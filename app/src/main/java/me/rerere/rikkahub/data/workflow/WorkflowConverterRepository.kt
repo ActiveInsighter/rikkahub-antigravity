@@ -88,7 +88,7 @@ class WorkflowConverterRepository(
         }
     }
 
-    suspend fun listPdfJobs(page: Int = 1): Result<WorkflowPage<PdfJob>> = withContext(Dispatchers.IO) {
+    suspend fun listPdfJobs(page: Int = 1): Result<WorkflowListPage<PdfJob>> = withContext(Dispatchers.IO) {
         runCatching {
             val session = workflowRepository.requireSession()
             val targetPage = page.coerceAtLeast(1)
@@ -328,7 +328,7 @@ class WorkflowConverterRepository(
             name = obj.str("name").ifBlank { "默认配置" },
             systemPrompt = obj.str("systemPrompt"),
             options = options,
-            revision = obj.int("revision", 1).coerceAtLeast(1),
+            revision = obj.int("revision").coerceAtLeast(1),
             created = obj.str("created"),
             updated = obj.str("updated"),
         )
@@ -377,7 +377,7 @@ class WorkflowConverterRepository(
             outputName = obj.str("outputName"),
             prompt = obj.str("prompt"),
             configId = obj.str("configId"),
-            configRevision = obj.int("configRevision", 1),
+            configRevision = obj.int("configRevision").coerceAtLeast(1),
             systemPrompt = obj.str("systemPrompt"),
             status = PdfJobStatus.fromWire(obj.str("status")),
             file = obj.str("file"),
