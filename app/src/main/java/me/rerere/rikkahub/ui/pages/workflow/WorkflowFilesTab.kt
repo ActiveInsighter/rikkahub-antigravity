@@ -2,7 +2,6 @@ package me.rerere.rikkahub.ui.pages.workflow
 
 import android.content.Context
 import android.net.Uri
-import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -47,6 +46,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -95,7 +96,7 @@ fun WorkflowFilesTab(
     onSearchChange: (String) -> Unit,
     onTypeFilterChange: (LibraryFileTypeFilter) -> Unit,
     onSortChange: (LibraryFileSort) -> Unit,
-    onUploadMarkdown: (fileName: String, contentBytes: ByteArray) -> Unit,
+    onUploadUri: (Context, Uri) -> Unit,
     onOpenPreview: (LibraryFile) -> Unit,
     onClosePreview: () -> Unit,
     onRenameFile: (LibraryFile, String) -> Unit,
@@ -107,37 +108,36 @@ fun WorkflowFilesTab(
     onUseFileInRun: (LibraryFile) -> Unit,
     onClearError: () -> Unit,
     onClearNotice: () -> Unit,
-    uploadTriggerCount: Int,
+    pendingUploadTrigger: Boolean,
+    onConsumeUploadTrigger: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val uriHandler = LocalUriHandler.current
 
-    var localMessage by remember { mutableStateOf<String?>(null) }
+    var localNotice by remember { mutableStateOf<String?>(null) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var renamingFolder by remember { mutableStateOf<LibraryFileFolder?>(null) }
     var deletingFolder by remember { mutableStateOf<LibraryFileFolder?>(null) }
+    var pdfDetailFile by remember { mutableStateOf<LibraryFile?>(null) }
     var renamingFile by remember { mutableStateOf<LibraryFile?>(null) }
     var movingFile by remember { mutableStateOf<LibraryFile?>(null) }
     var deletingFile by remember { mutableStateOf<LibraryFile?>(null) }
 
-    val markdownPicker = rememberLauncherForActivityResult(
+    val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri != null) {
-            val picked = readMarkdownFromUri(context, uri)
-            if (picked == null) {
-                localMessage = "无法读取所选文件，请选择不超过 2 MiB 的 .md 文件"
-            } else {
-                onUploadMarkdown(picked.first, picked.second)
-            }
+            onUploadUri(context, uri)
         }
     }
 
-    androidx.compose.runtime.LaunchedEffect(uploadTriggerCount) {
-        if (uploadTriggerCount > 0) {
-            markdownPicker.launch(arrayOf("text/markdown", "text/plain", "*/*"))
+    LaunchedEffect(pendingUploadTrigger) {
+        if (pendingUploadTrigger) {
+            onConsumeUploadTrigger()
+            filePicker.launch(arrayOf("application/pdf", "text/markdown", "text/plain", "*/*"))
         }
     }
 
@@ -353,34 +353,70 @@ fun WorkflowFilesTab(
                 }
 
                 if (state.isUploading) {
-                    item {
+                    item(key = "upload_progress") {
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
                         ) {
                             Column(
                                 modifier = Modifier.padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                Text("正在上传 Markdown 文件…", style = MaterialTheme.typography.labelMedium)
-                                LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = state.uploadingFileName?.let { "正在上传「$it」…" } ?: "正在准备上传…",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    state.uploadProgress?.let { pct ->
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "$pct%",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                }
+                                val pct = state.uploadProgress
+                                if (pct != null) {
+                                    LinearWavyProgressIndicator(
+                                        progress = { (pct / 100f).coerceIn(0f, 1f) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                } else {
+                                    LinearWavyProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                }
                             }
                         }
                     }
                 }
 
-                item {
-                    WorkflowErrorBanner(
-                        message = localMessage ?: state.errorMessage,
-                        onDismiss = {
-                            localMessage = null
-                            onClearError()
-                        },
-                    )
+                if (!state.errorMessage.isNullOrBlank()) {
+                    item(key = "files_error") {
+                        WorkflowErrorBanner(
+                            message = state.errorMessage,
+                            onDismiss = onClearError,
+                        )
+                    }
                 }
-                item {
-                    WorkflowNoticeBanner(message = state.noticeMessage, onDismiss = onClearNotice)
+                val notice = localNotice ?: state.noticeMessage
+                if (!notice.isNullOrBlank()) {
+                    item(key = "files_notice") {
+                        WorkflowNoticeBanner(
+                            message = notice,
+                            onDismiss = {
+                                localNotice = null
+                                onClearNotice()
+                            },
+                        )
+                    }
                 }
 
                 if (visibleFolders.isNotEmpty()) {
@@ -395,18 +431,18 @@ fun WorkflowFilesTab(
                 }
 
                 if (visibleFiles.isEmpty() && visibleFolders.isEmpty()) {
-                    item {
+                    item(key = "files_empty") {
                         WorkflowEmptyState(
                             icon = HugeIcons.FileImport,
                             title = if (query.isNotEmpty()) "未找到匹配的文件" else "当前目录暂无文件",
                             subtitle = if (query.isNotEmpty()) {
                                 "试试调整搜索关键词或类型筛选。"
                             } else {
-                                "点击右下角按钮上传 .md 文件，或从网页端导入 PDF 资料。"
+                                "点击右下角按钮上传 .md 或 .pdf 文件到云端资料库。"
                             },
-                            actionLabel = if (query.isEmpty()) "上传 Markdown" else null,
+                            actionLabel = if (query.isEmpty()) "上传文件" else null,
                             onAction = if (query.isEmpty()) {
-                                { markdownPicker.launch(arrayOf("text/markdown", "text/plain", "*/*")) }
+                                { filePicker.launch(arrayOf("application/pdf", "text/markdown", "text/plain", "*/*")) }
                             } else null,
                         )
                     }
@@ -418,13 +454,12 @@ fun WorkflowFilesTab(
                                 if (file.isMarkdown) {
                                     onOpenPreview(file)
                                 } else {
-                                    clipboard.setText(AnnotatedString(file.sourceUrl))
-                                    localMessage = "已复制文件链接"
+                                    pdfDetailFile = file
                                 }
                             },
                             onCopyLink = {
                                 clipboard.setText(AnnotatedString(file.sourceUrl))
-                                localMessage = "已复制文件链接"
+                                localNotice = "已复制「${file.fileName}」链接"
                             },
                             onUseInRun = { onUseFileInRun(file) },
                             onRename = { renamingFile = file },
@@ -532,11 +567,43 @@ fun WorkflowFilesTab(
             onDismiss = onClosePreview,
             onCopyContent = { text ->
                 clipboard.setText(AnnotatedString(text))
-                localMessage = "已复制 Markdown 内容"
+                localNotice = "已复制 Markdown 内容"
             },
             onUseInRun = {
                 onClosePreview()
                 onUseFileInRun(file)
+            },
+        )
+    }
+
+    pdfDetailFile?.let { file ->
+        PdfFileDetailSheet(
+            file = file,
+            onDismiss = { pdfDetailFile = null },
+            onOpenInBrowser = {
+                pdfDetailFile = null
+                runCatching { uriHandler.openUri(file.sourceUrl) }
+            },
+            onCopyLink = {
+                clipboard.setText(AnnotatedString(file.sourceUrl))
+                localNotice = "已复制「${file.fileName}」链接"
+                pdfDetailFile = null
+            },
+            onUseInRun = {
+                pdfDetailFile = null
+                onUseFileInRun(file)
+            },
+            onRename = {
+                pdfDetailFile = null
+                renamingFile = file
+            },
+            onMove = {
+                pdfDetailFile = null
+                movingFile = file
+            },
+            onDelete = {
+                pdfDetailFile = null
+                deletingFile = file
             },
         )
     }
@@ -960,23 +1027,133 @@ private fun MarkdownPreviewDialog(
     }
 }
 
-private fun readMarkdownFromUri(context: Context, uri: Uri): Pair<String, ByteArray>? {
-    val resolver = context.contentResolver
-    var displayName = "document.md"
-    resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-        if (cursor.moveToFirst()) {
-            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (idx >= 0) {
-                cursor.getString(idx)?.takeIf { it.isNotBlank() }?.let { displayName = it }
+@Composable
+private fun PdfFileDetailSheet(
+    file: LibraryFile,
+    onDismiss: () -> Unit,
+    onOpenInBrowser: () -> Unit,
+    onCopyLink: () -> Unit,
+    onUseInRun: () -> Unit,
+    onRename: () -> Unit,
+    onMove: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(
+                            MaterialTheme.colorScheme.tertiaryContainer,
+                            RoundedCornerShape(14.dp),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.File02,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = file.fileName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = "${formatByteSize(file.size)} · 更新于 ${formatWorkflowTime(file.updatedAt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onOpenInBrowser,
+                    shape = CircleShape,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(HugeIcons.Link01, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("浏览器打开")
+                }
+                Button(
+                    onClick = onUseInRun,
+                    shape = CircleShape,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(HugeIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("新建 Run")
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilledTonalButton(
+                    onClick = onCopyLink,
+                    shape = CircleShape,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(HugeIcons.Copy01, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("复制链接")
+                }
+                FilledTonalButton(
+                    onClick = onMove,
+                    shape = CircleShape,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(HugeIcons.Folder01, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("移动")
+                }
+                FilledTonalButton(
+                    onClick = onRename,
+                    shape = CircleShape,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(HugeIcons.Edit03, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("重命名")
+                }
+            }
+
+            OutlinedButton(
+                onClick = onDelete,
+                shape = CircleShape,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    HugeIcons.Delete01,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("删除文件", color = MaterialTheme.colorScheme.error)
             }
         }
     }
-    if (!displayName.endsWith(".md", ignoreCase = true)) {
-        return null
-    }
-    val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
-    if (bytes.isEmpty() || bytes.size > 2 * 1024 * 1024) {
-        return null
-    }
-    return displayName to bytes
 }

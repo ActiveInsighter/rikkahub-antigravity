@@ -89,11 +89,13 @@ fun WorkflowSchedulesTab(
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                item {
-                    WorkflowErrorBanner(
-                        message = state.errorMessage,
-                        onDismiss = onClearError,
-                    )
+                if (!state.errorMessage.isNullOrBlank()) {
+                    item(key = "schedules_error") {
+                        WorkflowErrorBanner(
+                            message = state.errorMessage,
+                            onDismiss = onClearError,
+                        )
+                    }
                 }
 
                 if (state.schedules.isEmpty()) {

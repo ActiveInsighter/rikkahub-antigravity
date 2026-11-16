@@ -314,11 +314,15 @@ fun WorkflowLibraryTab(
                     }
                 }
 
-                item {
-                    WorkflowErrorBanner(message = state.errorMessage, onDismiss = onClearError)
+                if (!state.errorMessage.isNullOrBlank()) {
+                    item(key = "library_error") {
+                        WorkflowErrorBanner(message = state.errorMessage, onDismiss = onClearError)
+                    }
                 }
-                item {
-                    WorkflowNoticeBanner(message = state.noticeMessage, onDismiss = onClearNotice)
+                if (!state.noticeMessage.isNullOrBlank()) {
+                    item(key = "library_notice") {
+                        WorkflowNoticeBanner(message = state.noticeMessage, onDismiss = onClearNotice)
+                    }
                 }
 
                 if (visibleSubfolders.isNotEmpty()) {

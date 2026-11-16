@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -41,7 +42,9 @@ import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Tick01
+import me.rerere.rikkahub.data.workflow.StatusTone
 import me.rerere.rikkahub.ui.theme.CustomColors
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -302,5 +305,87 @@ internal fun formatByteSize(bytes: Long): String {
     val kb = bytes / 1024.0
     if (kb < 1024.0) return String.format(Locale.US, "%.1f KB", kb)
     val mb = kb / 1024.0
-    return String.format(Locale.US, "%.2f MB", mb)
+    if (mb < 1024.0) return String.format(Locale.US, "%.2f MB", mb)
+    val gb = mb / 1024.0
+    return String.format(Locale.US, "%.2f GB", gb)
+}
+
+@Composable
+internal fun StatusBadgePill(
+    label: String,
+    colors: ToneColors,
+) {
+    Surface(
+        shape = CircleShape,
+        color = colors.container,
+        contentColor = colors.content,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+        )
+    }
+}
+
+internal data class ToneColors(
+    val container: Color,
+    val content: Color,
+)
+
+@Composable
+internal fun statusToneColors(tone: StatusTone): ToneColors {
+    val scheme = MaterialTheme.colorScheme
+    return when (tone) {
+        StatusTone.NEUTRAL -> ToneColors(
+            container = scheme.surfaceContainerHighest,
+            content = scheme.onSurfaceVariant,
+        )
+        StatusTone.INFO -> ToneColors(
+            container = scheme.secondaryContainer,
+            content = scheme.onSecondaryContainer,
+        )
+        StatusTone.SUCCESS -> ToneColors(
+            container = scheme.primaryContainer,
+            content = scheme.onPrimaryContainer,
+        )
+        StatusTone.WARNING -> ToneColors(
+            container = scheme.tertiaryContainer,
+            content = scheme.onTertiaryContainer,
+        )
+        StatusTone.DANGER -> ToneColors(
+            container = scheme.errorContainer,
+            content = scheme.onErrorContainer,
+        )
+    }
+}
+
+private fun parseInstantSafe(raw: String): Instant? {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return null
+    val normalized = if (trimmed.contains(' ') && !trimmed.contains('T')) {
+        trimmed.replace(' ', 'T')
+    } else {
+        trimmed
+    }
+    return runCatching { Instant.parse(normalized) }.getOrNull()
+}
+
+internal fun formatRelativeTime(raw: String): String {
+    val instant = parseInstantSafe(raw) ?: return raw.ifEmpty { "—" }
+    val seconds = Duration.between(instant, Instant.now()).seconds
+    return when {
+        seconds < 60 -> "刚刚"
+        seconds < 3600 -> "${seconds / 60} 分钟前"
+        seconds < 86_400 -> "${seconds / 3600} 小时前"
+        seconds < 86_400 * 7 -> "${seconds / 86_400} 天前"
+        else -> formatDateTime(raw)
+    }
+}
+
+internal fun formatDateTime(raw: String): String {
+    val instant = parseInstantSafe(raw) ?: return raw.ifEmpty { "—" }
+    val formatter = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault())
+    return formatter.format(instant)
 }

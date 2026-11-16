@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -19,7 +20,10 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
+import java.io.InputStream
 import java.net.URLEncoder
+import kotlin.math.ceil
 
 private const val LIBRARY_FOLDER_COLLECTION = "aw_library_folders"
 private const val RUN_FAVORITE_COLLECTION = "aw_run_favorites"
@@ -355,11 +359,12 @@ class WorkflowLibraryRepository(
         runCatching {
             val session = workflowRepository.requireSession()
             var unavailable = 0
-            do {
+            for (attempt in 0 until 50) {
                 val imported = executeLibraryJson(session, "/api/library/files/import", "POST").jsonObject
-                val done = imported["done"]?.jsonPrimitive?.contentOrNull == "true"
+                val done = imported["done"]?.jsonPrimitive?.booleanOrNull == true
                 unavailable = imported["unavailable"]?.jsonPrimitive?.intOrNull ?: 0
-            } while (!done)
+                if (done) break
+            }
 
             coroutineScope {
                 val foldersDeferred = async {
@@ -406,15 +411,32 @@ class WorkflowLibraryRepository(
     ): Result<LibraryFile> = withContext(Dispatchers.IO) {
         runCatching {
             val session = workflowRepository.requireSession()
-            val cleanName = fileName.trim()
-            if (!cleanName.endsWith(".md", ignoreCase = true) ||
-                contentBytes.isEmpty() ||
-                contentBytes.size > MAX_PLAN_TEXT_BYTES
+            val trimmedName = fileName.trim()
+            val cleanName = when {
+                trimmedName.endsWith(".md", ignoreCase = true) -> trimmedName
+                trimmedName.endsWith(".markdown", ignoreCase = true) ->
+                    trimmedName.dropLast(".markdown".length) + ".md"
+                else -> throw WorkflowApiException("请选择 .md 格式的 Markdown 文件", 400)
+            }
+            val normalizedBytes = if (
+                contentBytes.size >= 3 &&
+                contentBytes[0] == 0xEF.toByte() &&
+                contentBytes[1] == 0xBB.toByte() &&
+                contentBytes[2] == 0xBF.toByte()
             ) {
+                contentBytes.copyOfRange(3, contentBytes.size)
+            } else {
+                contentBytes
+            }
+            if (normalizedBytes.isEmpty() || normalizedBytes.size > MAX_PLAN_TEXT_BYTES) {
                 throw WorkflowApiException("请选择不超过 2 MiB 的 .md 文件", 400)
             }
+            val text = normalizedBytes.toString(Charsets.UTF_8)
+            if (text.isBlank() || text.contains('\u0000')) {
+                throw WorkflowApiException("文件内容为空或不是有效的 UTF-8 Markdown", 400)
+            }
             val encodedName = URLEncoder.encode(cleanName, "UTF-8").replace("+", "%20")
-            val rawBody = contentBytes.toRequestBody("text/plain; charset=utf-8".toMediaType())
+            val rawBody = normalizedBytes.toRequestBody("text/plain; charset=utf-8".toMediaType())
             val root = executeLibraryJson(
                 session = session,
                 path = "/api/library/files/markdown",
@@ -424,6 +446,158 @@ class WorkflowLibraryRepository(
             ).jsonObject
             parseLibraryFile(root)
         }
+    }
+
+    suspend fun uploadLibraryPdf(
+        fileName: String,
+        fileSize: Long,
+        openStream: () -> InputStream?,
+        onProgress: (Int) -> Unit = {},
+    ): Result<LibraryFile> = withContext(Dispatchers.IO) {
+        runCatching {
+            val session = workflowRepository.requireSession()
+            val cleanName = fileName.trim()
+            if (!cleanName.endsWith(".pdf", ignoreCase = true)) {
+                throw WorkflowApiException("请选择 .pdf 文件", 400)
+            }
+            if (fileSize < 5L) {
+                throw WorkflowApiException("PDF 文件无效或为空", 400)
+            }
+            if (fileSize > 2L * 1024L * 1024L * 1024L) {
+                throw WorkflowApiException("PDF 不能超过 2 GiB", 400)
+            }
+            onProgress(0)
+
+            val initBody = buildJsonObject {
+                put("fileName", cleanName)
+                put("size", fileSize)
+            }
+            val initRoot = executeLibraryJson(
+                session = session,
+                path = "/api/library/files/uploads/multipart",
+                method = "POST",
+                body = initBody,
+            ).jsonObject
+
+            val uploadId = initRoot["uploadId"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val ticket = initRoot["ticket"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val partSize = initRoot["partSize"]?.jsonPrimitive?.longOrNull ?: (32L * 1024L * 1024L)
+            if (uploadId.isEmpty() || ticket.isEmpty() || partSize <= 0L) {
+                throw WorkflowApiException("上传初始化响应无效，请重试", 502)
+            }
+            val encodedUploadId = URLEncoder.encode(uploadId, "UTF-8").replace("+", "%20")
+
+            val parts = mutableListOf<Pair<Int, String>>()
+            var uploadedBytes = 0L
+
+            try {
+                val stream = openStream()
+                    ?: throw WorkflowApiException("无法读取所选 PDF 文件", 400)
+                stream.use { input ->
+                    val totalParts = ceil(fileSize.toDouble() / partSize.toDouble()).toInt().coerceAtLeast(1)
+                    for (partNumber in 1..totalParts) {
+                        val expectedLen = minOf(partSize, fileSize - uploadedBytes).toInt()
+                        if (expectedLen <= 0) break
+                        val buffer = ByteArray(expectedLen)
+                        var readTotal = 0
+                        while (readTotal < expectedLen) {
+                            val n = input.read(buffer, readTotal, expectedLen - readTotal)
+                            if (n < 0) break
+                            readTotal += n
+                        }
+                        if (readTotal != expectedLen) {
+                            throw WorkflowApiException("读取 PDF 分片失败，文件大小不一致", 400)
+                        }
+                        if (partNumber == 1) {
+                            if (buffer.size < 5 || String(buffer, 0, 5, Charsets.US_ASCII) != "%PDF-") {
+                                throw WorkflowApiException("文件内容不是有效的 PDF", 400)
+                            }
+                        }
+
+                        val partResult = uploadMultipartPartWithRetry(
+                            session = session,
+                            encodedUploadId = encodedUploadId,
+                            partNumber = partNumber,
+                            ticket = ticket,
+                            bytes = buffer,
+                        )
+                        parts += partNumber to partResult
+                        uploadedBytes += expectedLen
+                        val percent = ((uploadedBytes * 95L) / fileSize).toInt().coerceIn(1, 95)
+                        onProgress(percent)
+                    }
+                }
+
+                val completeBody = buildJsonObject {
+                    put(
+                        "parts",
+                        buildJsonArray {
+                            for ((num, etag) in parts) {
+                                add(
+                                    buildJsonObject {
+                                        put("partNumber", num)
+                                        put("etag", etag)
+                                    }
+                                )
+                            }
+                        }
+                    )
+                }
+                val completedRoot = executeLibraryJson(
+                    session = session,
+                    path = "/api/library/files/uploads/multipart/$encodedUploadId/complete",
+                    method = "POST",
+                    body = completeBody,
+                    extraHeaders = mapOf("X-Upload-Ticket" to ticket),
+                ).jsonObject
+                onProgress(100)
+                parseLibraryFile(completedRoot)
+            } catch (err: Throwable) {
+                runCatching {
+                    executeLibraryJson(
+                        session = session,
+                        path = "/api/library/files/uploads/multipart/$encodedUploadId",
+                        method = "DELETE",
+                        extraHeaders = mapOf("X-Upload-Ticket" to ticket),
+                    )
+                }
+                throw err
+            }
+        }
+    }
+
+    private fun uploadMultipartPartWithRetry(
+        session: WorkflowSession,
+        encodedUploadId: String,
+        partNumber: Int,
+        ticket: String,
+        bytes: ByteArray,
+    ): String {
+        var lastError: Throwable? = null
+        for (attempt in 0 until 3) {
+            try {
+                val rawBody = bytes.toRequestBody("application/octet-stream".toMediaType())
+                val root = executeLibraryJson(
+                    session = session,
+                    path = "/api/library/files/uploads/multipart/$encodedUploadId/parts/$partNumber",
+                    method = "PUT",
+                    extraHeaders = mapOf("X-Upload-Ticket" to ticket),
+                    rawBody = rawBody,
+                ).jsonObject
+                val etag = root["etag"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                if (etag.isEmpty()) {
+                    throw WorkflowApiException("分片上传响应无效，请重试", 502)
+                }
+                return etag
+            } catch (err: Throwable) {
+                lastError = err
+                val retryable = err is IOException ||
+                    (err is WorkflowApiException && (err.statusCode == 0 || err.statusCode == 408 || err.statusCode == 429 || err.statusCode >= 500))
+                if (!retryable || attempt >= 2) throw err
+                Thread.sleep(500L shl attempt)
+            }
+        }
+        throw lastError ?: WorkflowApiException("分片上传失败", 502)
     }
 
     suspend fun readLibraryMarkdown(fileId: String): Result<String> = withContext(Dispatchers.IO) {
