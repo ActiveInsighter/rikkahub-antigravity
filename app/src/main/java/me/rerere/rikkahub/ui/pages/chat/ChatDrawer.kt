@@ -61,6 +61,7 @@ import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.FolderAdd
+import me.rerere.hugeicons.stroke.GitFork
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.ImageToVideo
 import me.rerere.hugeicons.stroke.InLove
@@ -761,6 +762,13 @@ private fun DrawerActions(navController: Navigator) {
             icon = HugeIcons.LanguageCircle,
             text = stringResource(R.string.chat_page_menu_ai_translator),
             onClick = { navController.navigate(Screen.Translator) },
+        )
+
+        // 工作流入口
+        DrawerEntry(
+            icon = HugeIcons.GitFork,
+            text = "工作流",
+            onClick = { navController.navigate(Screen.Workflow) },
         )
     }
 }

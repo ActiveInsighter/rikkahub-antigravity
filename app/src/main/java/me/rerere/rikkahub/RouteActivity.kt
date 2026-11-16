@@ -137,6 +137,7 @@ import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
 import me.rerere.rikkahub.ui.pages.stats.StatsPage
 import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
+import me.rerere.rikkahub.ui.pages.workflow.WorkflowPage
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import me.rerere.rikkahub.utils.CrashHandler
 import me.rerere.rikkahub.utils.openUsageAccessSettings
@@ -596,6 +597,10 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.Stats> {
                                 StatsPage()
                             }
+
+                            entry<Screen.Workflow> {
+                                WorkflowPage()
+                            }
                         }
                     )
                     if (BuildConfig.DEBUG) {
@@ -825,4 +830,7 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Stats : Screen
+
+    @Serializable
+    data object Workflow : Screen
 }
