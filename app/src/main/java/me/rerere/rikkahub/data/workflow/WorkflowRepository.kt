@@ -36,6 +36,7 @@ private const val KEY_SESSION = "session_v1"
 private const val KEY_BASE_URL = "base_url_v1"
 
 const val DEFAULT_POCKETBASE_URL = "https://pb.any1.tech"
+const val DEFAULT_REMOTE_API_URL = "https://ocr-files.any1.tech"
 private const val AUTH_COLLECTION = "aw_clients"
 private const val RUN_COLLECTION = "aw_dispatch_runs"
 private const val TASK_COLLECTION = "aw_dispatch_tasks"
@@ -43,6 +44,7 @@ private const val EVENT_COLLECTION = "aw_dispatch_events"
 private const val HISTORY_EVENT_COLLECTION = "aw_events"
 private const val HISTORY_ACT_COLLECTION = "aw_acts"
 private const val HISTORY_MESSAGE_COLLECTION = "aw_messages"
+private const val RUN_SCHEDULE_COLLECTION = "aw_run_schedules"
 private const val RUN_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 class WorkflowApiException(
@@ -223,6 +225,7 @@ class WorkflowRepository(
         status: DispatchStatus,
         parentRun: String = "",
         origin: DispatchRunOrigin? = null,
+        recurrence: DailyRecurrence? = null,
     ): Result<WorkflowRun> = withContext(Dispatchers.IO) {
         runCatching {
             val activeSession = requireSession()
@@ -232,6 +235,9 @@ class WorkflowRepository(
             val checkedPlan = planText.trim()
             if (checkedPlan.isEmpty()) {
                 throw WorkflowApiException("工作流定义不能为空", 400)
+            }
+            if (recurrence != null && !recurrence.isValid()) {
+                throw WorkflowApiException("每天重复的时间或时区无效", 400)
             }
 
             val meta = parsePlanMeta(checkedPlan, fallbackTitle = titleInput)
@@ -250,6 +256,16 @@ class WorkflowRepository(
                 if (parentRun.isNotBlank() && origin != null) {
                     put("parentRun", parentRun)
                     put("origin", origin.wireValue)
+                }
+                if (recurrence != null) {
+                    put(
+                        "recurrence",
+                        buildJsonObject {
+                            put("frequency", recurrence.frequency)
+                            put("time", recurrence.time)
+                            put("utcOffsetMinutes", recurrence.utcOffsetMinutes)
+                        }
+                    )
                 }
             }
 
@@ -270,6 +286,8 @@ class WorkflowRepository(
         titleInput: String,
         planText: String,
         publish: Boolean = false,
+        recurrence: DailyRecurrence? = null,
+        clearRecurrence: Boolean = false,
     ): Result<WorkflowRun> = withContext(Dispatchers.IO) {
         runCatching {
             val activeSession = requireSession()
@@ -284,6 +302,9 @@ class WorkflowRepository(
             if (checkedPlan.isEmpty()) {
                 throw WorkflowApiException("工作流定义不能为空", 400)
             }
+            if (recurrence != null && !recurrence.isValid()) {
+                throw WorkflowApiException("每天重复的时间或时区无效", 400)
+            }
             val meta = parsePlanMeta(checkedPlan, fallbackTitle = titleInput)
             val body = buildJsonObject {
                 put("title", meta.title)
@@ -293,6 +314,18 @@ class WorkflowRepository(
                 put("maxConcurrency", meta.maxConcurrency)
                 if (publish) {
                     put("status", DispatchStatus.QUEUED.wireValue)
+                }
+                if (recurrence != null) {
+                    put(
+                        "recurrence",
+                        buildJsonObject {
+                            put("frequency", recurrence.frequency)
+                            put("time", recurrence.time)
+                            put("utcOffsetMinutes", recurrence.utcOffsetMinutes)
+                        }
+                    )
+                } else if (clearRecurrence) {
+                    put("recurrence", kotlinx.serialization.json.JsonNull)
                 }
             }
             val root = executeJson(
@@ -311,6 +344,7 @@ class WorkflowRepository(
         titleInput: String,
         planText: String,
         status: DispatchStatus,
+        recurrence: DailyRecurrence? = null,
     ): Result<WorkflowRun> = withContext(Dispatchers.IO) {
         runCatching {
             val source = getRun(sourceId).getOrThrow()
@@ -323,6 +357,7 @@ class WorkflowRepository(
                 status = status,
                 parentRun = source.id,
                 origin = DispatchRunOrigin.EDITED_RERUN,
+                recurrence = recurrence,
             ).getOrThrow()
         }
     }
@@ -592,7 +627,75 @@ class WorkflowRepository(
         return parseListPage(root, 1, 100) { parseHistoryAct(it) }.items
     }
 
-    private fun requireSession(): WorkflowSession =
+    suspend fun listRunSchedules(
+        page: Int = 1,
+        perPage: Int = 20,
+    ): Result<WorkflowListPage<WorkflowRunSchedule>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val activeSession = requireSession()
+            val root = executeJson(
+                baseUrl = activeSession.baseUrl,
+                path = "/api/collections/$RUN_SCHEDULE_COLLECTION/records",
+                method = "GET",
+                query = mapOf(
+                    "page" to page.toString(),
+                    "perPage" to perPage.toString(),
+                    "sort" to "-created",
+                    "filter" to "owner=\"${quoteFilter(activeSession.userId)}\"",
+                ),
+                token = activeSession.token,
+            ).jsonObject
+            parseListPage(root, page, perPage) { obj ->
+                parseRunSchedule(obj).also { schedule ->
+                    if (schedule.owner != activeSession.userId) {
+                        throw WorkflowApiException("接口返回的数据归属无效", 502)
+                    }
+                }
+            }
+        }
+    }
+
+    suspend fun setRunScheduleEnabled(
+        schedule: WorkflowRunSchedule,
+        enabled: Boolean,
+    ): Result<WorkflowRunSchedule> = withContext(Dispatchers.IO) {
+        runCatching {
+            val activeSession = requireSession()
+            if (schedule.owner != activeSession.userId) {
+                throw WorkflowApiException("当前重复计划不属于登录账号", 403)
+            }
+            val body = buildJsonObject {
+                put("enabled", enabled)
+                put("expectedRevision", schedule.revision)
+            }
+            val root = executeJson(
+                baseUrl = activeSession.baseUrl,
+                path = "/api/anyworkflow/run-schedules/${schedule.id}/state",
+                method = "PUT",
+                body = body,
+                token = activeSession.token,
+            ).jsonObject
+            parseRunSchedule(root)
+        }
+    }
+
+    suspend fun deleteRunSchedule(schedule: WorkflowRunSchedule): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val activeSession = requireSession()
+            if (schedule.owner != activeSession.userId) {
+                throw WorkflowApiException("当前重复计划不属于登录账号", 403)
+            }
+            executeJson(
+                baseUrl = activeSession.baseUrl,
+                path = "/api/collections/$RUN_SCHEDULE_COLLECTION/records/${schedule.id}",
+                method = "DELETE",
+                token = activeSession.token,
+            )
+            Unit
+        }
+    }
+
+    internal fun requireSession(): WorkflowSession =
         _session.value ?: throw WorkflowApiException("请先连接 AnyWorkflow", 401)
 
     private fun normalizeBaseUrl(raw: String): String {
@@ -611,13 +714,16 @@ class WorkflowRepository(
             }
     }
 
-    private fun executeJson(
+    internal fun executeJson(
         baseUrl: String,
         path: String,
         method: String,
         query: Map<String, String> = emptyMap(),
         body: JsonObject? = null,
         token: String?,
+        extraHeaders: Map<String, String> = emptyMap(),
+        rawBody: okhttp3.RequestBody? = null,
+        authPrefix: String = "",
     ): JsonElement {
         val httpUrlBuilder = (baseUrl + path).toHttpUrlOrNull()?.newBuilder()
             ?: throw WorkflowApiException("请求地址无效", 400)
@@ -625,16 +731,20 @@ class WorkflowRepository(
             httpUrlBuilder.addQueryParameter(k, v)
         }
 
-        val requestBody = body?.toString()?.toRequestBody("application/json".toMediaType())
+        val requestBody = rawBody ?: body?.toString()?.toRequestBody("application/json".toMediaType())
         val requestBuilder = Request.Builder()
             .url(httpUrlBuilder.build())
             .header("Accept", "application/json")
+        for ((k, v) in extraHeaders) {
+            requestBuilder.header(k, v)
+        }
         if (!token.isNullOrBlank()) {
-            requestBuilder.header("Authorization", token)
+            requestBuilder.header("Authorization", "$authPrefix$token")
         }
         when (method) {
             "GET" -> requestBuilder.get()
             "POST" -> requestBuilder.post(requestBody ?: "".toRequestBody("application/json".toMediaType()))
+            "PUT" -> requestBuilder.put(requestBody ?: "".toRequestBody("application/json".toMediaType()))
             "PATCH" -> requestBuilder.patch(requestBody ?: "".toRequestBody("application/json".toMediaType()))
             "DELETE" -> requestBuilder.delete(requestBody)
             else -> requestBuilder.method(method, requestBody)
@@ -697,7 +807,7 @@ class WorkflowRepository(
         }
     }
 
-    private fun quoteFilter(value: String): String =
+    internal fun quoteFilter(value: String): String =
         value.replace("\\", "\\\\").replace("\"", "\\\"")
 
     private fun newRunId(): String {
@@ -742,7 +852,7 @@ class WorkflowRepository(
         return ParsedPlanMeta(title = title, mode = mode, maxConcurrency = maxConcurrency)
     }
 
-    private inline fun <T> parseListPage(
+    internal inline fun <T> parseListPage(
         root: JsonObject,
         page: Int,
         perPage: Int,
@@ -760,7 +870,7 @@ class WorkflowRepository(
         )
     }
 
-    private fun parseRun(obj: JsonObject): WorkflowRun {
+    internal fun parseRun(obj: JsonObject): WorkflowRun {
         val id = obj.str("id")
         return WorkflowRun(
             id = id,
@@ -899,12 +1009,42 @@ class WorkflowRepository(
         updated = obj.str("updated"),
     )
 
-    private fun JsonObject.str(key: String): String =
+    private fun parseRunSchedule(obj: JsonObject): WorkflowRunSchedule {
+        val ruleObj = obj["rule"] as? JsonObject
+            ?: throw WorkflowApiException("重复计划规则无效", 502)
+        val rule = DailyRecurrence(
+            frequency = ruleObj.str("frequency").ifEmpty { "daily" },
+            time = ruleObj.str("time").ifEmpty { "09:00" },
+            utcOffsetMinutes = ruleObj.int("utcOffsetMinutes"),
+        )
+        if (!rule.isValid()) {
+            throw WorkflowApiException("每天重复的时间或时区无效", 502)
+        }
+        return WorkflowRunSchedule(
+            id = obj.str("id"),
+            owner = obj.str("owner"),
+            sourceRun = obj.str("sourceRun"),
+            title = obj.str("title"),
+            rule = rule,
+            enabled = obj.bool("enabled"),
+            revision = obj.int("revision").coerceAtLeast(1),
+            nextRunAt = obj.str("nextRunAt"),
+            lastRun = obj.str("lastRun"),
+            skippedCount = obj.int("skippedCount"),
+            lastSkippedAt = obj.str("lastSkippedAt"),
+            lastError = obj.str("lastError"),
+        )
+    }
+
+    internal fun JsonObject.str(key: String): String =
         (this[key] as? JsonPrimitive)?.contentOrNull ?: ""
 
-    private fun JsonObject.int(key: String): Int =
+    internal fun JsonObject.int(key: String): Int =
         (this[key] as? JsonPrimitive)?.intOrNull ?: 0
 
-    private fun JsonObject.long(key: String): Long =
+    internal fun JsonObject.long(key: String): Long =
         (this[key] as? JsonPrimitive)?.longOrNull ?: 0L
+
+    internal fun JsonObject.bool(key: String): Boolean =
+        (this[key] as? JsonPrimitive)?.contentOrNull == "true"
 }

@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import me.rerere.rikkahub.data.workflow.DailyRecurrence
 import me.rerere.rikkahub.data.workflow.DispatchRequestedAction
 import me.rerere.rikkahub.data.workflow.DispatchStatus
 import me.rerere.rikkahub.data.workflow.RunListFilter
@@ -459,16 +460,42 @@ class WorkflowVM(
         }
     }
 
+    fun openRunById(runId: String) {
+        if (runId.isBlank()) return
+        val existing = _uiState.value.runs.firstOrNull { it.id == runId }
+        if (existing != null) {
+            selectRun(existing)
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            repository.getRun(runId)
+                .onSuccess { run ->
+                    _uiState.update { it.copy(isLoading = false) }
+                    selectRun(run)
+                }
+                .onFailure { err ->
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = err.message ?: "无法加载 Run 详情",
+                        )
+                    }
+                }
+        }
+    }
+
     fun createRun(
         title: String,
         planText: String,
         status: DispatchStatus,
+        recurrence: DailyRecurrence? = null,
         onSuccess: (WorkflowRun) -> Unit,
     ) {
         if (_uiState.value.isMutating) return
         viewModelScope.launch {
             _uiState.update { it.copy(isMutating = true, errorMessage = null) }
-            repository.createRun(title, planText, status)
+            repository.createRun(title, planText, status, recurrence = recurrence)
                 .onSuccess { created ->
                     _uiState.update {
                         it.copy(
@@ -496,12 +523,13 @@ class WorkflowVM(
         title: String,
         planText: String,
         publish: Boolean,
+        recurrence: DailyRecurrence? = null,
         onSuccess: (WorkflowRun) -> Unit,
     ) {
         if (_uiState.value.isMutating) return
         viewModelScope.launch {
             _uiState.update { it.copy(isMutating = true, errorMessage = null) }
-            repository.updateRunDraft(runId, title, planText, publish)
+            repository.updateRunDraft(runId, title, planText, publish, recurrence = recurrence)
                 .onSuccess { updated ->
                     _uiState.update { state ->
                         state.copy(
@@ -531,12 +559,13 @@ class WorkflowVM(
         title: String,
         planText: String,
         status: DispatchStatus,
+        recurrence: DailyRecurrence? = null,
         onSuccess: (WorkflowRun) -> Unit,
     ) {
         if (_uiState.value.isMutating) return
         viewModelScope.launch {
             _uiState.update { it.copy(isMutating = true, errorMessage = null) }
-            repository.createEditedRun(sourceId, title, planText, status)
+            repository.createEditedRun(sourceId, title, planText, status, recurrence = recurrence)
                 .onSuccess { created ->
                     _uiState.update {
                         it.copy(

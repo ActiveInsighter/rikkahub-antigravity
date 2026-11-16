@@ -46,6 +46,8 @@ import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -55,6 +57,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -76,12 +79,17 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ArrowRight01
+import me.rerere.hugeicons.stroke.Book02
+import me.rerere.hugeicons.stroke.Calendar03
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Clock01
 import me.rerere.hugeicons.stroke.CloudServer
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Edit03
+import me.rerere.hugeicons.stroke.Favourite
+import me.rerere.hugeicons.stroke.FileImport
+import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.GitFork
 import me.rerere.hugeicons.stroke.Link01
 import me.rerere.hugeicons.stroke.Login03
@@ -96,11 +104,13 @@ import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
 import me.rerere.rikkahub.data.workflow.DispatchRequestedAction
 import me.rerere.rikkahub.data.workflow.DispatchStatus
+import me.rerere.rikkahub.data.workflow.LibraryFolderScope
 import me.rerere.rikkahub.data.workflow.RunEditorTarget
 import me.rerere.rikkahub.data.workflow.RunListFilter
 import me.rerere.rikkahub.data.workflow.StatusTone
 import me.rerere.rikkahub.data.workflow.WorkflowRun
 import me.rerere.rikkahub.data.workflow.WorkflowSession
+import me.rerere.rikkahub.data.workflow.createStarterPlan
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.CardGroupIcon
@@ -115,21 +125,52 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+private enum class WorkflowNavTab(
+    val label: String,
+    val title: String,
+) {
+    RUNS("工作流", "工作流"),
+    SCHEDULES("重复", "重复计划"),
+    LIBRARY("收藏模板", "收藏与模板"),
+    FILES("资料库", "资料库"),
+}
+
 @Composable
-fun WorkflowPage(vm: WorkflowVM = koinViewModel()) {
+fun WorkflowPage(
+    vm: WorkflowVM = koinViewModel(),
+    schedulesVm: WorkflowSchedulesVM = koinViewModel(),
+    libraryVm: WorkflowLibraryVM = koinViewModel(),
+    filesVm: WorkflowFilesVM = koinViewModel(),
+) {
     val state by vm.uiState.collectAsStateWithLifecycle()
+    val schedulesState by schedulesVm.uiState.collectAsStateWithLifecycle()
+    val libraryState by libraryVm.uiState.collectAsStateWithLifecycle()
+    val filesState by filesVm.uiState.collectAsStateWithLifecycle()
+
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
+    var activeTab by rememberSaveable { mutableStateOf(WorkflowNavTab.RUNS) }
     var editorTarget by remember { mutableStateOf<RunEditorTarget?>(null) }
     var showAccountSheet by rememberSaveable { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<WorkflowRun?>(null) }
+    var showCreateTemplateDialog by remember { mutableStateOf(false) }
+    var fileUploadTriggerCount by remember { mutableIntStateOf(0) }
+
+    val activeRefreshing = when (activeTab) {
+        WorkflowNavTab.RUNS -> state.isRefreshing
+        WorkflowNavTab.SCHEDULES -> schedulesState.isRefreshing
+        WorkflowNavTab.LIBRARY -> libraryState.isRefreshing
+        WorkflowNavTab.FILES -> filesState.isRefreshing
+    }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = CustomColors.topBarColors.containerColor,
         topBar = {
             LargeFlexibleTopAppBar(
-                title = { Text("工作流") },
+                title = {
+                    Text(if (state.session == null) "工作流" else activeTab.title)
+                },
                 subtitle = {
                     Text(
                         text = state.session?.let { "已连接 · ${it.email}" }
@@ -142,10 +183,17 @@ fun WorkflowPage(vm: WorkflowVM = koinViewModel()) {
                 actions = {
                     if (state.session != null) {
                         IconButton(
-                            onClick = { vm.refresh() },
-                            enabled = !state.isLoading && !state.isRefreshing,
+                            onClick = {
+                                when (activeTab) {
+                                    WorkflowNavTab.RUNS -> vm.refresh()
+                                    WorkflowNavTab.SCHEDULES -> schedulesVm.refresh()
+                                    WorkflowNavTab.LIBRARY -> libraryVm.refresh()
+                                    WorkflowNavTab.FILES -> filesVm.refresh()
+                                }
+                            },
+                            enabled = !activeRefreshing,
                         ) {
-                            if (state.isRefreshing) {
+                            if (activeRefreshing) {
                                 LoadingIndicator(modifier = Modifier.size(20.dp))
                             } else {
                                 Icon(
@@ -172,14 +220,58 @@ fun WorkflowPage(vm: WorkflowVM = koinViewModel()) {
                 colors = CustomColors.topBarColors,
             )
         },
+        bottomBar = {
+            if (state.session != null) {
+                NavigationBar {
+                    WorkflowNavTab.entries.forEach { tab ->
+                        val icon = when (tab) {
+                            WorkflowNavTab.RUNS -> HugeIcons.GitFork
+                            WorkflowNavTab.SCHEDULES -> HugeIcons.Calendar03
+                            WorkflowNavTab.LIBRARY -> HugeIcons.Favourite
+                            WorkflowNavTab.FILES -> HugeIcons.Files02
+                        }
+                        NavigationBarItem(
+                            selected = activeTab == tab,
+                            onClick = { activeTab = tab },
+                            icon = { Icon(icon, contentDescription = tab.label) },
+                            label = { Text(tab.label, maxLines = 1) },
+                        )
+                    }
+                }
+            }
+        },
         floatingActionButton = {
             if (state.session != null) {
-                FloatingActionButton(
-                    onClick = { editorTarget = RunEditorTarget.Create },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                ) {
-                    Icon(HugeIcons.Add01, contentDescription = "新建工作流")
+                when (activeTab) {
+                    WorkflowNavTab.RUNS, WorkflowNavTab.SCHEDULES -> {
+                        FloatingActionButton(
+                            onClick = { editorTarget = RunEditorTarget.Create },
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        ) {
+                            Icon(HugeIcons.Add01, contentDescription = "新建工作流")
+                        }
+                    }
+                    WorkflowNavTab.LIBRARY -> {
+                        if (libraryState.activeScope == LibraryFolderScope.TEMPLATE) {
+                            FloatingActionButton(
+                                onClick = { showCreateTemplateDialog = true },
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            ) {
+                                Icon(HugeIcons.Add01, contentDescription = "新建模板")
+                            }
+                        }
+                    }
+                    WorkflowNavTab.FILES -> {
+                        FloatingActionButton(
+                            onClick = { fileUploadTriggerCount++ },
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        ) {
+                            Icon(HugeIcons.FileImport, contentDescription = "上传 Markdown")
+                        }
+                    }
                 }
             }
         },
@@ -198,25 +290,119 @@ fun WorkflowPage(vm: WorkflowVM = koinViewModel()) {
                 },
             )
         } else {
-            WorkflowRunsContent(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = innerPadding.calculateTopPadding()),
-                bottomPadding = innerPadding.calculateBottomPadding(),
-                state = state,
-                onRefresh = vm::refresh,
-                onFilterChange = vm::setFilter,
-                onSearchChange = vm::setSearchInput,
-                onPageChange = vm::setPage,
-                onSelectRun = vm::selectRun,
-                onEditDraft = { run -> editorTarget = RunEditorTarget.EditDraft(run) },
-                onEditAsNewVersion = { run -> editorTarget = RunEditorTarget.EditedRerun(run) },
-                onCommandRun = vm::commandRun,
-                onCloneRun = vm::cloneRun,
-                onRequestDelete = { deleteTarget = it },
-                onClearError = vm::clearError,
-                onOpenCreate = { editorTarget = RunEditorTarget.Create },
-            )
+            val contentModifier = Modifier
+                .fillMaxSize()
+                .padding(top = innerPadding.calculateTopPadding())
+            val bottomPad = innerPadding.calculateBottomPadding()
+
+            when (activeTab) {
+                WorkflowNavTab.RUNS -> WorkflowRunsContent(
+                    modifier = contentModifier,
+                    bottomPadding = bottomPad,
+                    state = state,
+                    favoriteRunIds = libraryState.favoriteRunIds,
+                    onRefresh = vm::refresh,
+                    onFilterChange = vm::setFilter,
+                    onSearchChange = vm::setSearchInput,
+                    onPageChange = vm::setPage,
+                    onSelectRun = vm::selectRun,
+                    onEditDraft = { run -> editorTarget = RunEditorTarget.EditDraft(run) },
+                    onEditAsNewVersion = { run -> editorTarget = RunEditorTarget.EditedRerun(run) },
+                    onCommandRun = vm::commandRun,
+                    onCloneRun = vm::cloneRun,
+                    onToggleFavorite = libraryVm::toggleFavoriteRun,
+                    onSaveAsTemplate = libraryVm::saveRunAsTemplate,
+                    onRequestDelete = { deleteTarget = it },
+                    onClearError = vm::clearError,
+                    onOpenCreate = { editorTarget = RunEditorTarget.Create },
+                )
+
+                WorkflowNavTab.SCHEDULES -> WorkflowSchedulesTab(
+                    modifier = contentModifier,
+                    state = schedulesState,
+                    bottomPadding = bottomPad,
+                    onRefresh = schedulesVm::refresh,
+                    onPageChange = schedulesVm::setPage,
+                    onToggle = schedulesVm::toggle,
+                    onDelete = schedulesVm::delete,
+                    onOpenRun = vm::openRunById,
+                    onOpenCreateRun = { editorTarget = RunEditorTarget.Create },
+                    onClearError = schedulesVm::clearError,
+                )
+
+                WorkflowNavTab.LIBRARY -> WorkflowLibraryTab(
+                    modifier = contentModifier,
+                    state = libraryState,
+                    bottomPadding = bottomPad,
+                    onRefresh = libraryVm::refresh,
+                    onScopeChange = libraryVm::setScope,
+                    onOpenFolder = libraryVm::openFolder,
+                    onSearchChange = libraryVm::setSearchQuery,
+                    onCreateFolder = libraryVm::createFolder,
+                    onRenameFolder = libraryVm::renameFolder,
+                    onDeleteFolder = libraryVm::deleteFolder,
+                    onOpenRun = vm::openRunById,
+                    onMoveFavorite = libraryVm::moveFavorite,
+                    onDeleteFavorite = libraryVm::deleteFavorite,
+                    onUseTemplate = { tpl ->
+                        editorTarget = RunEditorTarget.FromTemplate(
+                            title = tpl.title,
+                            planText = tpl.planText,
+                        )
+                    },
+                    onCreateTemplate = libraryVm::createTemplate,
+                    onUpdateTemplate = libraryVm::updateTemplate,
+                    onMoveTemplate = libraryVm::moveTemplate,
+                    onDuplicateTemplate = libraryVm::duplicateTemplate,
+                    onDeleteTemplate = libraryVm::deleteTemplate,
+                    onClearError = libraryVm::clearError,
+                    onClearNotice = libraryVm::clearNotice,
+                    showCreateTemplateDialog = showCreateTemplateDialog,
+                    onDismissCreateTemplateDialog = { showCreateTemplateDialog = false },
+                )
+
+                WorkflowNavTab.FILES -> WorkflowFilesTab(
+                    modifier = contentModifier,
+                    state = filesState,
+                    bottomPadding = bottomPad,
+                    onRefresh = filesVm::refresh,
+                    onOpenFolder = filesVm::openFolder,
+                    onSearchChange = filesVm::setSearchQuery,
+                    onTypeFilterChange = filesVm::setTypeFilter,
+                    onSortChange = filesVm::setSort,
+                    onUploadMarkdown = filesVm::uploadMarkdown,
+                    onOpenPreview = filesVm::openPreview,
+                    onClosePreview = filesVm::closePreview,
+                    onRenameFile = filesVm::renameFile,
+                    onMoveFile = filesVm::moveFile,
+                    onDeleteFile = filesVm::deleteFile,
+                    onCreateFolder = filesVm::createFolder,
+                    onRenameFolder = filesVm::renameFolder,
+                    onDeleteFolder = filesVm::deleteFolder,
+                    onUseFileInRun = { file ->
+                        val baseTitle = file.fileName.substringBeforeLast('.')
+                        val plan = buildString {
+                            appendLine("@run=$baseTitle")
+                            appendLine("@mode=serial")
+                            appendLine()
+                            appendLine("@task Task {")
+                            appendLine("  @mode=serial")
+                            appendLine("  @let source_file=<${file.sourceUrl}>")
+                            appendLine()
+                            appendLine("  @event Event {")
+                            appendLine("    {")
+                            appendLine("      请阅读并处理资料：%source_file%")
+                            appendLine("    }")
+                            appendLine("  }")
+                            appendLine("}")
+                        }
+                        editorTarget = RunEditorTarget.FromTemplate(baseTitle, plan)
+                    },
+                    onClearError = filesVm::clearError,
+                    onClearNotice = filesVm::clearNotice,
+                    uploadTriggerCount = fileUploadTriggerCount,
+                )
+            }
         }
     }
 
@@ -259,27 +445,32 @@ fun WorkflowPage(vm: WorkflowVM = koinViewModel()) {
                 vm.clearError()
                 editorTarget = null
             },
-            onSubmit = { title, planText, status ->
-                when (target) {
-                    RunEditorTarget.Create -> vm.createRun(title, planText, status) {
-                        editorTarget = null
+            onSubmit = { title, planText, status, recurrence ->
+                val onDone: (WorkflowRun) -> Unit = {
+                    editorTarget = null
+                    if (recurrence != null) {
+                        schedulesVm.refresh()
                     }
+                }
+                when (target) {
+                    RunEditorTarget.Create, is RunEditorTarget.FromTemplate ->
+                        vm.createRun(title, planText, status, recurrence, onDone)
                     is RunEditorTarget.EditDraft -> vm.updateDraft(
                         runId = target.run.id,
                         title = title,
                         planText = planText,
                         publish = status == DispatchStatus.QUEUED,
-                    ) {
-                        editorTarget = null
-                    }
+                        recurrence = recurrence,
+                        onSuccess = onDone,
+                    )
                     is RunEditorTarget.EditedRerun -> vm.createEditedRun(
                         sourceId = target.source.id,
                         title = title,
                         planText = planText,
                         status = status,
-                    ) {
-                        editorTarget = null
-                    }
+                        recurrence = recurrence,
+                        onSuccess = onDone,
+                    )
                 }
             },
         )
@@ -482,6 +673,7 @@ private fun WorkflowRunsContent(
     modifier: Modifier = Modifier,
     bottomPadding: androidx.compose.ui.unit.Dp,
     state: WorkflowUiState,
+    favoriteRunIds: Set<String>,
     onRefresh: () -> Unit,
     onFilterChange: (RunListFilter) -> Unit,
     onSearchChange: (String) -> Unit,
@@ -491,6 +683,8 @@ private fun WorkflowRunsContent(
     onEditAsNewVersion: (WorkflowRun) -> Unit,
     onCommandRun: (WorkflowRun, DispatchRequestedAction) -> Unit,
     onCloneRun: (WorkflowRun, DispatchStatus) -> Unit,
+    onToggleFavorite: (WorkflowRun) -> Unit,
+    onSaveAsTemplate: (WorkflowRun) -> Unit,
     onRequestDelete: (WorkflowRun) -> Unit,
     onClearError: () -> Unit,
     onOpenCreate: () -> Unit,
@@ -669,11 +863,14 @@ private fun WorkflowRunsContent(
                                 index = index,
                                 totalCount = state.runs.size,
                                 isMutating = state.isMutating,
+                                isFavorited = run.id in favoriteRunIds,
                                 onClick = { onSelectRun(run) },
                                 onEditDraft = { onEditDraft(run) },
                                 onEditAsNewVersion = { onEditAsNewVersion(run) },
                                 onCommand = { action -> onCommandRun(run, action) },
                                 onClone = { status -> onCloneRun(run, status) },
+                                onToggleFavorite = { onToggleFavorite(run) },
+                                onSaveAsTemplate = { onSaveAsTemplate(run) },
                                 onDelete = { onRequestDelete(run) },
                             )
                         }
@@ -700,11 +897,14 @@ private fun RunCardItem(
     index: Int,
     totalCount: Int,
     isMutating: Boolean,
+    isFavorited: Boolean,
     onClick: () -> Unit,
     onEditDraft: () -> Unit,
     onEditAsNewVersion: () -> Unit,
     onCommand: (DispatchRequestedAction) -> Unit,
     onClone: (DispatchStatus) -> Unit,
+    onToggleFavorite: () -> Unit,
+    onSaveAsTemplate: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val statusMeta = run.statusMeta()
@@ -719,7 +919,7 @@ private fun RunCardItem(
     )
     val shape = if (isPressed) RoundedCornerShape(animatedCorner) else baseShape
 
-    val actions = remember(run, isMutating) {
+    val actions = remember(run, isMutating, isFavorited) {
         buildList {
             if (run.canEditDraft) {
                 add(
@@ -771,7 +971,23 @@ private fun RunCardItem(
                     )
                 )
             }
+            add(
+                ItemAction(
+                    text = if (isFavorited) "取消收藏" else "收藏",
+                    icon = HugeIcons.Favourite,
+                    enabled = !isMutating,
+                    onClick = onToggleFavorite,
+                )
+            )
             if (run.planText.isNotBlank()) {
+                add(
+                    ItemAction(
+                        text = "存为模板",
+                        icon = HugeIcons.Book02,
+                        enabled = !isMutating,
+                        onClick = onSaveAsTemplate,
+                    )
+                )
                 add(
                     ItemAction(
                         text = "复制为草稿",

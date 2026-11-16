@@ -35,6 +35,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -64,6 +65,7 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.ArrowTurnBackward
 import me.rerere.hugeicons.stroke.Book02
+import me.rerere.hugeicons.stroke.Calendar03
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.CheckList
 import me.rerere.hugeicons.stroke.Code
@@ -73,6 +75,7 @@ import me.rerere.hugeicons.stroke.Play
 import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.data.workflow.DEFAULT_START_PAGE_PRESETS
+import me.rerere.rikkahub.data.workflow.DailyRecurrence
 import me.rerere.rikkahub.data.workflow.DispatchExecutionMode
 import me.rerere.rikkahub.data.workflow.DispatchStatus
 import me.rerere.rikkahub.data.workflow.DslHighlightColors
@@ -82,6 +85,7 @@ import me.rerere.rikkahub.data.workflow.DslOutlineKind
 import me.rerere.rikkahub.data.workflow.DslSyntaxVisualTransformation
 import me.rerere.rikkahub.data.workflow.RunEditorTarget
 import me.rerere.rikkahub.data.workflow.createStarterPlan
+import me.rerere.rikkahub.data.workflow.defaultDailyRecurrence
 import me.rerere.rikkahub.data.workflow.duplicateCurrentLine
 import me.rerere.rikkahub.data.workflow.formatWorkflowDsl
 import me.rerere.rikkahub.data.workflow.insertActSnippet
@@ -106,11 +110,12 @@ fun WorkflowDslEditorDialog(
     errorMessage: String? = null,
     onClearError: () -> Unit = {},
     onDismiss: () -> Unit,
-    onSubmit: (title: String, planText: String, targetStatus: DispatchStatus) -> Unit,
+    onSubmit: (title: String, planText: String, targetStatus: DispatchStatus, recurrence: DailyRecurrence?) -> Unit,
 ) {
     val initialTitle = remember(target) {
         when (target) {
             RunEditorTarget.Create -> ""
+            is RunEditorTarget.FromTemplate -> target.title
             is RunEditorTarget.EditDraft -> target.run.title
             is RunEditorTarget.EditedRerun -> target.source.title
         }
@@ -118,6 +123,7 @@ fun WorkflowDslEditorDialog(
     val initialPlan = remember(target) {
         when (target) {
             RunEditorTarget.Create -> createStarterPlan()
+            is RunEditorTarget.FromTemplate -> target.planText.ifBlank { createStarterPlan(target.title) }
             is RunEditorTarget.EditDraft -> target.run.planText.ifBlank { createStarterPlan(target.run.title) }
             is RunEditorTarget.EditedRerun -> target.source.planText.ifBlank { createStarterPlan(target.source.title) }
         }
@@ -128,6 +134,11 @@ fun WorkflowDslEditorDialog(
     val undoStack = remember(target) { mutableStateListOf<TextFieldValue>() }
     val redoStack = remember(target) { mutableStateListOf<TextFieldValue>() }
     var feedbackMessage by remember { mutableStateOf<String?>(null) }
+
+    val defaultRecurrence = remember { defaultDailyRecurrence() }
+    var recurrenceEnabled by remember(target) { mutableStateOf(false) }
+    var recurrenceTime by remember(target) { mutableStateOf(defaultRecurrence.time) }
+    var showScheduleSheet by remember { mutableStateOf(false) }
 
     var showVariableSheet by remember { mutableStateOf(false) }
     var showOutlineSheet by remember { mutableStateOf(false) }
@@ -239,6 +250,7 @@ fun WorkflowDslEditorDialog(
                                 Text(
                                     text = when (target) {
                                         RunEditorTarget.Create -> "新建工作流"
+                                        is RunEditorTarget.FromTemplate -> "从模板新建"
                                         is RunEditorTarget.EditDraft -> "编辑草稿"
                                         is RunEditorTarget.EditedRerun -> "基于 ${target.source.versionLabel} 编辑"
                                     },
@@ -253,6 +265,37 @@ fun WorkflowDslEditorDialog(
                             }
                         },
                         actions = {
+                            Surface(
+                                onClick = { showScheduleSheet = true },
+                                shape = CircleShape,
+                                color = if (recurrenceEnabled) {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerHigh
+                                },
+                                contentColor = if (recurrenceEnabled) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.padding(end = 4.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = HugeIcons.Calendar03,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                    Text(
+                                        text = if (recurrenceEnabled) "每天 $recurrenceTime" else "定时",
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                                }
+                            }
                             // 诊断状态胶囊
                             Surface(
                                 onClick = { showDiagnosticsSheet = true },
@@ -280,7 +323,7 @@ fun WorkflowDslEditorDialog(
                                         modifier = Modifier.size(14.dp),
                                     )
                                     Text(
-                                        text = if (inspection.hasErrors) "${inspection.errorCount} 问题" else "语法正常",
+                                        text = if (inspection.hasErrors) "${inspection.errorCount} 问题" else "正常",
                                         style = MaterialTheme.typography.labelSmall,
                                     )
                                 }
@@ -295,6 +338,11 @@ fun WorkflowDslEditorDialog(
                     )
                 },
                 bottomBar = {
+                    val activeRecurrence = if (recurrenceEnabled) {
+                        defaultRecurrence.copy(time = recurrenceTime.trim())
+                    } else {
+                        null
+                    }
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainerLow,
                         tonalElevation = 2.dp,
@@ -307,7 +355,7 @@ fun WorkflowDslEditorDialog(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             FilledTonalButton(
-                                onClick = { onSubmit(title, editorValue.text, DispatchStatus.DRAFT) },
+                                onClick = { onSubmit(title, editorValue.text, DispatchStatus.DRAFT, activeRecurrence) },
                                 enabled = !isMutating && editorValue.text.isNotBlank(),
                                 modifier = Modifier.weight(1f),
                                 shape = CircleShape,
@@ -319,7 +367,7 @@ fun WorkflowDslEditorDialog(
                                     if (inspection.hasErrors) {
                                         showDiagnosticsSheet = true
                                     } else {
-                                        onSubmit(title, editorValue.text, DispatchStatus.QUEUED)
+                                        onSubmit(title, editorValue.text, DispatchStatus.QUEUED, activeRecurrence)
                                     }
                                 },
                                 enabled = !isMutating && editorValue.text.isNotBlank(),
@@ -509,6 +557,67 @@ fun WorkflowDslEditorDialog(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    if (showScheduleSheet) {
+        ModalBottomSheet(onDismissRequest = { showScheduleSheet = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(
+                    text = "每天重复计划",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("启用每天自动执行", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = "按固定时区 ${defaultRecurrence.formatUtcOffset()} 触发",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = recurrenceEnabled,
+                        onCheckedChange = { recurrenceEnabled = it },
+                    )
+                }
+                if (recurrenceEnabled) {
+                    OutlinedTextField(
+                        value = recurrenceTime,
+                        onValueChange = { recurrenceTime = it },
+                        label = { Text("每天执行时间（HH:mm）") },
+                        placeholder = { Text("09:00") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        isError = !defaultRecurrence.copy(time = recurrenceTime.trim()).isValid(),
+                        supportingText = {
+                            if (!defaultRecurrence.copy(time = recurrenceTime.trim()).isValid()) {
+                                Text("请输入 00:00 ~ 23:59 格式的时间")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Button(
+                    onClick = { showScheduleSheet = false },
+                    shape = CircleShape,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("完成")
+                }
+                Spacer(Modifier.height(8.dp))
             }
         }
     }
