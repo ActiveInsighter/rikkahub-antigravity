@@ -77,7 +77,7 @@ jobs:
           for apk in app/build/outputs/apk/github/debug/*.apk; do
             "$APK_SIGNER" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/apk-signature.txt"
             cat "$RUNNER_TEMP/apk-signature.txt"
-            rg --fixed-strings --ignore-case "$EXPECTED_CERT" "$RUNNER_TEMP/apk-signature.txt"
+            grep -Fi -- "$EXPECTED_CERT" "$RUNNER_TEMP/apk-signature.txt"
             name=$(basename "$apk")
             cp "$apk" "artifacts/${name/app-github-/RikkaHub-3.2.0-antigravity-}"
           done

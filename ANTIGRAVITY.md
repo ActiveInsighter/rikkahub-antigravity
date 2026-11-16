@@ -6,7 +6,7 @@
 
 打开本仓库的 [Releases](https://github.com/ActiveInsighter/rikkahub-antigravity/releases)，在最新的 Antigravity 构建下载 APK。Android 8.0 及以上，普通手机选 `arm64-v8a`，不确定选 `universal`；`x86_64` 适用于对应模拟器/设备。
 
-这是独立的 Debug 应用，包名 `me.rerere.rikkahub.debug`，可与正式版并存。可通过官方版的数据导出与本版的数据导入迁移配置。从 Build 5 起，固定签名显式绑定到本仓库 Actions Secret，并核对 APK 证书与密钥证书一致。Build 5 及后续构建之间可以覆盖升级。Build 3/4 实际使用了各自的临时 Debug 签名，迁移到 Build 5 需要先导出数据、卸载旧修改版、再安装和导入；官方正式版不受影响。
+这是独立的 Debug 应用，包名 `me.rerere.rikkahub.debug`，可与正式版并存。可通过官方版的数据导出与本版的数据导入迁移配置。从 Build 6 起，固定签名显式绑定到本仓库 Actions Secret，并核对 APK 证书与密钥证书一致。Build 6 及后续构建之间可以覆盖升级。Build 3/4 实际使用了各自的临时 Debug 签名，迁移到 Build 6 需要先导出数据、卸载旧修改版、再安装和导入；官方正式版不受影响。
 
 1. 提供商：Google Gemini，Base URL：`https://generativelanguage.googleapis.com/v1beta`。
 2. 开启 Interactions API，关闭 Vertex AI。
@@ -75,4 +75,4 @@ git apply rikkahub-antigravity-interactions.patch
 
 不要在沙盒运行 `gh auth login` 或索要 Token。可先让 Agent 用 GitHub REST `/user` 确认登录账号，再读取目标仓库。修改源码后推送功能分支并核对远端提交。当前本机登录缺少 `workflow` scope，因此编辑 Actions 工作流可能被 GitHub 拒绝；普通仓库读写不因此失效。
 
-本版会省略 Interactions 的原始 logcat 请求体/事件内容，并在应用请求日志中隐藏远程网络 transform、MCP headers 和 env；HTTP 日志同时隐藏常见鉴权头。公开 APK 及构建附件不含你的私人配置。Build 5 起固定签名已显式指定并核对；旧 Build 3/4 须按前述方式迁移。已有版本支持 GitHub 配置，导入凭据本身无需重编译。
+本版会省略 Interactions 的原始 logcat 请求体/事件内容，并在应用请求日志中隐藏远程网络 transform、MCP headers 和 env；HTTP 日志同时隐藏常见鉴权头。公开 APK 及构建附件不含你的私人配置。Build 6 起固定签名已显式指定并核对；旧 Build 3/4 须按前述方式迁移。已有版本支持 GitHub 配置，导入凭据本身无需重编译。
