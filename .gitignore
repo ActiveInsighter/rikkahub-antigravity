@@ -16,3 +16,6 @@ local.properties
 .local-signing/
 artifacts/
 app/google-services.json
+
+# Personal provider imports must never enter Git or public release artifacts.
+.private-config/

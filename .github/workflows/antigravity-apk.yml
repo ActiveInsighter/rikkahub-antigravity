@@ -60,6 +60,7 @@ jobs:
         run: >-
           ./gradlew :ai:testDebugUnitTest
           --tests me.rerere.ai.provider.providers.google.InteractionsApiTest
+          --tests me.rerere.ai.util.RequestLogRedactionTest
           --no-daemon --max-workers=2
           '-Dorg.gradle.jvmargs=-Xmx5g -Dfile.encoding=UTF-8'
       - name: Build signed debug APKs

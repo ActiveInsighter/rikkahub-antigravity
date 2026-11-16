@@ -235,6 +235,9 @@ val dataSourceModule = module {
             .addInterceptor(AIRequestInterceptor())
             .addInterceptor(HttpLoggingInterceptor().apply {
                 redactHeader("Proxy-Authorization")
+                redactHeader("Authorization")
+                redactHeader("x-goog-api-key")
+                redactHeader("x-api-key")
                 level = HttpLoggingInterceptor.Level.HEADERS
             })
             .build()

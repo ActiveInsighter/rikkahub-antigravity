@@ -62,3 +62,17 @@ APK 在 `app/build/outputs/apk/github/debug/`。本地默认 Debug 签名可能�
 git apply --check rikkahub-antigravity-interactions.patch
 git apply rikkahub-antigravity-interactions.patch
 ```
+
+## 私人 GitHub 认证配置
+
+参考 `ActiveInsighter/file-converter-ai` 的线上 `gemini_agent.py`：通过远程环境的 network allowlist 向 `github.com` 注入 HTTPS Git Basic 认证，向 `api.github.com` 注入 REST Bearer 认证，并保留普通出站网络。Token 不放入环境变量或提示词；GitHub MCP 默认关闭。支持范围由该 Token 的实际 GitHub 权限决定。
+
+使用 `tools/antigravity/create-github-provider.py` 生成私人二维码及 JSON（需要 Python 的 `qrcode[pil]`）：它读取 `RIKKA_GITHUB_TOKEN` 或本机 `gh` 登录，不把 Token 输出到终端。结果位于 Git 忽略的 `.private-config/`，目录和文件分别限制为 700/600；不得提交到仓库或上传公开 Release。
+
+在手机「设置 → 提供商 → 导入 → 扫描二维码/从相册选择」导入，得到 `Antigravity GitHub` 提供商及已配置的模型。Google API Key 留空，请在手机填入你现有的 Key，然后在新聊天选择 `Antigravity + GitHub`。
+
+如果想沿用原提供商，可将私人 `github-environment.json` 的对象填入原模型自定义请求体的 `environment` 字段，并在助手提示词说明 Git/REST 已由远程代理配置认证。生成的完整提供商还附有独立的 GitHub 使用说明；它不会更改你已有提供商。
+
+不要在沙盒运行 `gh auth login` 或索要 Token。可先让 Agent 用 GitHub REST `/user` 确认登录账号，再读取目标仓库。修改源码后推送功能分支并核对远端提交。当前本机登录缺少 `workflow` scope，因此编辑 Actions 工作流可能被 GitHub 拒绝；普通仓库读写不因此失效。
+
+本版会省略 Interactions 的原始 logcat 请求体/事件内容，并在应用请求日志中隐藏远程网络 transform、MCP headers 和 env；HTTP 日志同时隐藏常见鉴权头。公开 APK 及构建附件不含你的私人配置，固定签名不变，可以覆盖安装。

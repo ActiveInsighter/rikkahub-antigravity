@@ -155,6 +155,28 @@ class InteractionsApiTest {
     }
 
     @Test
+    fun `antigravity preserves custom remote GitHub authentication`() {
+        val environment = json.parseToJsonElement(
+            """{"type":"remote","network":{"allowlist":[{"domain":"github.com","transform":{"Authorization":"Basic test-only"}},{"domain":"api.github.com","transform":{"Authorization":"Bearer test-only"}},{"domain":"*"}]}}"""
+        )
+        val body = api.buildRequestBody(
+            messages = listOf(UIMessage.system("assistant instructions"), UIMessage.user("Read my repository")),
+            params = TextGenerationParams(
+                model = Model(modelId = "antigravity-preview-09-2026"),
+                customBody = listOf(CustomBody("environment", environment)),
+            ),
+            stream = true,
+        )
+
+        assertEquals(environment, body["environment"])
+        assertEquals("assistant instructions", body["system_instruction"]!!.jsonPrimitive.content)
+        assertEquals("antigravity-preview-09-2026", body["agent"]!!.jsonPrimitive.content)
+        assertFalse(body.containsKey("model"))
+        assertFalse(body.containsKey("tools"))
+        assertFalse(body.containsKey("generation_config"))
+    }
+
+    @Test
     fun `antigravity stream handles remote tools and final text`() {
         val (chunks, message) = decode(
             """{"interaction":{"id":"agent_1","agent":"antigravity-preview-09-2026","status":"in_progress"},"event_type":"interaction.created"}""",

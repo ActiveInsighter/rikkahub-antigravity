@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.ai
 
+import me.rerere.ai.util.redactInteractionRequestForLogging
 import me.rerere.common.android.LogEntry
 import me.rerere.common.android.Logging
 import okhttp3.Interceptor
@@ -19,7 +20,8 @@ class RequestLoggingInterceptor : Interceptor {
         val requestBody = request.body?.let { body ->
             val buffer = Buffer()
             body.writeTo(buffer)
-            buffer.readUtf8()
+            val raw = buffer.readUtf8()
+            if (request.url.encodedPath.endsWith("/interactions")) redactInteractionRequestForLogging(raw) else raw
         }
 
         val response: Response
@@ -64,7 +66,7 @@ class RequestLoggingInterceptor : Interceptor {
 
     private fun okhttp3.Headers.toMap(): Map<String, String> {
         return names().associateWith { name ->
-            if (name.equals("Proxy-Authorization", ignoreCase = true)) {
+            if (name.lowercase() in setOf("proxy-authorization", "authorization", "x-goog-api-key", "x-api-key")) {
                 "██"
             } else {
                 get(name) ?: ""
