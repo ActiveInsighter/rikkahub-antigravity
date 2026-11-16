@@ -113,4 +113,12 @@ val repositoryModule = module {
     single {
         me.rerere.rikkahub.data.workflow.WorkflowLibraryRepository(get())
     }
+
+    single {
+        me.rerere.rikkahub.data.workflow.WorkflowConverterRepository(get())
+    }
+
+    single {
+        me.rerere.rikkahub.data.workflow.WorkflowSettingsRepository(get())
+    }
 }

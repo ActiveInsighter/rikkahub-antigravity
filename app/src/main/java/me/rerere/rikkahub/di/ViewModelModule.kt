@@ -24,9 +24,11 @@ import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerVM
 import me.rerere.rikkahub.ui.pages.stats.StatsVM
 import me.rerere.rikkahub.ui.pages.translator.TranslatorVM
+import me.rerere.rikkahub.ui.pages.workflow.WorkflowConverterVM
 import me.rerere.rikkahub.ui.pages.workflow.WorkflowFilesVM
 import me.rerere.rikkahub.ui.pages.workflow.WorkflowLibraryVM
 import me.rerere.rikkahub.ui.pages.workflow.WorkflowSchedulesVM
+import me.rerere.rikkahub.ui.pages.workflow.WorkflowSettingsVM
 import me.rerere.rikkahub.ui.pages.workflow.WorkflowVM
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
@@ -116,4 +118,6 @@ val viewModelModule = module {
     viewModelOf(::WorkflowSchedulesVM)
     viewModelOf(::WorkflowLibraryVM)
     viewModelOf(::WorkflowFilesVM)
+    viewModelOf(::WorkflowConverterVM)
+    viewModelOf(::WorkflowSettingsVM)
 }

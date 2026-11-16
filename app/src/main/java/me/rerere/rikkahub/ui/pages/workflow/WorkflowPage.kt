@@ -3,11 +3,11 @@ package me.rerere.rikkahub.ui.pages.workflow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
@@ -30,12 +30,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Calendar03
-import me.rerere.hugeicons.stroke.CloudServer
 import me.rerere.hugeicons.stroke.Favourite
+import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.FileImport
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.GitFork
 import me.rerere.hugeicons.stroke.Refresh03
+import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
 import me.rerere.rikkahub.data.workflow.DispatchStatus
 import me.rerere.rikkahub.data.workflow.LibraryFolderScope
@@ -52,8 +53,9 @@ private enum class WorkflowNavTab(
 ) {
     RUNS("工作流", "工作流"),
     SCHEDULES("重复", "重复计划"),
-    LIBRARY("收藏模板", "收藏与模板"),
+    LIBRARY("收藏", "收藏与模板"),
     FILES("资料库", "资料库"),
+    CONVERTER("转换", "文件转换"),
 }
 
 @Composable
@@ -62,17 +64,21 @@ fun WorkflowPage(
     schedulesVm: WorkflowSchedulesVM = koinViewModel(),
     libraryVm: WorkflowLibraryVM = koinViewModel(),
     filesVm: WorkflowFilesVM = koinViewModel(),
+    converterVm: WorkflowConverterVM = koinViewModel(),
+    settingsVm: WorkflowSettingsVM = koinViewModel(),
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val schedulesState by schedulesVm.uiState.collectAsStateWithLifecycle()
     val libraryState by libraryVm.uiState.collectAsStateWithLifecycle()
     val filesState by filesVm.uiState.collectAsStateWithLifecycle()
+    val converterState by converterVm.uiState.collectAsStateWithLifecycle()
+    val settingsState by settingsVm.uiState.collectAsStateWithLifecycle()
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     var activeTab by rememberSaveable { mutableStateOf(WorkflowNavTab.RUNS) }
     var editorTarget by remember { mutableStateOf<RunEditorTarget?>(null) }
-    var showAccountSheet by rememberSaveable { mutableStateOf(false) }
+    var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<WorkflowRun?>(null) }
     var showCreateTemplateDialog by remember { mutableStateOf(false) }
     var pendingFileUploadTrigger by remember { mutableStateOf(false) }
@@ -82,6 +88,7 @@ fun WorkflowPage(
         WorkflowNavTab.SCHEDULES -> schedulesState.isRefreshing
         WorkflowNavTab.LIBRARY -> libraryState.isRefreshing
         WorkflowNavTab.FILES -> filesState.isRefreshing
+        WorkflowNavTab.CONVERTER -> converterState.isRefreshingJobs
     }
 
     Scaffold(
@@ -110,6 +117,7 @@ fun WorkflowPage(
                                     WorkflowNavTab.SCHEDULES -> schedulesVm.refresh()
                                     WorkflowNavTab.LIBRARY -> libraryVm.refresh()
                                     WorkflowNavTab.FILES -> filesVm.refresh()
+                                    WorkflowNavTab.CONVERTER -> converterVm.refresh()
                                 }
                             },
                             enabled = !activeRefreshing,
@@ -124,15 +132,15 @@ fun WorkflowPage(
                             }
                         }
                         FilledTonalIconButton(
-                            onClick = { showAccountSheet = true },
+                            onClick = { showSettingsDialog = true },
                             shapes = IconButtonDefaults.shapes(),
                             colors = IconButtonDefaults.filledTonalIconButtonColors(
                                 containerColor = CustomColors.listItemColors.containerColor,
                             ),
                         ) {
                             Icon(
-                                imageVector = HugeIcons.CloudServer,
-                                contentDescription = "连接信息",
+                                imageVector = HugeIcons.Settings03,
+                                contentDescription = "工作流设置",
                             )
                         }
                     }
@@ -150,6 +158,7 @@ fun WorkflowPage(
                             WorkflowNavTab.SCHEDULES -> HugeIcons.Calendar03
                             WorkflowNavTab.LIBRARY -> HugeIcons.Favourite
                             WorkflowNavTab.FILES -> HugeIcons.Files02
+                            WorkflowNavTab.CONVERTER -> HugeIcons.File02
                         }
                         NavigationBarItem(
                             selected = activeTab == tab,
@@ -193,6 +202,7 @@ fun WorkflowPage(
                             Icon(HugeIcons.FileImport, contentDescription = "上传文件")
                         }
                     }
+                    WorkflowNavTab.CONVERTER -> Unit
                 }
             }
         },
@@ -324,6 +334,24 @@ fun WorkflowPage(
                     pendingUploadTrigger = pendingFileUploadTrigger,
                     onConsumeUploadTrigger = { pendingFileUploadTrigger = false },
                 )
+
+                WorkflowNavTab.CONVERTER -> WorkflowConverterTab(
+                    modifier = contentModifier,
+                    state = converterState,
+                    libraryFiles = filesState.drive.files,
+                    bottomPadding = bottomPad,
+                    onRefresh = converterVm::refresh,
+                    onPageChange = converterVm::setPage,
+                    onUploadPdf = converterVm::uploadPdfFromUri,
+                    onClearUploadedPdf = converterVm::clearUploadedPdf,
+                    onCreateJob = converterVm::createJob,
+                    onCancelJob = converterVm::cancelJob,
+                    onRerunJob = converterVm::rerunJob,
+                    onRequestDownload = converterVm::requestDownloadUrl,
+                    onSaveConfig = converterVm::saveConfig,
+                    onClearError = converterVm::clearError,
+                    onClearNotice = converterVm::clearNotice,
+                )
             }
         }
     }
@@ -398,14 +426,26 @@ fun WorkflowPage(
         )
     }
 
-    if (showAccountSheet && state.session != null) {
-        AccountBottomSheet(
+    if (showSettingsDialog && state.session != null) {
+        WorkflowSettingsDialog(
             session = state.session!!,
-            onDismiss = { showAccountSheet = false },
+            state = settingsState,
+            onDismiss = { showSettingsDialog = false },
+            onRefresh = settingsVm::refreshAll,
             onDisconnect = {
-                showAccountSheet = false
+                showSettingsDialog = false
                 vm.logout()
             },
+            onAddStartLink = settingsVm::addStartLink,
+            onUpdateStartLink = settingsVm::updateStartLink,
+            onDeleteStartLink = settingsVm::deleteStartLink,
+            onResetStartLinks = settingsVm::resetStartLinks,
+            onAddSavedModel = settingsVm::addSavedModel,
+            onRemoveSavedModel = settingsVm::removeSavedModel,
+            onRefreshCatalog = settingsVm::refreshModelCatalog,
+            onSaveRuntimeDefaults = settingsVm::saveRuntimeDefaults,
+            onClearError = settingsVm::clearError,
+            onClearNotice = settingsVm::clearNotice,
         )
     }
 
