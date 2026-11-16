@@ -950,7 +950,7 @@ private fun MarkdownPreviewDialog(
                                     .verticalScroll(rememberScrollState())
                                     .padding(vertical = 12.dp),
                             ) {
-                                MaterialMarkdown(markdown = content)
+                                MaterialMarkdown(content = content)
                             }
                         }
                     }
