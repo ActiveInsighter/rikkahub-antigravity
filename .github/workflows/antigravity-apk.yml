@@ -24,7 +24,14 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
+      - name: Configure preinstalled Android SDK
+        run: |
+          SDK_MANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          "$SDK_MANAGER" --version
+          # yes exits with SIGPIPE after sdkmanager finishes reading its input.
+          set +o pipefail
+          yes | "$SDK_MANAGER" --licenses > /dev/null
       - name: Install Android SDK components
         run: sdkmanager 'platforms;android-37' 'platforms;android-37.2' 'cmake;3.22.1'
       - uses: pnpm/action-setup@v4

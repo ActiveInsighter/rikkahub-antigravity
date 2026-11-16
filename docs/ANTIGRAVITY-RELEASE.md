@@ -9,4 +9,4 @@
 - Actions 运行请求回归测试、构建 APK 并验证签名；未使用用户 API Key 调用 Google 实测，仍需安装后验证账号权限和真实响应。
 - Debug 版关闭 Firebase Analytics 和 Crashlytics 数据收集，使用本地占位配置，无需 Firebase 密钥。
 
-源代码及详细说明见仓库的 [ANTIGRAVITY.md](../blob/main/ANTIGRAVITY.md)。
+源代码及详细说明见仓库的 [ANTIGRAVITY.md](https://github.com/ActiveInsighter/rikkahub-antigravity/blob/main/ANTIGRAVITY.md)。
