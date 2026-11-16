@@ -33,7 +33,7 @@ jobs:
           set +o pipefail
           yes | "$SDK_MANAGER" --licenses > /dev/null
       - name: Install Android SDK components
-        run: sdkmanager 'platforms;android-37' 'platforms;android-37.2' 'cmake;3.22.1'
+        run: sdkmanager 'platforms;android-37.2' 'cmake;3.22.1'
       - uses: pnpm/action-setup@v4
         with:
           version: 11

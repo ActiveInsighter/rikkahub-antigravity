@@ -35,7 +35,7 @@
 
 `Antigravity Debug APK` 工作流在推送 `main` 或手动运行时执行，测试 `InteractionsApiTest`、构建 `:app:assembleGithubDebug`、验证 APK 签名、上传构建附件并创建含 APK 和 SHA-256 清单的预发布 Release。
 
-环境：JDK 21、上游 Gradle Wrapper、Android SDK 37 / 37.2、CMake 3.22.1、Node 22、pnpm 11。Gradle 按上游配置安装所需 NDK 等依赖。
+环境：JDK 21、上游 Gradle Wrapper、Android SDK 37.2、CMake 3.22.1、Node 22、pnpm 11。库模块的 compileSdk 显式与 app 对齐到 37.2，避免 SDK 仓库不存在 android-37 包名的问题。Gradle 按上游配置安装所需 NDK 等依赖。
 
 `tools/antigravity/prepare-debug.py` 生成非真实项目的 Firebase 占位配置，只用于满足上游的初始化要求；Debug Manifest 关闭 Analytics/Crashlytics 收集。无需提供 Firebase 项目或 Google API Key 来构建。
 
