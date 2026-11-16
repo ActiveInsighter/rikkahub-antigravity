@@ -64,6 +64,46 @@ enum class DispatchRunOrigin(val wireValue: String, val label: String) {
     }
 }
 
+enum class DispatchExecutorKind(val wireValue: String, val label: String) {
+    BROWSER("browser", "浏览器"),
+    CODEX("codex", "Codex");
+
+    companion object {
+        fun fromWire(value: String?): DispatchExecutorKind =
+            entries.firstOrNull { it.wireValue == value } ?: BROWSER
+    }
+}
+
+enum class DispatchEventStatus(
+    val wireValue: String,
+    val isActive: Boolean = false,
+) {
+    WAITING("waiting"),
+    READY("ready", isActive = true),
+    LEASED("leased", isActive = true),
+    RUNNING("running", isActive = true),
+    PAUSED("paused", isActive = true),
+    TERMINAL("terminal");
+
+    companion object {
+        fun fromWire(value: String?): DispatchEventStatus =
+            entries.firstOrNull { it.wireValue == value } ?: WAITING
+    }
+}
+
+enum class WorkflowHistoryStatus(val wireValue: String) {
+    SUCCEEDED("succeeded"),
+    FAILED("failed"),
+    CANCELED("canceled"),
+    INTERRUPTED("interrupted"),
+    UNKNOWN("unknown");
+
+    companion object {
+        fun fromWire(value: String?): WorkflowHistoryStatus =
+            entries.firstOrNull { it.wireValue == value } ?: UNKNOWN
+    }
+}
+
 enum class RunListFilter(val key: String, val label: String) {
     ALL("all", "全部"),
     DRAFT("draft", "草稿"),
@@ -117,6 +157,12 @@ data class WorkflowRun(
     val versionLabel: String
         get() = "v$versionMajor.$versionMinor"
 
+    val canEditDraft: Boolean
+        get() = status == DispatchStatus.DRAFT
+
+    val canEditAsNewVersion: Boolean
+        get() = status.isTerminal && planText.isNotBlank()
+
     val canPause: Boolean
         get() = status.isActive && requestedAction == DispatchRequestedAction.NONE
 
@@ -149,13 +195,217 @@ data class WorkflowRun(
     }
 }
 
-data class WorkflowRunPage(
+data class WorkflowTask(
+    val id: String,
+    val owner: String,
+    val run: String,
+    val runIndex: Int,
+    val executorKind: DispatchExecutorKind,
+    val title: String,
+    val executionMode: DispatchExecutionMode,
+    val maxConcurrency: Int,
+    val orchestrationState: String,
+    val compileError: String,
+    val status: DispatchStatus,
+    val requestedAction: DispatchRequestedAction,
+    val totalEvents: Int,
+    val completedEvents: Int,
+    val lastError: String,
+    val startedAt: String,
+    val endedAt: String,
+    val created: String,
+    val updated: String,
+) {
+    val displayTitle: String
+        get() = title.trim().ifEmpty { "Task ${runIndex + 1}" }
+
+    fun statusMeta(): StatusMeta {
+        if (orchestrationState == "failed" || compileError.isNotBlank()) {
+            return StatusMeta("编排失败", StatusTone.DANGER)
+        }
+        if (status.isActive) {
+            when (requestedAction) {
+                DispatchRequestedAction.PAUSE -> return StatusMeta("已请求暂停", StatusTone.WARNING)
+                DispatchRequestedAction.RESUME -> return StatusMeta("正在恢复", StatusTone.INFO)
+                DispatchRequestedAction.CANCEL -> return StatusMeta("正在取消", StatusTone.WARNING)
+                DispatchRequestedAction.NONE -> Unit
+            }
+        }
+        return when (status) {
+            DispatchStatus.DRAFT -> StatusMeta("草稿", StatusTone.NEUTRAL)
+            DispatchStatus.QUEUED -> StatusMeta("排队中", StatusTone.INFO)
+            DispatchStatus.RUNNING -> StatusMeta("执行中", StatusTone.WARNING)
+            DispatchStatus.SUCCEEDED -> StatusMeta("已完成", StatusTone.SUCCESS)
+            DispatchStatus.FAILED -> StatusMeta("失败", StatusTone.DANGER)
+            DispatchStatus.CANCELED -> StatusMeta("已取消", StatusTone.NEUTRAL)
+        }
+    }
+}
+
+data class WorkflowEvent(
+    val id: String,
+    val owner: String,
+    val task: String,
+    val eventIndex: Int,
+    val queueTextOverride: String,
+    val status: DispatchEventStatus,
+    val attempt: Int,
+    val workerId: String,
+    val localRunId: String,
+    val localAttempt: Int,
+    val lastError: String,
+    val terminalResult: String,
+    val progressLabel: String,
+    val created: String,
+    val updated: String,
+) {
+    val displayTitle: String
+        get() {
+            val line = queueTextOverride.lineSequence()
+                .firstOrNull { it.trim().startsWith("@event=", ignoreCase = true) }
+                ?.substringAfter('=')
+                ?.trim()
+            return line?.takeIf { it.isNotEmpty() } ?: "Event ${eventIndex + 1}"
+        }
+
+    fun statusMeta(): StatusMeta {
+        return when (status) {
+            DispatchEventStatus.WAITING -> StatusMeta("等待前置", StatusTone.NEUTRAL)
+            DispatchEventStatus.READY -> StatusMeta("待领取", StatusTone.INFO)
+            DispatchEventStatus.LEASED -> StatusMeta("已分配", StatusTone.INFO)
+            DispatchEventStatus.RUNNING -> StatusMeta("执行中", StatusTone.WARNING)
+            DispatchEventStatus.PAUSED -> StatusMeta("已暂停", StatusTone.WARNING)
+            DispatchEventStatus.TERMINAL -> when (terminalResult) {
+                "succeeded" -> StatusMeta("已完成", StatusTone.SUCCESS)
+                "failed" -> StatusMeta("失败", StatusTone.DANGER)
+                "canceled" -> StatusMeta("已取消", StatusTone.NEUTRAL)
+                else -> StatusMeta("已结束", StatusTone.NEUTRAL)
+            }
+        }
+    }
+}
+
+data class WorkflowHistoryEvent(
+    val id: String,
+    val owner: String,
+    val task: String,
+    val eventIndex: Int,
+    val attempt: Int,
+    val status: WorkflowHistoryStatus,
+    val title: String,
+    val actCount: Int,
+    val messageCount: Int,
+)
+
+data class WorkflowHistoryAct(
+    val id: String,
+    val owner: String,
+    val event: String,
+    val actIndex: Int,
+    val attempt: Int,
+    val status: WorkflowHistoryStatus,
+    val title: String,
+    val startedAt: String,
+    val endedAt: String,
+    val durationMs: Long,
+    val messageCount: Int,
+    val created: String,
+    val updated: String,
+) {
+    val displayTitle: String
+        get() = title.trim().ifEmpty { "Act ${actIndex + 1}" }
+
+    fun statusMeta(eventActive: Boolean): StatusMeta {
+        return when (status) {
+            WorkflowHistoryStatus.SUCCEEDED -> StatusMeta("已完成", StatusTone.SUCCESS)
+            WorkflowHistoryStatus.FAILED -> StatusMeta("失败", StatusTone.DANGER)
+            WorkflowHistoryStatus.CANCELED -> StatusMeta("已取消", StatusTone.NEUTRAL)
+            WorkflowHistoryStatus.INTERRUPTED -> StatusMeta("已中断", StatusTone.WARNING)
+            WorkflowHistoryStatus.UNKNOWN -> if (eventActive) {
+                StatusMeta("进行中", StatusTone.WARNING)
+            } else {
+                StatusMeta("未知", StatusTone.NEUTRAL)
+            }
+        }
+    }
+}
+
+data class WorkflowHistoryMessageSummary(
+    val id: String,
+    val owner: String,
+    val act: String,
+    val nodeIndex: Int,
+    val attempt: Int,
+    val status: WorkflowHistoryStatus,
+    val sentAt: String,
+    val receivedAt: String,
+    val created: String,
+    val updated: String,
+) {
+    fun statusMeta(eventActive: Boolean): StatusMeta {
+        return when (status) {
+            WorkflowHistoryStatus.SUCCEEDED -> StatusMeta("已回复", StatusTone.SUCCESS)
+            WorkflowHistoryStatus.FAILED -> StatusMeta("失败", StatusTone.DANGER)
+            WorkflowHistoryStatus.CANCELED -> StatusMeta("已取消", StatusTone.NEUTRAL)
+            WorkflowHistoryStatus.INTERRUPTED -> StatusMeta("已中断", StatusTone.WARNING)
+            WorkflowHistoryStatus.UNKNOWN -> if (receivedAt.isNotBlank()) {
+                StatusMeta("已回复", StatusTone.SUCCESS)
+            } else if (eventActive) {
+                StatusMeta("等待回复", StatusTone.WARNING)
+            } else {
+                StatusMeta("未完成", StatusTone.NEUTRAL)
+            }
+        }
+    }
+}
+
+data class WorkflowHistoryMessage(
+    val id: String,
+    val owner: String,
+    val act: String,
+    val nodeIndex: Int,
+    val attempt: Int,
+    val status: WorkflowHistoryStatus,
+    val userMarkdown: String,
+    val assistantMarkdown: String,
+    val conversationUrl: String,
+    val sentAt: String,
+    val receivedAt: String,
+    val created: String,
+    val updated: String,
+) {
+    fun statusMeta(eventActive: Boolean): StatusMeta {
+        return when (status) {
+            WorkflowHistoryStatus.SUCCEEDED -> StatusMeta("已回复", StatusTone.SUCCESS)
+            WorkflowHistoryStatus.FAILED -> StatusMeta("失败", StatusTone.DANGER)
+            WorkflowHistoryStatus.CANCELED -> StatusMeta("已取消", StatusTone.NEUTRAL)
+            WorkflowHistoryStatus.INTERRUPTED -> StatusMeta("已中断", StatusTone.WARNING)
+            WorkflowHistoryStatus.UNKNOWN -> if (receivedAt.isNotBlank()) {
+                StatusMeta("已回复", StatusTone.SUCCESS)
+            } else if (eventActive) {
+                StatusMeta("等待回复", StatusTone.WARNING)
+            } else {
+                StatusMeta("未完成", StatusTone.NEUTRAL)
+            }
+        }
+    }
+}
+
+data class WorkflowListPage<T>(
     val page: Int,
     val perPage: Int,
     val totalItems: Int,
     val totalPages: Int,
-    val items: List<WorkflowRun>,
+    val items: List<T>,
 )
+
+typealias WorkflowRunPage = WorkflowListPage<WorkflowRun>
+
+sealed interface RunEditorTarget {
+    data object Create : RunEditorTarget
+    data class EditDraft(val run: WorkflowRun) : RunEditorTarget
+    data class EditedRerun(val source: WorkflowRun) : RunEditorTarget
+}
 
 fun createStarterPlan(title: String = ""): String = buildString {
     appendLine("@run=${title.trim()}")

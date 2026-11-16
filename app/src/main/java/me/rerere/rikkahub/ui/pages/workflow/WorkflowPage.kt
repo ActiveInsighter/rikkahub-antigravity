@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,7 +46,6 @@ import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -55,7 +53,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,7 +65,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -100,11 +96,11 @@ import me.rerere.hugeicons.stroke.Zap
 import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
 import me.rerere.rikkahub.data.workflow.DispatchRequestedAction
 import me.rerere.rikkahub.data.workflow.DispatchStatus
+import me.rerere.rikkahub.data.workflow.RunEditorTarget
 import me.rerere.rikkahub.data.workflow.RunListFilter
 import me.rerere.rikkahub.data.workflow.StatusTone
 import me.rerere.rikkahub.data.workflow.WorkflowRun
 import me.rerere.rikkahub.data.workflow.WorkflowSession
-import me.rerere.rikkahub.data.workflow.createStarterPlan
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.CardGroupIcon
@@ -112,7 +108,6 @@ import me.rerere.rikkahub.ui.components.ui.ItemAction
 import me.rerere.rikkahub.ui.components.ui.ItemActionMenu
 import me.rerere.rikkahub.ui.components.ui.cardGroupItemShape
 import me.rerere.rikkahub.ui.theme.CustomColors
-import me.rerere.rikkahub.utils.plus
 import me.rerere.ui.components.RikkaConfirmDialog
 import org.koin.androidx.compose.koinViewModel
 import java.time.Duration
@@ -125,7 +120,7 @@ fun WorkflowPage(vm: WorkflowVM = koinViewModel()) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
-    var showCreateSheet by rememberSaveable { mutableStateOf(false) }
+    var editorTarget by remember { mutableStateOf<RunEditorTarget?>(null) }
     var showAccountSheet by rememberSaveable { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<WorkflowRun?>(null) }
 
@@ -180,7 +175,7 @@ fun WorkflowPage(vm: WorkflowVM = koinViewModel()) {
         floatingActionButton = {
             if (state.session != null) {
                 FloatingActionButton(
-                    onClick = { showCreateSheet = true },
+                    onClick = { editorTarget = RunEditorTarget.Create },
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                 ) {
@@ -214,36 +209,72 @@ fun WorkflowPage(vm: WorkflowVM = koinViewModel()) {
                 onSearchChange = vm::setSearchInput,
                 onPageChange = vm::setPage,
                 onSelectRun = vm::selectRun,
+                onEditDraft = { run -> editorTarget = RunEditorTarget.EditDraft(run) },
+                onEditAsNewVersion = { run -> editorTarget = RunEditorTarget.EditedRerun(run) },
                 onCommandRun = vm::commandRun,
                 onCloneRun = vm::cloneRun,
                 onRequestDelete = { deleteTarget = it },
                 onClearError = vm::clearError,
-                onOpenCreate = { showCreateSheet = true },
+                onOpenCreate = { editorTarget = RunEditorTarget.Create },
             )
         }
     }
 
     state.selectedRun?.let { run ->
-        RunDetailBottomSheet(
+        WorkflowRunDetailDialog(
             run = run,
+            detail = state.detail,
             isMutating = state.isMutating,
             onDismiss = { vm.selectRun(null) },
+            onRefresh = vm::refreshSelectedRunDetail,
+            onSelectVersion = vm::selectRun,
+            onEditDraft = { targetRun ->
+                editorTarget = RunEditorTarget.EditDraft(targetRun)
+            },
+            onEditAsNewVersion = { targetRun ->
+                editorTarget = RunEditorTarget.EditedRerun(targetRun)
+            },
             onCommand = { action -> vm.commandRun(run, action) },
             onClone = { status -> vm.cloneRun(run, status) },
             onDelete = {
                 vm.selectRun(null)
                 deleteTarget = run
             },
+            onLoadEvents = { taskId -> vm.loadEventsForTask(taskId) },
+            onLoadActs = { event -> vm.loadActsForEvent(event) },
+            onLoadMessages = { actId, page -> vm.loadMessagesForAct(actId, page) },
+            onOpenMessage = vm::openMessageDetail,
+            onRetryMessage = vm::retryMessageDetail,
+            onCloseMessage = vm::closeMessageDetail,
         )
     }
 
-    if (showCreateSheet) {
-        CreateRunBottomSheet(
+    editorTarget?.let { target ->
+        WorkflowDslEditorDialog(
+            target = target,
             isMutating = state.isMutating,
-            onDismiss = { showCreateSheet = false },
-            onCreate = { title, planText, status ->
-                vm.createRun(title, planText, status) {
-                    showCreateSheet = false
+            onDismiss = { editorTarget = null },
+            onSubmit = { title, planText, status ->
+                when (target) {
+                    RunEditorTarget.Create -> vm.createRun(title, planText, status) {
+                        editorTarget = null
+                    }
+                    is RunEditorTarget.EditDraft -> vm.updateDraft(
+                        runId = target.run.id,
+                        title = title,
+                        planText = planText,
+                        publish = status == DispatchStatus.QUEUED,
+                    ) {
+                        editorTarget = null
+                    }
+                    is RunEditorTarget.EditedRerun -> vm.createEditedRun(
+                        sourceId = target.source.id,
+                        title = title,
+                        planText = planText,
+                        status = status,
+                    ) {
+                        editorTarget = null
+                    }
                 }
             },
         )
@@ -331,7 +362,7 @@ private fun ConnectWorkflowView(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = "登录你的 PocketBase 账号后，即可在移动端查看、控制与新建云端工作流。",
+                        text = "登录你的 PocketBase 账号后，即可在移动端查看、编辑、控制与追踪云端工作流。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -451,6 +482,8 @@ private fun WorkflowRunsContent(
     onSearchChange: (String) -> Unit,
     onPageChange: (Int) -> Unit,
     onSelectRun: (WorkflowRun) -> Unit,
+    onEditDraft: (WorkflowRun) -> Unit,
+    onEditAsNewVersion: (WorkflowRun) -> Unit,
     onCommandRun: (WorkflowRun, DispatchRequestedAction) -> Unit,
     onCloneRun: (WorkflowRun, DispatchStatus) -> Unit,
     onRequestDelete: (WorkflowRun) -> Unit,
@@ -472,7 +505,6 @@ private fun WorkflowRunsContent(
             ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // 筛选条
             item(key = "filter_bar") {
                 Row(
                     modifier = Modifier
@@ -507,7 +539,6 @@ private fun WorkflowRunsContent(
                 }
             }
 
-            // 搜索栏 + 数量状态
             item(key = "search_and_status") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -569,7 +600,6 @@ private fun WorkflowRunsContent(
                 }
             }
 
-            // 错误提示
             if (!state.errorMessage.isNullOrBlank()) {
                 item(key = "error_banner") {
                     Surface(
@@ -604,7 +634,6 @@ private fun WorkflowRunsContent(
                 }
             }
 
-            // 初次加载骨架/指示器
             if (state.isLoading && state.runs.isEmpty()) {
                 item(key = "loading_state") {
                     Box(
@@ -627,7 +656,6 @@ private fun WorkflowRunsContent(
                     )
                 }
             } else {
-                // 工作流卡片列表（与 RikkaHub CardGroup 同款分段圆角 + 2.dp 间距）
                 item(key = "runs_group") {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         state.runs.forEachIndexed { index, run ->
@@ -637,6 +665,8 @@ private fun WorkflowRunsContent(
                                 totalCount = state.runs.size,
                                 isMutating = state.isMutating,
                                 onClick = { onSelectRun(run) },
+                                onEditDraft = { onEditDraft(run) },
+                                onEditAsNewVersion = { onEditAsNewVersion(run) },
                                 onCommand = { action -> onCommandRun(run, action) },
                                 onClone = { status -> onCloneRun(run, status) },
                                 onDelete = { onRequestDelete(run) },
@@ -666,6 +696,8 @@ private fun RunCardItem(
     totalCount: Int,
     isMutating: Boolean,
     onClick: () -> Unit,
+    onEditDraft: () -> Unit,
+    onEditAsNewVersion: () -> Unit,
     onCommand: (DispatchRequestedAction) -> Unit,
     onClone: (DispatchStatus) -> Unit,
     onDelete: () -> Unit,
@@ -684,6 +716,26 @@ private fun RunCardItem(
 
     val actions = remember(run, isMutating) {
         buildList {
+            if (run.canEditDraft) {
+                add(
+                    ItemAction(
+                        text = "编辑草稿",
+                        icon = HugeIcons.Edit03,
+                        enabled = !isMutating,
+                        onClick = onEditDraft,
+                    )
+                )
+            }
+            if (run.canEditAsNewVersion) {
+                add(
+                    ItemAction(
+                        text = "基于此版本编辑",
+                        icon = HugeIcons.Edit03,
+                        enabled = !isMutating,
+                        onClick = onEditAsNewVersion,
+                    )
+                )
+            }
             if (run.canPause) {
                 add(
                     ItemAction(
@@ -766,7 +818,6 @@ private fun RunCardItem(
                 verticalAlignment = Alignment.Top,
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                // 状态图标（进行中用 M3 Expressive ContainedLoadingIndicator）
                 if (run.status == DispatchStatus.RUNNING) {
                     ContainedLoadingIndicator(modifier = Modifier.size(40.dp))
                 } else {
@@ -821,8 +872,23 @@ private fun RunCardItem(
                     }
                 }
 
-                if (actions.isNotEmpty()) {
-                    ItemActionMenu(actions = actions)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (run.canEditDraft) {
+                        FilledTonalIconButton(
+                            onClick = onEditDraft,
+                            enabled = !isMutating,
+                            modifier = Modifier.size(34.dp),
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Edit03,
+                                contentDescription = "编辑草稿",
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                    if (actions.isNotEmpty()) {
+                        ItemActionMenu(actions = actions)
+                    }
                 }
             }
 
@@ -895,7 +961,7 @@ private fun RunStatusCircle(
 }
 
 @Composable
-private fun StatusBadgePill(
+internal fun StatusBadgePill(
     label: String,
     colors: ToneColors,
 ) {
@@ -1028,328 +1094,6 @@ private fun WorkflowPager(
 }
 
 @Composable
-private fun RunDetailBottomSheet(
-    run: WorkflowRun,
-    isMutating: Boolean,
-    onDismiss: () -> Unit,
-    onCommand: (DispatchRequestedAction) -> Unit,
-    onClone: (DispatchStatus) -> Unit,
-    onDelete: () -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val statusMeta = run.statusMeta()
-    val toneColors = statusToneColors(statusMeta.tone)
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            // 头部标题与状态
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    StatusBadgePill(label = statusMeta.label, colors = toneColors)
-                    Text(
-                        text = "${run.versionLabel} · ${run.origin.label}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Text(
-                    text = run.displayTitle,
-                    style = MaterialTheme.typography.headlineSmall,
-                )
-                Text(
-                    text = "Run ID: ${run.id}",
-                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            // 错误信息
-            if (run.lastError.isNotBlank()) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.errorContainer,
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Alert01,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Text(
-                            text = run.lastError,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                    }
-                }
-            }
-
-            // 运行参数摘要
-            CardGroup(title = { Text("执行概览") }) {
-                item(
-                    headlineContent = { Text("执行模式") },
-                    trailingContent = {
-                        Text(
-                            text = if (run.executionMode.wireValue == "parallel") {
-                                "并行 (${run.maxConcurrency} 并发)"
-                            } else {
-                                "串行"
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    },
-                )
-                item(
-                    headlineContent = { Text("任务进度") },
-                    trailingContent = {
-                        Text(
-                            text = "${run.completedTasks} / ${run.totalTasks}",
-                            style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    },
-                )
-                item(
-                    headlineContent = { Text("更新时间") },
-                    trailingContent = {
-                        Text(
-                            text = formatDateTime(run.updated),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    },
-                )
-                if (run.scheduledAt.isNotBlank()) {
-                    item(
-                        headlineContent = { Text("计划执行时间") },
-                        trailingContent = {
-                            Text(
-                                text = formatDateTime(run.scheduledAt),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        },
-                    )
-                }
-            }
-
-            // DSL 定义预览
-            if (run.planText.isNotBlank()) {
-                CardGroup(title = { Text("工作流定义 (DSL)") }) {
-                    formItem {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        ) {
-                            Text(
-                                text = run.planText.trim(),
-                                modifier = Modifier.padding(12.dp),
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 14,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 控制与操作按钮
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (run.status.isActive) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        if (run.canPause) {
-                            FilledTonalButton(
-                                onClick = { onCommand(DispatchRequestedAction.PAUSE) },
-                                enabled = !isMutating,
-                                modifier = Modifier.weight(1f),
-                                shape = CircleShape,
-                            ) {
-                                Icon(HugeIcons.Pause, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("暂停")
-                            }
-                        }
-                        if (run.canResume) {
-                            Button(
-                                onClick = { onCommand(DispatchRequestedAction.RESUME) },
-                                enabled = !isMutating,
-                                modifier = Modifier.weight(1f),
-                                shape = CircleShape,
-                            ) {
-                                Icon(HugeIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("恢复")
-                            }
-                        }
-                        if (run.canCancel) {
-                            OutlinedButton(
-                                onClick = { onCommand(DispatchRequestedAction.CANCEL) },
-                                enabled = !isMutating,
-                                modifier = Modifier.weight(1f),
-                                shape = CircleShape,
-                            ) {
-                                Icon(HugeIcons.StopCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("取消")
-                            }
-                        }
-                    }
-                }
-
-                if (run.planText.isNotBlank()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        FilledTonalButton(
-                            onClick = { onClone(DispatchStatus.DRAFT) },
-                            enabled = !isMutating,
-                            modifier = Modifier.weight(1f),
-                            shape = CircleShape,
-                        ) {
-                            Icon(HugeIcons.Copy01, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("复制为草稿")
-                        }
-                        Button(
-                            onClick = { onClone(DispatchStatus.QUEUED) },
-                            enabled = !isMutating,
-                            modifier = Modifier.weight(1f),
-                            shape = CircleShape,
-                        ) {
-                            Icon(HugeIcons.Refresh03, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("完整重跑")
-                        }
-                    }
-                }
-
-                if (run.canDelete) {
-                    TextButton(
-                        onClick = onDelete,
-                        enabled = !isMutating,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error,
-                        ),
-                    ) {
-                        Icon(HugeIcons.Delete01, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("删除此 Run")
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CreateRunBottomSheet(
-    isMutating: Boolean,
-    onDismiss: () -> Unit,
-    onCreate: (title: String, planText: String, status: DispatchStatus) -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var title by rememberSaveable { mutableStateOf("") }
-    var planText by rememberSaveable { mutableStateOf(createStarterPlan()) }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text(
-                text = "新建工作流",
-                style = MaterialTheme.typography.headlineSmall,
-            )
-
-            OutlinedTextField(
-                value = title,
-                onValueChange = { next ->
-                    title = next
-                    planText = planText.replaceFirst(
-                        Regex("^@run=.*$", RegexOption.MULTILINE),
-                        "@run=${next.trim()}",
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("工作流名称") },
-                placeholder = { Text("例如：每日资讯摘要") },
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp),
-            )
-
-            OutlinedTextField(
-                value = planText,
-                onValueChange = { planText = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp),
-                label = { Text("工作流定义 (DSL)") },
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                shape = RoundedCornerShape(16.dp),
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                FilledTonalButton(
-                    onClick = { onCreate(title, planText, DispatchStatus.DRAFT) },
-                    enabled = !isMutating && planText.isNotBlank(),
-                    modifier = Modifier.weight(1f),
-                    shape = CircleShape,
-                ) {
-                    Text("保存草稿")
-                }
-                Button(
-                    onClick = { onCreate(title, planText, DispatchStatus.QUEUED) },
-                    enabled = !isMutating && planText.isNotBlank(),
-                    modifier = Modifier.weight(1f),
-                    shape = CircleShape,
-                ) {
-                    Icon(HugeIcons.Play, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("立即运行")
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun AccountBottomSheet(
     session: WorkflowSession,
     onDismiss: () -> Unit,
@@ -1387,13 +1131,13 @@ private fun AccountBottomSheet(
     }
 }
 
-private data class ToneColors(
+internal data class ToneColors(
     val container: Color,
     val content: Color,
 )
 
 @Composable
-private fun statusToneColors(tone: StatusTone): ToneColors {
+internal fun statusToneColors(tone: StatusTone): ToneColors {
     val scheme = MaterialTheme.colorScheme
     return when (tone) {
         StatusTone.NEUTRAL -> ToneColors(
@@ -1430,7 +1174,7 @@ private fun parseInstantSafe(raw: String): Instant? {
     return runCatching { Instant.parse(normalized) }.getOrNull()
 }
 
-private fun formatRelativeTime(raw: String): String {
+internal fun formatRelativeTime(raw: String): String {
     val instant = parseInstantSafe(raw) ?: return raw.ifEmpty { "—" }
     val seconds = Duration.between(instant, Instant.now()).seconds
     return when {
@@ -1442,7 +1186,7 @@ private fun formatRelativeTime(raw: String): String {
     }
 }
 
-private fun formatDateTime(raw: String): String {
+internal fun formatDateTime(raw: String): String {
     val instant = parseInstantSafe(raw) ?: return raw.ifEmpty { "—" }
     val formatter = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault())
     return formatter.format(instant)

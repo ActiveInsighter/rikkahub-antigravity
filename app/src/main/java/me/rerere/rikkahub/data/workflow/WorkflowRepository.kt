@@ -3,6 +3,9 @@ package me.rerere.rikkahub.data.workflow
 import android.content.Context
 import androidx.core.content.edit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +21,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
@@ -34,6 +38,11 @@ private const val KEY_BASE_URL = "base_url_v1"
 const val DEFAULT_POCKETBASE_URL = "https://pb.any1.tech"
 private const val AUTH_COLLECTION = "aw_clients"
 private const val RUN_COLLECTION = "aw_dispatch_runs"
+private const val TASK_COLLECTION = "aw_dispatch_tasks"
+private const val EVENT_COLLECTION = "aw_dispatch_events"
+private const val HISTORY_EVENT_COLLECTION = "aw_events"
+private const val HISTORY_ACT_COLLECTION = "aw_acts"
+private const val HISTORY_MESSAGE_COLLECTION = "aw_messages"
 private const val RUN_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 class WorkflowApiException(
@@ -162,24 +171,49 @@ class WorkflowRepository(
                 token = activeSession.token,
             ).jsonObject
 
-            val itemsArray = root["items"] as? JsonArray
-                ?: throw WorkflowApiException("接口返回的数据格式无效", 502)
-
-            val runs = itemsArray.map { element ->
-                val run = parseRun(element.jsonObject)
-                if (run.owner != activeSession.userId) {
-                    throw WorkflowApiException("接口返回的数据归属无效", 502)
+            parseListPage(root, page, perPage) { obj ->
+                parseRun(obj).also { run ->
+                    if (run.owner != activeSession.userId) {
+                        throw WorkflowApiException("接口返回的数据归属无效", 502)
+                    }
                 }
-                run
             }
+        }
+    }
 
-            WorkflowRunPage(
-                page = root["page"]?.jsonPrimitive?.intOrNull ?: page,
-                perPage = root["perPage"]?.jsonPrimitive?.intOrNull ?: perPage,
-                totalItems = root["totalItems"]?.jsonPrimitive?.intOrNull ?: runs.size,
-                totalPages = (root["totalPages"]?.jsonPrimitive?.intOrNull ?: 1).coerceAtLeast(1),
-                items = runs,
-            )
+    suspend fun getRun(id: String): Result<WorkflowRun> = withContext(Dispatchers.IO) {
+        runCatching {
+            val activeSession = requireSession()
+            val root = executeJson(
+                baseUrl = activeSession.baseUrl,
+                path = "/api/collections/$RUN_COLLECTION/records/$id",
+                method = "GET",
+                token = activeSession.token,
+            ).jsonObject
+            parseRun(root).also { run ->
+                if (run.owner != activeSession.userId) {
+                    throw WorkflowApiException("当前 Run 不属于登录账号", 403)
+                }
+            }
+        }
+    }
+
+    suspend fun listRunVersions(familyId: String): Result<List<WorkflowRun>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val activeSession = requireSession()
+            val root = executeJson(
+                baseUrl = activeSession.baseUrl,
+                path = "/api/collections/$RUN_COLLECTION/records",
+                method = "GET",
+                query = mapOf(
+                    "page" to "1",
+                    "perPage" to "100",
+                    "sort" to "+versionNumber",
+                    "filter" to "owner=\"${quoteFilter(activeSession.userId)}\" && familyId=\"${quoteFilter(familyId)}\"",
+                ),
+                token = activeSession.token,
+            ).jsonObject
+            parseListPage(root, 1, 100) { parseRun(it) }.items
         }
     }
 
@@ -187,6 +221,8 @@ class WorkflowRepository(
         titleInput: String,
         planText: String,
         status: DispatchStatus,
+        parentRun: String = "",
+        origin: DispatchRunOrigin? = null,
     ): Result<WorkflowRun> = withContext(Dispatchers.IO) {
         runCatching {
             val activeSession = requireSession()
@@ -211,6 +247,10 @@ class WorkflowRepository(
                 put("status", status.wireValue)
                 put("requestedAction", DispatchRequestedAction.NONE.wireValue)
                 put("commandVersion", 0)
+                if (parentRun.isNotBlank() && origin != null) {
+                    put("parentRun", parentRun)
+                    put("origin", origin.wireValue)
+                }
             }
 
             val root = executeJson(
@@ -222,6 +262,68 @@ class WorkflowRepository(
             ).jsonObject
 
             parseRun(root)
+        }
+    }
+
+    suspend fun updateRunDraft(
+        id: String,
+        titleInput: String,
+        planText: String,
+        publish: Boolean = false,
+    ): Result<WorkflowRun> = withContext(Dispatchers.IO) {
+        runCatching {
+            val activeSession = requireSession()
+            val current = getRun(id).getOrThrow()
+            if (current.owner != activeSession.userId) {
+                throw WorkflowApiException("当前 Run 不属于登录账号", 403)
+            }
+            if (current.status != DispatchStatus.DRAFT) {
+                throw WorkflowApiException("只有草稿 Run 可以修改定义", 409)
+            }
+            val checkedPlan = planText.trim()
+            if (checkedPlan.isEmpty()) {
+                throw WorkflowApiException("工作流定义不能为空", 400)
+            }
+            val meta = parsePlanMeta(checkedPlan, fallbackTitle = titleInput)
+            val body = buildJsonObject {
+                put("title", meta.title)
+                put("planText", planText)
+                put("planChecksum", "")
+                put("executionMode", meta.mode.wireValue)
+                put("maxConcurrency", meta.maxConcurrency)
+                if (publish) {
+                    put("status", DispatchStatus.QUEUED.wireValue)
+                }
+            }
+            val root = executeJson(
+                baseUrl = activeSession.baseUrl,
+                path = "/api/collections/$RUN_COLLECTION/records/$id",
+                method = "PATCH",
+                body = body,
+                token = activeSession.token,
+            ).jsonObject
+            parseRun(root)
+        }
+    }
+
+    suspend fun createEditedRun(
+        sourceId: String,
+        titleInput: String,
+        planText: String,
+        status: DispatchStatus,
+    ): Result<WorkflowRun> = withContext(Dispatchers.IO) {
+        runCatching {
+            val source = getRun(sourceId).getOrThrow()
+            if (!source.status.isTerminal) {
+                throw WorkflowApiException("只能基于已结束的 Run 创建编辑版本", 409)
+            }
+            createRun(
+                titleInput = titleInput,
+                planText = planText,
+                status = status,
+                parentRun = source.id,
+                origin = DispatchRunOrigin.EDITED_RERUN,
+            ).getOrThrow()
         }
     }
 
@@ -317,6 +419,177 @@ class WorkflowRepository(
             )
             Unit
         }
+    }
+
+    suspend fun listTasksForRun(
+        runId: String,
+        page: Int = 1,
+        perPage: Int = 100,
+    ): Result<WorkflowListPage<WorkflowTask>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val activeSession = requireSession()
+            val root = executeJson(
+                baseUrl = activeSession.baseUrl,
+                path = "/api/collections/$TASK_COLLECTION/records",
+                method = "GET",
+                query = mapOf(
+                    "page" to page.toString(),
+                    "perPage" to perPage.toString(),
+                    "sort" to "+runIndex",
+                    "filter" to "owner=\"${quoteFilter(activeSession.userId)}\" && run=\"${quoteFilter(runId)}\"",
+                ),
+                token = activeSession.token,
+            ).jsonObject
+            parseListPage(root, page, perPage) { parseTask(it) }
+        }
+    }
+
+    suspend fun listEventsForTask(
+        taskId: String,
+        page: Int = 1,
+        perPage: Int = 100,
+    ): Result<WorkflowListPage<WorkflowEvent>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val activeSession = requireSession()
+            val root = executeJson(
+                baseUrl = activeSession.baseUrl,
+                path = "/api/collections/$EVENT_COLLECTION/records",
+                method = "GET",
+                query = mapOf(
+                    "page" to page.toString(),
+                    "perPage" to perPage.toString(),
+                    "sort" to "+eventIndex",
+                    "filter" to "owner=\"${quoteFilter(activeSession.userId)}\" && task=\"${quoteFilter(taskId)}\"",
+                ),
+                token = activeSession.token,
+            ).jsonObject
+            parseListPage(root, page, perPage) { parseEvent(it) }
+        }
+    }
+
+    suspend fun listHistoryActsForDispatchEvent(
+        event: WorkflowEvent,
+    ): Result<List<WorkflowHistoryAct>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val activeSession = requireSession()
+            if (event.localRunId.isBlank()) return@runCatching emptyList()
+
+            var candidates = listAllHistoryEventsForLocalRun(
+                session = activeSession,
+                localRunId = event.localRunId,
+                eventIndex = event.eventIndex,
+            )
+            if (candidates.isEmpty()) {
+                candidates = listAllHistoryEventsForLocalRun(
+                    session = activeSession,
+                    localRunId = event.localRunId,
+                    eventIndex = null,
+                )
+            }
+            val exactMatches = candidates.filter { it.eventIndex == event.eventIndex }
+            val matchedHistoryEvents = when {
+                exactMatches.isNotEmpty() -> exactMatches
+                candidates.size == 1 -> listOf(candidates.first())
+                else -> emptyList()
+            }
+            if (matchedHistoryEvents.isEmpty()) return@runCatching emptyList()
+
+            val acts = coroutineScope {
+                matchedHistoryEvents.map { historyEvent ->
+                    async {
+                        listAllHistoryActsForEvent(activeSession, historyEvent.id)
+                    }
+                }.awaitAll().flatten()
+            }
+            acts.sortedWith(compareBy<WorkflowHistoryAct> { it.actIndex }.thenBy { it.id })
+        }
+    }
+
+    suspend fun listHistoryMessageSummariesForAct(
+        actId: String,
+        page: Int = 1,
+        perPage: Int = 50,
+    ): Result<WorkflowListPage<WorkflowHistoryMessageSummary>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val activeSession = requireSession()
+            val root = executeJson(
+                baseUrl = activeSession.baseUrl,
+                path = "/api/collections/$HISTORY_MESSAGE_COLLECTION/records",
+                method = "GET",
+                query = mapOf(
+                    "page" to page.toString(),
+                    "perPage" to perPage.toString(),
+                    "sort" to "+nodeIndex,+id",
+                    "filter" to "owner=\"${quoteFilter(activeSession.userId)}\" && act=\"${quoteFilter(actId)}\"",
+                    "fields" to "id,owner,act,nodeIndex,attempt,status,sentAt,receivedAt,created,updated",
+                ),
+                token = activeSession.token,
+            ).jsonObject
+            parseListPage(root, page, perPage) { parseMessageSummary(it) }
+        }
+    }
+
+    suspend fun getHistoryMessage(
+        messageId: String,
+        actId: String,
+    ): Result<WorkflowHistoryMessage> = withContext(Dispatchers.IO) {
+        runCatching {
+            val activeSession = requireSession()
+            val root = executeJson(
+                baseUrl = activeSession.baseUrl,
+                path = "/api/collections/$HISTORY_MESSAGE_COLLECTION/records/$messageId",
+                method = "GET",
+                token = activeSession.token,
+            ).jsonObject
+            val msg = parseMessage(root)
+            if (msg.owner != activeSession.userId) {
+                throw WorkflowApiException("消息不属于当前账号", 403)
+            }
+            if (msg.act != actId) {
+                throw WorkflowApiException("消息不属于当前 Act", 502)
+            }
+            msg
+        }
+    }
+
+    private fun listAllHistoryEventsForLocalRun(
+        session: WorkflowSession,
+        localRunId: String,
+        eventIndex: Int?,
+    ): List<WorkflowHistoryEvent> {
+        val indexFilter = if (eventIndex != null) " && eventIndex = $eventIndex" else ""
+        val root = executeJson(
+            baseUrl = session.baseUrl,
+            path = "/api/collections/$HISTORY_EVENT_COLLECTION/records",
+            method = "GET",
+            query = mapOf(
+                "page" to "1",
+                "perPage" to "100",
+                "sort" to "+eventIndex",
+                "filter" to "owner=\"${quoteFilter(session.userId)}\" && task.taskId=\"${quoteFilter(localRunId)}\"$indexFilter",
+            ),
+            token = session.token,
+        ).jsonObject
+        return parseListPage(root, 1, 100) { parseHistoryEvent(it) }.items
+    }
+
+    private fun listAllHistoryActsForEvent(
+        session: WorkflowSession,
+        historyEventId: String,
+    ): List<WorkflowHistoryAct> {
+        val root = executeJson(
+            baseUrl = session.baseUrl,
+            path = "/api/collections/$HISTORY_ACT_COLLECTION/records",
+            method = "GET",
+            query = mapOf(
+                "page" to "1",
+                "perPage" to "100",
+                "sort" to "+actIndex",
+                "filter" to "owner=\"${quoteFilter(session.userId)}\" && event=\"${quoteFilter(historyEventId)}\"",
+            ),
+            token = session.token,
+        ).jsonObject
+        return parseListPage(root, 1, 100) { parseHistoryAct(it) }.items
     }
 
     private fun requireSession(): WorkflowSession =
@@ -469,6 +742,24 @@ class WorkflowRepository(
         return ParsedPlanMeta(title = title, mode = mode, maxConcurrency = maxConcurrency)
     }
 
+    private inline fun <T> parseListPage(
+        root: JsonObject,
+        page: Int,
+        perPage: Int,
+        mapper: (JsonObject) -> T,
+    ): WorkflowListPage<T> {
+        val itemsArray = root["items"] as? JsonArray
+            ?: throw WorkflowApiException("接口返回的数据格式无效", 502)
+        val items = itemsArray.map { mapper(it.jsonObject) }
+        return WorkflowListPage(
+            page = root["page"]?.jsonPrimitive?.intOrNull ?: page,
+            perPage = root["perPage"]?.jsonPrimitive?.intOrNull ?: perPage,
+            totalItems = root["totalItems"]?.jsonPrimitive?.intOrNull ?: items.size,
+            totalPages = (root["totalPages"]?.jsonPrimitive?.intOrNull ?: 1).coerceAtLeast(1),
+            items = items,
+        )
+    }
+
     private fun parseRun(obj: JsonObject): WorkflowRun {
         val id = obj.str("id")
         return WorkflowRun(
@@ -498,9 +789,122 @@ class WorkflowRepository(
         )
     }
 
+    private fun parseTask(obj: JsonObject): WorkflowTask = WorkflowTask(
+        id = obj.str("id"),
+        owner = obj.str("owner"),
+        run = obj.str("run"),
+        runIndex = obj.int("runIndex"),
+        executorKind = DispatchExecutorKind.fromWire(obj.str("executorKind")),
+        title = obj.str("title"),
+        executionMode = DispatchExecutionMode.fromWire(obj.str("executionMode")),
+        maxConcurrency = obj.int("maxConcurrency").takeIf { it > 0 } ?: 1,
+        orchestrationState = obj.str("orchestrationState"),
+        compileError = obj.str("compileError"),
+        status = DispatchStatus.fromWire(obj.str("status")),
+        requestedAction = DispatchRequestedAction.fromWire(obj.str("requestedAction")),
+        totalEvents = obj.int("totalEvents"),
+        completedEvents = obj.int("completedEvents"),
+        lastError = obj.str("lastError"),
+        startedAt = obj.str("startedAt"),
+        endedAt = obj.str("endedAt"),
+        created = obj.str("created"),
+        updated = obj.str("updated"),
+    )
+
+    private fun parseEvent(obj: JsonObject): WorkflowEvent {
+        val progressObj = obj["progress"] as? JsonObject
+        val progressLabel = buildString {
+            val phase = progressObj?.get("phase")?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+            val completed = progressObj?.get("completedNodes")?.jsonPrimitive?.intOrNull
+            val total = progressObj?.get("totalNodes")?.jsonPrimitive?.intOrNull
+            if (completed != null && total != null && total > 0) {
+                append("$completed/$total 节点")
+            } else if (phase.isNotEmpty()) {
+                append(phase)
+            }
+        }
+        return WorkflowEvent(
+            id = obj.str("id"),
+            owner = obj.str("owner"),
+            task = obj.str("task"),
+            eventIndex = obj.int("eventIndex"),
+            queueTextOverride = obj.str("queueTextOverride"),
+            status = DispatchEventStatus.fromWire(obj.str("status")),
+            attempt = obj.int("attempt"),
+            workerId = obj.str("workerId"),
+            localRunId = obj.str("localRunId"),
+            localAttempt = obj.int("localAttempt"),
+            lastError = obj.str("lastError"),
+            terminalResult = obj.str("terminalResult"),
+            progressLabel = progressLabel,
+            created = obj.str("created"),
+            updated = obj.str("updated"),
+        )
+    }
+
+    private fun parseHistoryEvent(obj: JsonObject): WorkflowHistoryEvent = WorkflowHistoryEvent(
+        id = obj.str("id"),
+        owner = obj.str("owner"),
+        task = obj.str("task"),
+        eventIndex = obj.int("eventIndex"),
+        attempt = obj.int("attempt"),
+        status = WorkflowHistoryStatus.fromWire(obj.str("status")),
+        title = obj.str("title"),
+        actCount = obj.int("actCount"),
+        messageCount = obj.int("messageCount"),
+    )
+
+    private fun parseHistoryAct(obj: JsonObject): WorkflowHistoryAct = WorkflowHistoryAct(
+        id = obj.str("id"),
+        owner = obj.str("owner"),
+        event = obj.str("event"),
+        actIndex = obj.int("actIndex"),
+        attempt = obj.int("attempt"),
+        status = WorkflowHistoryStatus.fromWire(obj.str("status")),
+        title = obj.str("title"),
+        startedAt = obj.str("startedAt"),
+        endedAt = obj.str("endedAt"),
+        durationMs = obj.long("durationMs"),
+        messageCount = obj.int("messageCount"),
+        created = obj.str("created"),
+        updated = obj.str("updated"),
+    )
+
+    private fun parseMessageSummary(obj: JsonObject): WorkflowHistoryMessageSummary = WorkflowHistoryMessageSummary(
+        id = obj.str("id"),
+        owner = obj.str("owner"),
+        act = obj.str("act"),
+        nodeIndex = obj.int("nodeIndex"),
+        attempt = obj.int("attempt"),
+        status = WorkflowHistoryStatus.fromWire(obj.str("status")),
+        sentAt = obj.str("sentAt"),
+        receivedAt = obj.str("receivedAt"),
+        created = obj.str("created"),
+        updated = obj.str("updated"),
+    )
+
+    private fun parseMessage(obj: JsonObject): WorkflowHistoryMessage = WorkflowHistoryMessage(
+        id = obj.str("id"),
+        owner = obj.str("owner"),
+        act = obj.str("act"),
+        nodeIndex = obj.int("nodeIndex"),
+        attempt = obj.int("attempt"),
+        status = WorkflowHistoryStatus.fromWire(obj.str("status")),
+        userMarkdown = obj.str("userMarkdown"),
+        assistantMarkdown = obj.str("assistantMarkdown"),
+        conversationUrl = obj.str("conversationUrl"),
+        sentAt = obj.str("sentAt"),
+        receivedAt = obj.str("receivedAt"),
+        created = obj.str("created"),
+        updated = obj.str("updated"),
+    )
+
     private fun JsonObject.str(key: String): String =
         (this[key] as? JsonPrimitive)?.contentOrNull ?: ""
 
     private fun JsonObject.int(key: String): Int =
         (this[key] as? JsonPrimitive)?.intOrNull ?: 0
+
+    private fun JsonObject.long(key: String): Long =
+        (this[key] as? JsonPrimitive)?.longOrNull ?: 0L
 }
