@@ -17,6 +17,7 @@ import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.stream.SseEvent
 import me.rerere.ai.ui.GoogleInteractionsMetadata
@@ -44,6 +45,24 @@ import kotlin.time.Clock
 
 class InteractionsApiTest {
     private val api = InteractionsAPI(OkHttpClient())
+
+    @Test
+    fun `interactions url follows gemini base url or vertex location`() {
+        assertEquals(
+            "https://generativelanguage.googleapis.com/v1beta/interactions",
+            ProviderSetting.Google().interactionsUrl(),
+        )
+
+        val vertex = ProviderSetting.Google(vertexAI = true, useServiceAccount = true, projectId = "my-project")
+        assertEquals(
+            "https://aiplatform.googleapis.com/v1/projects/my-project/locations/global/interactions",
+            vertex.copy(location = "global").interactionsUrl(),
+        )
+        assertEquals(
+            "https://aiplatform.eu.rep.googleapis.com/v1/projects/my-project/locations/eu/interactions",
+            vertex.copy(location = "eu").interactionsUrl(),
+        )
+    }
 
     @Test
     fun `request body uses stateless interactions schema`() {
