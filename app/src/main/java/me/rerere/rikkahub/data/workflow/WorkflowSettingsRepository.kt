@@ -145,12 +145,19 @@ class WorkflowSettingsRepository(
     suspend fun listSavedModels(): Result<List<SavedAiModel>> = withContext(Dispatchers.IO) {
         runCatching {
             val session = workflowRepository.requireSession()
-            val arr = workflowRepository.executeJson(
+            val root = workflowRepository.executeJson(
                 baseUrl = session.baseUrl,
                 path = "/api/anyworkflow/models/saved",
                 method = "GET",
                 token = session.token,
-            ).jsonArray
+            )
+            val arr = when (root) {
+                is JsonArray -> root
+                is JsonObject -> (root["items"] as? JsonArray)
+                    ?: (root["models"] as? JsonArray)
+                    ?: JsonArray(emptyList())
+                else -> JsonArray(emptyList())
+            }
             arr.mapNotNull { el ->
                 val obj = el as? JsonObject ?: return@mapNotNull null
                 val id = obj["id"]?.jsonPrimitive?.contentOrNull.orEmpty()

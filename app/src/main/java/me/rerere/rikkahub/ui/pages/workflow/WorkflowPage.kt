@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.workflow
 
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -164,7 +165,7 @@ fun WorkflowPage(
                             selected = activeTab == tab,
                             onClick = { activeTab = tab },
                             icon = { Icon(icon, contentDescription = tab.label) },
-                            label = { Text(tab.label, maxLines = 1) },
+                            label = { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         )
                     }
                 }
@@ -223,8 +224,9 @@ fun WorkflowPage(
         } else {
             val contentModifier = Modifier
                 .fillMaxSize()
-                .padding(top = innerPadding.calculateTopPadding())
-            val bottomPad = innerPadding.calculateBottomPadding()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding)
+            val bottomPad = 0.dp
 
             when (activeTab) {
                 WorkflowNavTab.RUNS -> WorkflowRunsTab(

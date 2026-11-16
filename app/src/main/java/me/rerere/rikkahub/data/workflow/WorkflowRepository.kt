@@ -766,7 +766,7 @@ class WorkflowRepository(
             }
 
             if (!res.isSuccessful) {
-                if ((res.code == 401 || res.code == 403) && token != null) {
+                if (res.code == 401 && token != null && baseUrl == _session.value?.baseUrl) {
                     logout()
                 }
                 val fallback = "请求失败（${res.code}）"
