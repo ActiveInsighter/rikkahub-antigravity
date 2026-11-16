@@ -49,6 +49,17 @@ android {
     }
 
     signingConfigs {
+        getByName("debug") {
+            // Use the exact restored key, regardless of Android's default user directory.
+            val debugKeystore = System.getenv("RIKKA_DEBUG_KEYSTORE")
+            if (!debugKeystore.isNullOrBlank()) {
+                storeFile = rootProject.file(debugKeystore)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+                storeType = "JKS"
+            }
+        }
         create("release") {
             val localProperties = Properties()
             val localPropertiesFile = rootProject.file("local.properties")
