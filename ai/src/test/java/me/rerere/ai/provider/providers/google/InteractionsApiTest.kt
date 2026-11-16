@@ -1,6 +1,7 @@
 package me.rerere.ai.provider.providers.google
 
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
@@ -12,6 +13,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.core.Tool
 import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.CustomBody
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
@@ -93,6 +95,84 @@ class InteractionsApiTest {
 
         // Gemini API 的 Interactions 不接受 safety_settings
         assertFalse(body.containsKey("safety_settings"))
+    }
+
+    @Test
+    fun `antigravity uses agent schema and keeps managed default tools`() {
+        for (modelId in listOf("antigravity-preview-05-2026", "antigravity-preview-09-2026", "antigravity-preview-latest")) {
+            for (stream in listOf(false, true)) {
+                val body = api.buildRequestBody(
+                    messages = listOf(UIMessage.user("Hello")),
+                    params = TextGenerationParams(
+                        model = Model(
+                            modelId = modelId,
+                            abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING),
+                            outputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                            tools = setOf(BuiltInTools.Search, BuiltInTools.UrlContext),
+                        ),
+                        temperature = 0.5f,
+                        topP = 0.8f,
+                        maxTokens = 1024,
+                        tools = listOf(testTool()),
+                        reasoningLevel = ReasoningLevel.HIGH,
+                    ),
+                    stream = stream,
+                )
+
+                assertEquals(modelId, body["agent"]!!.jsonPrimitive.content)
+                assertEquals("remote", body["environment"]!!.jsonPrimitive.content)
+                assertEquals(stream, body["stream"]!!.jsonPrimitive.boolean)
+                assertFalse(body["store"]!!.jsonPrimitive.boolean)
+                for (key in listOf("model", "generation_config", "response_format", "tools")) {
+                    assertFalse("Agent request must omit $key", body.containsKey(key))
+                }
+                assertEquals("user_input", body["input"]!!.jsonArray[0].jsonObject["type"]!!.jsonPrimitive.content)
+            }
+        }
+    }
+
+    @Test
+    fun `antigravity removes stale custom model and accepts agent configuration`() {
+        val agentConfig = buildJsonObject {
+            put("type", "antigravity")
+            put("max_total_tokens", "32768")
+        }
+        val body = api.buildRequestBody(
+            messages = listOf(UIMessage.user("Hello")),
+            params = TextGenerationParams(
+                model = Model(modelId = "antigravity-preview-09-2026"),
+                customBody = listOf(
+                    CustomBody("model", JsonPrimitive("gemini-3.8-flash")),
+                    CustomBody("agent_config", agentConfig),
+                ),
+            ),
+            stream = true,
+        )
+
+        assertFalse(body.containsKey("model"))
+        assertEquals("antigravity-preview-09-2026", body["agent"]!!.jsonPrimitive.content)
+        assertEquals(agentConfig, body["agent_config"])
+    }
+
+    @Test
+    fun `antigravity stream handles remote tools and final text`() {
+        val (chunks, message) = decode(
+            """{"interaction":{"id":"agent_1","agent":"antigravity-preview-09-2026","status":"in_progress"},"event_type":"interaction.created"}""",
+            """{"index":0,"step":{"type":"code_execution_call","id":"exec_1","arguments":{"code":"print(42)"}},"event_type":"step.start"}""",
+            """{"index":0,"event_type":"step.stop"}""",
+            """{"index":1,"step":{"type":"code_execution_result","call_id":"exec_1","result":{"output":"42"}},"event_type":"step.start"}""",
+            """{"index":1,"event_type":"step.stop"}""",
+            """{"index":2,"step":{"type":"model_output"},"event_type":"step.start"}""",
+            """{"index":2,"delta":{"type":"text","text":"The answer is 42."},"event_type":"step.delta"}""",
+            """{"index":2,"event_type":"step.stop"}""",
+            """{"interaction":{"id":"agent_1","status":"completed","agent":"antigravity-preview-09-2026"},"event_type":"interaction.completed"}""",
+        )
+
+        val tool = message.parts[0] as UIMessagePart.ServerTool
+        assertEquals("code_execution", tool.toolName)
+        assertEquals(ServerToolStatus.COMPLETED, tool.status)
+        assertEquals("The answer is 42.", (message.parts[1] as UIMessagePart.Text).text)
+        assertEquals("completed", (chunks.last() as StreamChunk.Finish).finishReason)
     }
 
     @Test

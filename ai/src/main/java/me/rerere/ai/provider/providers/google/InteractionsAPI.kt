@@ -189,7 +189,13 @@ internal class InteractionsAPI(
         params: TextGenerationParams,
         stream: Boolean,
     ): JsonObject = buildJsonObject {
-        put("model", params.model.modelId)
+        val isAntigravity = params.model.modelId.startsWith("antigravity-preview-")
+        if (isAntigravity) {
+            put("agent", params.model.modelId)
+            put("environment", "remote")
+        } else {
+            put("model", params.model.modelId)
+        }
         put("stream", stream)
         put("store", false)
 
@@ -214,9 +220,9 @@ internal class InteractionsAPI(
                 thinkingLevel(params)?.let { put("thinking_level", it) }
             }
         }
-        if (generationConfig.isNotEmpty()) put("generation_config", generationConfig)
+        if (!isAntigravity && generationConfig.isNotEmpty()) put("generation_config", generationConfig)
 
-        if (outputsImage) {
+        if (!isAntigravity && outputsImage) {
             putJsonArray("response_format") {
                 add(buildJsonObject { put("type", "text") })
                 add(buildJsonObject { put("type", "image") })
@@ -233,7 +239,9 @@ internal class InteractionsAPI(
                 else -> null
             }
         }
-        if (useFunctionTools || builtInTools.isNotEmpty()) {
+        // Omit tools to retain the managed agent's defaults. Client function tools require
+        // stateful continuation, which this stateless client does not implement.
+        if (!isAntigravity && (useFunctionTools || builtInTools.isNotEmpty())) {
             putJsonArray("tools") {
                 if (useFunctionTools) {
                     params.tools.forEach { tool ->
@@ -252,7 +260,10 @@ internal class InteractionsAPI(
         }
 
         // safety_settings 只在 Vertex 上可用，Gemini API 的 Interactions 会直接拒绝该参数
-    }.mergeCustomBody(params.customBody)
+    }.mergeCustomBody(params.customBody).let { body ->
+        // Even a stale custom model field must not conflict with an Antigravity agent.
+        if (params.model.modelId.startsWith("antigravity-preview-")) JsonObject(body - "model") else body
+    }
 
     // Interactions API 只接受 thinking_level，没有 thinkingBudget
     private fun thinkingLevel(params: TextGenerationParams): String? = when (params.reasoningLevel) {

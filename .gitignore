@@ -11,3 +11,8 @@ local.properties
 .cursor
 .history
 .kotlin
+# Local build tooling and persistent APK signing key
+.build-tools/
+.local-signing/
+artifacts/
+app/google-services.json
