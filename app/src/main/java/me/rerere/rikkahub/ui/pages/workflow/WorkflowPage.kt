@@ -253,7 +253,12 @@ fun WorkflowPage(vm: WorkflowVM = koinViewModel()) {
         WorkflowDslEditorDialog(
             target = target,
             isMutating = state.isMutating,
-            onDismiss = { editorTarget = null },
+            errorMessage = state.errorMessage,
+            onClearError = vm::clearError,
+            onDismiss = {
+                vm.clearError()
+                editorTarget = null
+            },
             onSubmit = { title, planText, status ->
                 when (target) {
                     RunEditorTarget.Create -> vm.createRun(title, planText, status) {

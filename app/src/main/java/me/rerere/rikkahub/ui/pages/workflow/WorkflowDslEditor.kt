@@ -103,6 +103,8 @@ import me.rerere.rikkahub.ui.theme.CustomColors
 fun WorkflowDslEditorDialog(
     target: RunEditorTarget,
     isMutating: Boolean,
+    errorMessage: String? = null,
+    onClearError: () -> Unit = {},
     onDismiss: () -> Unit,
     onSubmit: (title: String, planText: String, targetStatus: DispatchStatus) -> Unit,
 ) {
@@ -192,7 +194,11 @@ fun WorkflowDslEditorDialog(
         } else {
             "@run=${nextTitle.trim()}\n$currentText"
         }
-        applyEdit(editorValue.copy(text = updated))
+        val clampedSelection = TextRange(
+            editorValue.selection.start.coerceIn(0, updated.length),
+            editorValue.selection.end.coerceIn(0, updated.length),
+        )
+        applyEdit(editorValue.copy(text = updated, selection = clampedSelection))
     }
 
     fun syncModeDirective(mode: DispatchExecutionMode) {
@@ -203,7 +209,11 @@ fun WorkflowDslEditorDialog(
         } else {
             "@mode=${mode.wireValue}\n$currentText"
         }
-        applyEdit(editorValue.copy(text = updated))
+        val clampedSelection = TextRange(
+            editorValue.selection.start.coerceIn(0, updated.length),
+            editorValue.selection.end.coerceIn(0, updated.length),
+        )
+        applyEdit(editorValue.copy(text = updated, selection = clampedSelection))
     }
 
     Dialog(
@@ -393,6 +403,46 @@ fun WorkflowDslEditorDialog(
                         onDuplicate = { applyInsert(duplicateCurrentLine(editorValue)) },
                         onOpenOutline = { showOutlineSheet = true },
                     )
+
+                    AnimatedVisibility(visible = !errorMessage.isNullOrBlank()) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = HugeIcons.Alert01,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Text(
+                                    text = errorMessage.orEmpty(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                IconButton(
+                                    onClick = onClearError,
+                                    modifier = Modifier.size(24.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = HugeIcons.Cancel01,
+                                        contentDescription = "关闭错误提示",
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
 
                     AnimatedVisibility(visible = feedbackMessage != null) {
                         Surface(
