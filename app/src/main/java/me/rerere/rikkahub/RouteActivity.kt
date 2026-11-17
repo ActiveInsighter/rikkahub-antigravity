@@ -137,6 +137,9 @@ import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
 import me.rerere.rikkahub.ui.pages.stats.StatsPage
 import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
+import me.rerere.rikkahub.ui.pages.agent.AgentPage
+import me.rerere.rikkahub.ui.pages.agent.AgentSettingPage
+import me.rerere.rikkahub.ui.pages.home.HomePage
 import me.rerere.rikkahub.ui.pages.workflow.WorkflowPage
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import me.rerere.rikkahub.utils.CrashHandler
@@ -292,18 +295,7 @@ class RouteActivity : ComponentActivity() {
         }
         val migrationState by DatabaseMigrationTracker.state.collectAsStateWithLifecycle()
 
-        val startScreen = Screen.Chat(
-            id = if (readBooleanPreference("create_new_conversation_on_start", true)) {
-                Uuid.random().toString()
-            } else {
-                readStringPreference(
-                    "lastConversationId",
-                    Uuid.random().toString()
-                ) ?: Uuid.random().toString()
-            }
-        )
-
-        val backStack = rememberNavBackStack(startScreen)
+        val backStack = rememberNavBackStack(Screen.Home)
         SideEffect {
             navStack = backStack
             while (pendingIntents.isNotEmpty()) {
@@ -596,6 +588,24 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.Stats> {
                                 StatsPage()
+                            }
+
+                            entry<Screen.Home>(
+                                metadata = NavDisplay.transitionSpec { fadeIn() togetherWith fadeOut() }
+                                    + NavDisplay.popTransitionSpec { fadeIn() togetherWith fadeOut() }
+                            ) {
+                                HomePage()
+                            }
+
+                            entry<Screen.Agent>(
+                                metadata = NavDisplay.transitionSpec { fadeIn() togetherWith fadeOut() }
+                                    + NavDisplay.popTransitionSpec { fadeIn() togetherWith fadeOut() }
+                            ) { key ->
+                                AgentPage(id = Uuid.parse(key.id))
+                            }
+
+                            entry<Screen.AgentSetting> {
+                                AgentSettingPage()
                             }
 
                             entry<Screen.Workflow> {

@@ -319,4 +319,20 @@ val dataSourceModule = module {
     single<RikkaHubAPI> {
         get<Retrofit>().create(RikkaHubAPI::class.java)
     }
+
+    single {
+        me.rerere.rikkahub.data.agent.AgentSettingsStore(context = get())
+    }
+
+    single {
+        me.rerere.rikkahub.data.agent.AgentDatabase.create(context = get())
+    }
+
+    single {
+        get<me.rerere.rikkahub.data.agent.AgentDatabase>().conversationDao()
+    }
+
+    single {
+        get<me.rerere.rikkahub.data.agent.AgentDatabase>().messageNodeDao()
+    }
 }
