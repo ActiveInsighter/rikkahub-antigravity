@@ -1,6 +1,9 @@
 name: Workflow Visual & API Verification
 
 on:
+  push:
+    branches:
+      - 'feat/visual-verify*'
   workflow_dispatch:
     inputs:
       write_test:
