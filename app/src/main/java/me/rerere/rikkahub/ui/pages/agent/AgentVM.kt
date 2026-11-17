@@ -259,7 +259,8 @@ class AgentVM(
                     add(
                         UIMessagePart.Reasoning(
                             reasoning = reasoningBuilder.toString(),
-                            finishedAt = if (finished) Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()) else null,
+                            // Reasoning.finishedAt 是 kotlin.time.Instant，不是 kotlinx.datetime.LocalDateTime
+                            finishedAt = if (finished) Clock.System.now() else null,
                         )
                     )
                 }
