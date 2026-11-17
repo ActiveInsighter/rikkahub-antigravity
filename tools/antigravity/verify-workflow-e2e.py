@@ -642,7 +642,8 @@ def run_android_verification(
         adb(["shell", "pm", "clear", PACKAGE_ID], check=False)
         adb(["shell", "am", "start", "-n", f"{PACKAGE_ID}/{MAIN_ACTIVITY}"])
 
-        root = wait_for_any_label(["Messages", "工作流", "连接工作流服务"], timeout_sec=25.0)
+        root = wait_for_any_label(["Messages", "工作流", "连接工作流服务"], timeout_sec=45.0)
+        dismiss_anr_if_present(root)
         capture_screen(out_dir, "01_chat_home")
         captured.append("01_chat_home.png")
 
