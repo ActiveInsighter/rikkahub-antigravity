@@ -643,20 +643,20 @@ def run_android_verification(
     try:
         adb(["logcat", "-c"], check=False)
         if apk_path:
-            for _ in range(15):
-                pm_res = adb(["shell", "pm", "path", "android"], check=False)
-                if pm_res.returncode == 0 and "package:" in pm_res.stdout:
-                    break
-                time.sleep(2)
             print(f"Installing APK: {apk_path}")
-            for attempt in range(1, 4):
+            for attempt in range(1, 5):
+                for _ in range(20):
+                    pm_res = adb(["shell", "pm", "path", "android"], check=False)
+                    if pm_res.returncode == 0 and "package:" in pm_res.stdout:
+                        break
+                    time.sleep(2)
                 res = adb(["install", "-r", "-d", "-t", apk_path], check=False)
                 if res.returncode == 0:
                     break
                 print(f"[WARN] adb install attempt {attempt} failed: {res.stdout} {res.stderr}")
-                if attempt == 3:
+                if attempt == 4:
                     raise subprocess.CalledProcessError(res.returncode, ["adb", "install", apk_path], output=res.stdout, stderr=res.stderr)
-                time.sleep(5)
+                time.sleep(10)
 
         # Clear app state for a deterministic cold-start login & screenshot run
         adb(["shell", "pm", "clear", PACKAGE_ID], check=False)
