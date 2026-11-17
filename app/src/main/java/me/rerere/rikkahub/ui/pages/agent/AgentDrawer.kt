@@ -1,7 +1,6 @@
 package me.rerere.rikkahub.ui.pages.agent
 
 import androidx.activity.ComponentActivity
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,7 +57,7 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.ui.context.LocalNavController
-import me.rerere.rikkahub.utils.toLocalString
+import me.rerere.rikkahub.utils.toLocalDateTime
 import org.koin.androidx.compose.koinViewModel
 import kotlin.uuid.Uuid
 
@@ -281,7 +280,8 @@ fun AgentDrawerContent(
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                     Text(
-                                        text = item.updateAt.toLocalString(),
+                                        // Instant 只有 toLocalDateTime/toLocalDate/toLocalTime，没有 toLocalString
+                                        text = item.updateAt.toLocalDateTime(),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
