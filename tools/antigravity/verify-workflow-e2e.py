@@ -33,7 +33,7 @@ from typing import Any
 DEFAULT_PB_URL = "https://pb.any1.tech"
 DEFAULT_REMOTE_URL = "https://anyworkflow-remote.2212148739lbw.workers.dev"
 PACKAGE_ID = "me.rerere.rikkahub.debug"
-MAIN_ACTIVITY = "me.rerere.rikkahub.ui.activity.MainActivity"
+MAIN_ACTIVITY = "me.rerere.rikkahub.RouteActivity"
 
 
 def redact(text: str, secrets: list[str]) -> str:
@@ -205,6 +205,12 @@ def adb(args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]
     return subprocess.run(["adb", *args], text=True, capture_output=True, check=check)
 
 
+def adb_input_text(value: str) -> None:
+    """Type ASCII text via adb shell input text with safe shell escaping."""
+    escaped = re.sub(r"([\\'\";|&<>()$`*?!#~ \t])", r"\\\1", value)
+    adb(["shell", "input", "text", escaped])
+
+
 def dump_ui_and_screenshot(out_dir: Path, name: str) -> ET.Element | None:
     screenshots_dir = out_dir / "screenshots"
     ui_dir = out_dir / "ui-dumps"
@@ -225,6 +231,14 @@ def dump_ui_and_screenshot(out_dir: Path, name: str) -> ET.Element | None:
     return None
 
 
+def parse_bounds(bounds: str) -> tuple[int, int, int, int] | None:
+    m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds or "")
+    if not m:
+        return None
+    x1, y1, x2, y2 = map(int, m.groups())
+    return x1, y1, x2, y2
+
+
 def find_node_center(root: ET.Element | None, text_match: str) -> tuple[int, int] | None:
     if root is None:
         return None
@@ -232,50 +246,161 @@ def find_node_center(root: ET.Element | None, text_match: str) -> tuple[int, int
         text = (node.attrib.get("text") or "").strip()
         desc = (node.attrib.get("content-desc") or "").strip()
         if text_match in (text, desc) or text_match in text or text_match in desc:
-            bounds = node.attrib.get("bounds", "")
-            m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
-            if m:
-                x1, y1, x2, y2 = map(int, m.groups())
+            b = parse_bounds(node.attrib.get("bounds", ""))
+            if b:
+                x1, y1, x2, y2 = b
                 return (x1 + x2) // 2, (y1 + y2) // 2
     return None
 
 
-def tap_label(out_dir: Path, label: str, capture_name: str, wait_sec: float = 2.0) -> bool:
-    root = dump_ui_and_screenshot(out_dir, f"{capture_name}_before")
+def find_edit_fields(root: ET.Element | None) -> list[tuple[str, tuple[int, int]]]:
+    fields: list[tuple[str, tuple[int, int]]] = []
+    if root is None:
+        return fields
+    for node in root.iter("node"):
+        cls = node.attrib.get("class", "")
+        if "EditText" in cls or node.attrib.get("password") == "true":
+            b = parse_bounds(node.attrib.get("bounds", ""))
+            if b:
+                x1, y1, x2, y2 = b
+                hint = (node.attrib.get("text") or node.attrib.get("hint") or "").strip()
+                fields.append((hint, ((x1 + x2) // 2, (y1 + y2) // 2)))
+    return fields
+
+
+def tap_label(
+    out_dir: Path,
+    label: str,
+    capture_name: str,
+    wait_sec: float = 2.0,
+    root: ET.Element | None = None,
+) -> ET.Element | None:
+    if root is None:
+        root = dump_ui_and_screenshot(out_dir, f"{capture_name}_before")
     pos = find_node_center(root, label)
     if not pos:
         print(f"[WARN] UI node '{label}' not found")
-        return False
+        return None
     adb(["shell", "input", "tap", str(pos[0]), str(pos[1])])
     time.sleep(wait_sec)
-    dump_ui_and_screenshot(out_dir, capture_name)
-    return True
+    return dump_ui_and_screenshot(out_dir, capture_name)
 
 
-def run_android_verification(apk_path: str | None, out_dir: Path) -> None:
+def run_android_verification(
+    apk_path: str | None,
+    out_dir: Path,
+    pb_url: str,
+    identity: str,
+    password: str,
+) -> dict[str, Any]:
     devices = adb(["devices"]).stdout
     if "\tdevice" not in devices:
         raise RuntimeError(f"No connected adb device/emulator found:\n{devices}")
 
     adb(["logcat", "-c"], check=False)
+    adb(["shell", "settings", "put", "secure", "show_ime_with_hard_keyboard", "0"], check=False)
     if apk_path:
         print(f"Installing APK: {apk_path}")
         adb(["install", "-r", "-d", apk_path])
 
-    adb(["shell", "am", "start", "-n", f"{PACKAGE_ID}/{MAIN_ACTIVITY}"])
+    adb(["shell", "am", "start", "-W", "-n", f"{PACKAGE_ID}/{MAIN_ACTIVITY}"])
     time.sleep(4)
-    dump_ui_and_screenshot(out_dir, "01_home")
+    home_root = dump_ui_and_screenshot(out_dir, "01_chat_home")
 
-    # Capture workflow tabs if reachable from UI
-    for idx, tab_label in enumerate(["工作流", "重复", "收藏", "资料库", "转换"], start=2):
-        tap_label(out_dir, tab_label, f"0{idx}_{tab_label}", wait_sec=2.5)
+    # Open navigation drawer via "Messages" button or left-edge swipe
+    drawer_root = tap_label(out_dir, "Messages", "02_chat_drawer", wait_sec=2.0, root=home_root)
+    if drawer_root is None or find_node_center(drawer_root, "工作流") is None:
+        adb(["shell", "input", "swipe", "20", "800", "750", "800", "250"])
+        time.sleep(2.0)
+        drawer_root = dump_ui_and_screenshot(out_dir, "02_chat_drawer")
+
+    # Navigate to Workflow page
+    workflow_root = tap_label(out_dir, "工作流", "03_workflow_entry", wait_sec=2.5, root=drawer_root)
+    logged_in = False
+
+    if workflow_root is not None and find_node_center(workflow_root, "重复") is not None:
+        logged_in = True
+    elif workflow_root is not None and find_node_center(workflow_root, "连接工作流服务") is not None:
+        dump_ui_and_screenshot(out_dir, "03_workflow_connect")
+        if identity and password:
+            fields = find_edit_fields(workflow_root)
+            email_pos = find_node_center(workflow_root, "name@example.com") or (fields[1][1] if len(fields) >= 2 else None)
+            pwd_pos = find_node_center(workflow_root, "输入密码") or (fields[2][1] if len(fields) >= 3 else None)
+
+            if email_pos and pwd_pos:
+                print("[INFO] Entering workflow test credentials...")
+                adb(["shell", "input", "tap", str(email_pos[0]), str(email_pos[1])])
+                time.sleep(0.6)
+                adb_input_text(identity)
+                time.sleep(0.6)
+
+                adb(["shell", "input", "tap", str(pwd_pos[0]), str(pwd_pos[1])])
+                time.sleep(0.6)
+                adb_input_text(password)
+                time.sleep(0.6)
+
+                adb(["shell", "input", "keyevent", "111"], check=False)  # dismiss soft keyboard if open
+                time.sleep(0.8)
+
+                after_fill = dump_ui_and_screenshot(out_dir, "03b_workflow_connect_filled")
+                connect_pos = find_node_center(after_fill, "连接工作流服务")
+                if connect_pos:
+                    adb(["shell", "input", "tap", str(connect_pos[0]), str(connect_pos[1])])
+                    for _ in range(8):
+                        time.sleep(2.0)
+                        check_root = dump_ui_and_screenshot(out_dir, "04_workflow_after_login")
+                        if find_node_center(check_root, "重复") is not None:
+                            logged_in = True
+                            workflow_root = check_root
+                            break
+                else:
+                    print("[WARN] Connect button not found after filling credentials")
+            else:
+                print(f"[WARN] Could not locate email/password fields (found {len(fields)} EditTexts)")
+        else:
+            print("[INFO] WORKFLOW_TEST_IDENTITY / WORKFLOW_TEST_PASSWORD not set; skipping login")
+
+    captured_tabs: list[str] = []
+    if logged_in:
+        tabs = [
+            ("工作流", "05_tab_runs"),
+            ("重复", "06_tab_schedules"),
+            ("收藏", "07_tab_library"),
+            ("资料库", "08_tab_files"),
+            ("转换", "09_tab_converter"),
+        ]
+        current_root = workflow_root
+        for label, shot_name in tabs:
+            res_root = tap_label(out_dir, label, shot_name, wait_sec=2.5, root=current_root)
+            if res_root is not None:
+                captured_tabs.append(label)
+                current_root = res_root
+
+        settings_root = tap_label(out_dir, "工作流设置", "10_workflow_settings", wait_sec=2.0, root=current_root)
+        if settings_root is not None:
+            adb(["shell", "input", "keyevent", "4"], check=False)  # Back
 
     logs_dir = out_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     logcat = adb(["logcat", "-d", "-v", "time"], check=False).stdout
-    secrets = [os.environ.get("WORKFLOW_TEST_PASSWORD", "")]
+    secrets = [password]
     (logs_dir / "logcat.txt").write_text(redact(logcat, secrets), encoding="utf-8")
-    print(f"Saved screenshots & logcat to {out_dir}")
+
+    screenshots = sorted(p.name for p in (out_dir / "screenshots").glob("*.png"))
+    report = {
+        "packageId": PACKAGE_ID,
+        "mainActivity": MAIN_ACTIVITY,
+        "pbUrl": pb_url,
+        "loggedIn": logged_in,
+        "capturedTabs": captured_tabs,
+        "screenshots": screenshots,
+    }
+    (out_dir / "android-verify-report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    print(f"Saved {len(screenshots)} screenshots & logcat to {out_dir}")
+    return report
 
 
 def main() -> int:
@@ -307,7 +432,16 @@ def main() -> int:
             exit_code = 1
 
     if args.mode in ("android", "all"):
-        run_android_verification(args.apk, out_dir)
+        report = run_android_verification(
+            apk_path=args.apk,
+            out_dir=out_dir,
+            pb_url=args.pb_url.rstrip("/"),
+            identity=args.identity,
+            password=args.password,
+        )
+        if args.identity and args.password and not report["loggedIn"]:
+            print("[FAIL] Credentials were provided but Android workflow login did not succeed")
+            exit_code = 1
 
     return exit_code
 
