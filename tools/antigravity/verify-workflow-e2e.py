@@ -588,6 +588,13 @@ def wait_for_any_label(labels: list[str], timeout_sec: float = 35.0, poll_sec: f
     return dump_ui_xml()
 
 
+def hide_keyboard_if_shown() -> None:
+    res = adb(["shell", "dumpsys", "input_method"], check=False)
+    if "mInputShown=true" in res.stdout:
+        adb(["shell", "input", "keyevent", "4"], check=False)
+        time.sleep(0.5)
+
+
 def input_text_into_field(pos: tuple[int, int], value: str, clear_existing: bool = False) -> None:
     adb(["shell", "input", "tap", str(pos[0]), str(pos[1])])
     time.sleep(0.4)
@@ -598,6 +605,7 @@ def input_text_into_field(pos: tuple[int, int], value: str, clear_existing: bool
         time.sleep(0.2)
     adb(["shell", f"input text {shlex.quote(value)}"])
     time.sleep(0.4)
+    hide_keyboard_if_shown()
 
 
 def tap_and_capture(out_dir: Path, label: str, capture_name: str, wait_sec: float = 2.0, exact: bool = False) -> bool:
