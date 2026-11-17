@@ -653,9 +653,15 @@ def run_android_verification(
         if apk_path:
             print(f"Installing APK: {apk_path}")
             for attempt in range(1, 5):
-                for _ in range(20):
+                for _ in range(30):
                     pm_res = adb(["shell", "pm", "path", "android"], check=False)
-                    if pm_res.returncode == 0 and "package:" in pm_res.stdout:
+                    sm_res = adb(["shell", "sm", "list-volumes"], check=False)
+                    if (
+                        pm_res.returncode == 0
+                        and "package:" in pm_res.stdout
+                        and sm_res.returncode == 0
+                        and "mounted" in sm_res.stdout
+                    ):
                         break
                     time.sleep(2)
                 res = adb(["install", "-r", "-d", "-t", apk_path], check=False)
