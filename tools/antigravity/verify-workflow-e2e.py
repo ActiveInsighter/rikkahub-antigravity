@@ -562,10 +562,25 @@ def find_edit_texts(root: ET.Element | None) -> list[tuple[int, int]]:
     return out
 
 
-def wait_for_any_label(labels: list[str], timeout_sec: float = 20.0, poll_sec: float = 1.0) -> ET.Element | None:
+def dismiss_anr_if_present(root: ET.Element | None) -> bool:
+    if root is None:
+        return False
+    if find_node_center(root, "isn't responding") is not None:
+        wait_pos = find_node_center(root, "Wait", exact=True)
+        if wait_pos:
+            print("[INFO] Dismissing Android ANR dialog ('Wait')")
+            adb(["shell", "input", "tap", str(wait_pos[0]), str(wait_pos[1])], check=False)
+            time.sleep(1.0)
+            return True
+    return False
+
+
+def wait_for_any_label(labels: list[str], timeout_sec: float = 35.0, poll_sec: float = 1.5) -> ET.Element | None:
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
         root = dump_ui_xml()
+        if dismiss_anr_if_present(root):
+            continue
         for label in labels:
             if find_node_center(root, label) is not None:
                 return root
