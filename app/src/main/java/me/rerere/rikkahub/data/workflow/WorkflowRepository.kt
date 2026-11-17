@@ -36,7 +36,9 @@ private const val KEY_SESSION = "session_v1"
 private const val KEY_BASE_URL = "base_url_v1"
 
 const val DEFAULT_POCKETBASE_URL = "https://pb.any1.tech"
-const val DEFAULT_REMOTE_API_URL = "https://ocr-files.any1.tech"
+// AnyWorkflow Remote Worker API (/api/library/*, /api/file-conversion/*, /api/models/catalog/refresh).
+// Note: https://ocr-files.any1.tech only serves public R2 PDF objects (<uuid>.pdf) and returns FILE_NOT_FOUND for /api/*.
+const val DEFAULT_REMOTE_API_URL = "https://anyworkflow-remote.2212148739lbw.workers.dev"
 private const val AUTH_COLLECTION = "aw_clients"
 private const val RUN_COLLECTION = "aw_dispatch_runs"
 private const val TASK_COLLECTION = "aw_dispatch_tasks"

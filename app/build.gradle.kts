@@ -95,6 +95,12 @@ android {
         }
         debug {
             applicationIdSuffix = ".debug"
+            val minifyDebug = System.getenv("CI") == "true" || project.hasProperty("rikka.minifyDebug")
+            if (minifyDebug) {
+                optimization {
+                    enable = true
+                }
+            }
             buildConfigField("String", "VERSION_NAME", "\"${android.defaultConfig.versionName}\"")
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }

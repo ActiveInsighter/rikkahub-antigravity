@@ -1,6 +1,8 @@
 # RikkaHub Antigravity
 
-本仓库基于 [RikkaHub 3.2.0](https://github.com/rikkahub/rikkahub/tree/3.2.0)，上游提交 `e033a47d395fe57d16db2144069c3abdb7117547`，保留上游 AGPL-3.0 许可证。
+本仓库基于 [RikkaHub 3.3.0](https://github.com/rikkahub/rikkahub/tree/3.3.0)，上游提交 `eb33917e483aae1427db9cb10232642a640d2986`（`versionCode = 197`），保留上游 AGPL-3.0 许可证。
+
+工作流集成架构、远端接口分工与自动化验证说明见 [docs/WORKFLOW_ARCHITECTURE.md](docs/WORKFLOW_ARCHITECTURE.md)。
 
 ## 下载与配置
 
