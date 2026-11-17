@@ -259,7 +259,7 @@ class AgentVM(
                     add(
                         UIMessagePart.Reasoning(
                             reasoning = reasoningBuilder.toString(),
-                            finishedAt = if (finished) Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()) else null,
+                            finishedAt = if (finished) Clock.System.now() else null,
                         )
                     )
                 }

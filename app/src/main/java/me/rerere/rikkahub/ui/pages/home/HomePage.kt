@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -59,6 +60,7 @@ import kotlin.uuid.Uuid
 @Composable
 fun HomePage() {
     val navController = LocalNavController.current
+    val context = LocalContext.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
@@ -74,10 +76,10 @@ fun HomePage() {
     }
 
     fun openChat() {
-        val id = if (readBooleanPreference("create_new_conversation_on_start", true)) {
+        val id = if (context.readBooleanPreference("create_new_conversation_on_start", true)) {
             Uuid.random().toString()
         } else {
-            readStringPreference(
+            context.readStringPreference(
                 "lastConversationId",
                 Uuid.random().toString(),
             ) ?: Uuid.random().toString()
