@@ -2,12 +2,18 @@ name: Workflow Visual & API Verification
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main, 'feat/**']
   workflow_run:
     workflows: ["Antigravity Debug APK"]
     types: [completed]
 
 permissions:
   contents: read
+
+concurrency:
+  group: visual-verify-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   api-verify:
@@ -27,6 +33,7 @@ jobs:
         run: |
           python3 tools/antigravity/verify-workflow-e2e.py \
             --mode api \
+            --mock-if-no-creds \
             --write-test \
             --out-dir artifacts/api-verify
       - name: Upload API verification report & logs
@@ -47,6 +54,15 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - name: Configure preinstalled Android SDK
+        run: |
+          SDK_MANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          "$SDK_MANAGER" --version
+          set +o pipefail
+          yes | "$SDK_MANAGER" --licenses > /dev/null
+      - name: Install Android SDK components
+        run: sdkmanager 'platforms;android-37.2' 'cmake;3.22.1'
       - uses: pnpm/action-setup@v4
         with:
           version: 11
@@ -68,6 +84,11 @@ jobs:
           '-Dorg.gradle.jvmargs=-Xmx5g -Dfile.encoding=UTF-8'
       - name: Run Android Emulator & Capture Screenshots + Logcat
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          WORKFLOW_PB_URL: ${{ vars.WORKFLOW_PB_URL || 'https://pb.any1.tech' }}
+          WORKFLOW_REMOTE_API_URL: ${{ vars.WORKFLOW_REMOTE_API_URL || 'https://anyworkflow-remote.2212148739lbw.workers.dev' }}
+          WORKFLOW_TEST_IDENTITY: ${{ secrets.WORKFLOW_TEST_IDENTITY }}
+          WORKFLOW_TEST_PASSWORD: ${{ secrets.WORKFLOW_TEST_PASSWORD }}
         with:
           api-level: 34
           target: google_apis
@@ -79,6 +100,7 @@ jobs:
             APK_PATH=$(ls app/build/outputs/apk/github/debug/*x86_64*.apk | head -n 1)
             python3 tools/antigravity/verify-workflow-e2e.py \
               --mode android \
+              --mock-if-no-creds \
               --apk "$APK_PATH" \
               --out-dir artifacts/android-verify
       - name: Upload Screenshots, UI Dumps & Logcat
@@ -87,5 +109,5 @@ jobs:
         with:
           name: workflow-visual-verify-${{ github.run_number }}
           path: artifacts/android-verify/
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 30

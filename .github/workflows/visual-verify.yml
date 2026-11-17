@@ -1,0 +1,113 @@
+name: Workflow Visual & API Verification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'feat/**']
+  workflow_run:
+    workflows: ["Antigravity Debug APK"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run Workflow API E2E verification
+        env:
+          WORKFLOW_PB_URL: ${{ vars.WORKFLOW_PB_URL || 'https://pb.any1.tech' }}
+          WORKFLOW_REMOTE_API_URL: ${{ vars.WORKFLOW_REMOTE_API_URL || 'https://anyworkflow-remote.2212148739lbw.workers.dev' }}
+          WORKFLOW_TEST_IDENTITY: ${{ secrets.WORKFLOW_TEST_IDENTITY }}
+          WORKFLOW_TEST_PASSWORD: ${{ secrets.WORKFLOW_TEST_PASSWORD }}
+        run: |
+          python3 tools/antigravity/verify-workflow-e2e.py \
+            --mode api \
+            --mock-if-no-creds \
+            --write-test \
+            --out-dir artifacts/api-verify
+      - name: Upload API verification report & logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-api-verify-${{ github.run_number }}
+          path: artifacts/api-verify/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  android-visual-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Configure preinstalled Android SDK
+        run: |
+          SDK_MANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          "$SDK_MANAGER" --version
+          set +o pipefail
+          yes | "$SDK_MANAGER" --licenses > /dev/null
+      - name: Install Android SDK components
+        run: sdkmanager 'platforms;android-37.2' 'cmake;3.22.1'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+      - name: Install web UI dependencies
+        working-directory: web-ui
+        run: pnpm install --frozen-lockfile
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Prepare debug Firebase configuration
+        run: python3 tools/antigravity/prepare-debug.py
+      - name: Build x86_64 debug APK for emulator
+        run: >-
+          ./gradlew :app:assembleGithubDebug
+          --no-daemon --max-workers=2
+          '-Dorg.gradle.jvmargs=-Xmx5g -Dfile.encoding=UTF-8'
+      - name: Run Android Emulator & Capture Screenshots + Logcat
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          WORKFLOW_PB_URL: ${{ vars.WORKFLOW_PB_URL || 'https://pb.any1.tech' }}
+          WORKFLOW_REMOTE_API_URL: ${{ vars.WORKFLOW_REMOTE_API_URL || 'https://anyworkflow-remote.2212148739lbw.workers.dev' }}
+          WORKFLOW_TEST_IDENTITY: ${{ secrets.WORKFLOW_TEST_IDENTITY }}
+          WORKFLOW_TEST_PASSWORD: ${{ secrets.WORKFLOW_TEST_PASSWORD }}
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            APK_PATH=$(ls app/build/outputs/apk/github/debug/*x86_64*.apk | head -n 1)
+            python3 tools/antigravity/verify-workflow-e2e.py \
+              --mode android \
+              --mock-if-no-creds \
+              --apk "$APK_PATH" \
+              --out-dir artifacts/android-verify
+      - name: Upload Screenshots, UI Dumps & Logcat
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-visual-verify-${{ github.run_number }}
+          path: artifacts/android-verify/
+          if-no-files-found: error
+          retention-days: 30
