@@ -603,7 +603,10 @@ def input_text_into_field(pos: tuple[int, int], value: str, clear_existing: bool
         del_events = " ".join(["67"] * 45)
         adb(["shell", f"input keyevent {del_events}"], check=False)
         time.sleep(0.2)
-    adb(["shell", f"input text {shlex.quote(value)}"])
+    for i in range(0, len(value), 6):
+        chunk = value[i : i + 6]
+        adb(["shell", f"input text {shlex.quote(chunk)}"])
+        time.sleep(0.2)
     time.sleep(0.4)
     hide_keyboard_if_shown()
 
