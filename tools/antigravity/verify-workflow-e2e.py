@@ -602,12 +602,17 @@ def input_text_into_field(pos: tuple[int, int], value: str, clear_existing: bool
 
 def tap_and_capture(out_dir: Path, label: str, capture_name: str, wait_sec: float = 2.0, exact: bool = False) -> bool:
     root = dump_ui_xml()
+    if dismiss_anr_if_present(root):
+        root = dump_ui_xml()
     pos = find_node_center(root, label, exact=exact)
     if not pos:
         print(f"[WARN] UI node '{label}' not found for '{capture_name}'")
         return False
     adb(["shell", "input", "tap", str(pos[0]), str(pos[1])])
     time.sleep(wait_sec)
+    after_root = dump_ui_xml()
+    if dismiss_anr_if_present(after_root):
+        time.sleep(1.0)
     capture_screen(out_dir, capture_name)
     return True
 
