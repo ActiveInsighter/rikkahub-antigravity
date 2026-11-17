@@ -95,8 +95,8 @@ jobs:
           WORKFLOW_TEST_IDENTITY: ${{ secrets.WORKFLOW_TEST_IDENTITY }}
           WORKFLOW_TEST_PASSWORD: ${{ secrets.WORKFLOW_TEST_PASSWORD }}
         with:
-          api-level: 34
-          target: google_apis
+          api-level: 33
+          target: default
           arch: x86_64
           profile: pixel_6
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim

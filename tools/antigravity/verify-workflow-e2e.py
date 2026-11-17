@@ -202,7 +202,15 @@ def run_api_verification(
 
 
 def adb(args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["adb", *args], text=True, capture_output=True, check=check)
+    res = subprocess.run(["adb", *args], text=True, capture_output=True)
+    if check and res.returncode != 0:
+        print(f"[ADB ERROR] cmd=adb {' '.join(args)} rc={res.returncode}")
+        if res.stdout:
+            print(f"[ADB STDOUT]\n{res.stdout.strip()}")
+        if res.stderr:
+            print(f"[ADB STDERR]\n{res.stderr.strip()}")
+        raise subprocess.CalledProcessError(res.returncode, ["adb", *args], res.stdout, res.stderr)
+    return res
 
 
 def adb_input_text(value: str) -> None:
@@ -298,6 +306,11 @@ def run_android_verification(
         raise RuntimeError(f"No connected adb device/emulator found:\n{devices}")
 
     adb(["logcat", "-c"], check=False)
+    for _ in range(15):
+        pm_check = adb(["shell", "pm", "path", "android"], check=False)
+        if pm_check.returncode == 0 and "package:" in pm_check.stdout:
+            break
+        time.sleep(2)
     adb(["shell", "settings", "put", "secure", "show_ime_with_hard_keyboard", "0"], check=False)
     if apk_path:
         print(f"Installing APK: {apk_path}")
