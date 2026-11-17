@@ -488,7 +488,11 @@ def run_api_verification(
 
 
 def adb(args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["adb", *args], text=True, capture_output=True, check=check)
+    res = subprocess.run(["adb", *args], text=True, capture_output=True)
+    if check and res.returncode != 0:
+        print(f"[ADB ERROR] cmd=adb {' '.join(args)}\nstdout={res.stdout}\nstderr={res.stderr}", file=sys.stderr)
+        raise subprocess.CalledProcessError(res.returncode, ["adb", *args], output=res.stdout, stderr=res.stderr)
+    return res
 
 
 def dump_ui_xml() -> ET.Element | None:
@@ -619,8 +623,20 @@ def run_android_verification(
     try:
         adb(["logcat", "-c"], check=False)
         if apk_path:
+            for _ in range(15):
+                pm_res = adb(["shell", "pm", "path", "android"], check=False)
+                if pm_res.returncode == 0 and "package:" in pm_res.stdout:
+                    break
+                time.sleep(2)
             print(f"Installing APK: {apk_path}")
-            adb(["install", "-r", "-d", apk_path])
+            for attempt in range(1, 4):
+                res = adb(["install", "-r", "-d", "-t", apk_path], check=False)
+                if res.returncode == 0:
+                    break
+                print(f"[WARN] adb install attempt {attempt} failed: {res.stdout} {res.stderr}")
+                if attempt == 3:
+                    raise subprocess.CalledProcessError(res.returncode, ["adb", "install", apk_path], output=res.stdout, stderr=res.stderr)
+                time.sleep(5)
 
         # Clear app state for a deterministic cold-start login & screenshot run
         adb(["shell", "pm", "clear", PACKAGE_ID], check=False)
