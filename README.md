@@ -1,4 +1,4 @@
-> **Antigravity 修改版（基于官方 3.2.0）**：[APK 下载](https://github.com/ActiveInsighter/rikkahub-antigravity/releases) · [配置及构建说明](ANTIGRAVITY.md)
+> **Antigravity 修改版（基于官方 3.3.0）**：[APK 下载](https://github.com/ActiveInsighter/rikkahub-antigravity/releases) · [配置及构建说明](ANTIGRAVITY.md)
 
 <div align="center">
   <img src="docs/icon.png" alt="App Icon" width="100" />

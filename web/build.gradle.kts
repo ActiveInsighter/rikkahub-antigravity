@@ -27,10 +27,22 @@ val buildWebUi = tasks.register<Exec>("buildWebUi") {
         webUiDir.file("tsconfig.json"),
         webUiDir.file("vite.config.ts"),
         webUiDir.file("vite-env.d.ts")
-    )
-    inputs.dir(webUiDir.dir("app"))
-    inputs.dir(webUiDir.dir("public"))
+    ).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(webUiDir.dir("app")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(webUiDir.dir("public")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(fileTree(webUiDir) { include(".env*") })
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.property("nodeVersion", providers.exec {
+        commandLine("node", "--version")
+    }.standardOutput.asText.map { it.trim() })
+    inputs.property("pnpmVersion", providers.exec {
+        commandLine("pnpm", "--version")
+    }.standardOutput.asText.map { it.trim() })
+    inputs.property("os", System.getProperty("os.name"))
+    inputs.property("arch", System.getProperty("os.arch"))
     outputs.dir(webStaticResourcesDir)
+    // These declared sources fully determine the embedded static bundle.
+    outputs.cacheIf { true }
 }
 
 android {

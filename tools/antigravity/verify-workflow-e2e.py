@@ -9,7 +9,7 @@ Supports:
 
 Environment variables (never printed or logged):
   WORKFLOW_PB_URL          PocketBase base URL (default: https://pb.any1.tech)
-  WORKFLOW_REMOTE_API_URL  Remote Worker URL (default: https://anyworkflow-remote.2212148739lbw.workers.dev)
+  WORKFLOW_REMOTE_API_URL  Remote Worker URL (default: https://file.any1.tech)
   WORKFLOW_TEST_IDENTITY   Test account email / username
   WORKFLOW_TEST_PASSWORD   Test account password
 """
@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_PB_URL = "https://pb.any1.tech"
-DEFAULT_REMOTE_URL = "https://anyworkflow-remote.2212148739lbw.workers.dev"
+DEFAULT_REMOTE_URL = "https://file.any1.tech"
 PACKAGE_ID = "me.rerere.rikkahub.debug"
 MAIN_ACTIVITY = "me.rerere.rikkahub.ui.activity.MainActivity"
 

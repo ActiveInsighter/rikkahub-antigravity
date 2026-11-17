@@ -18,7 +18,7 @@ AnyWorkflow 模块依赖两类服务端地址，**切勿混用**：
 | 常量 | 默认地址 | 用途 | 鉴权方式 |
 | :--- | :--- | :--- | :--- |
 | `DEFAULT_POCKETBASE_URL` | `https://pb.any1.tech` | PocketBase 数据与认证：`/api/collections/aw_*`、`/api/anyworkflow/*` | `Authorization: <pbToken>` |
-| `DEFAULT_REMOTE_API_URL` | `https://anyworkflow-remote.2212148739lbw.workers.dev` | Cloudflare Worker API：`/api/library/*`、`/api/file-conversion/*`、`/api/models/catalog/refresh` | `Authorization: Bearer <pbToken>` + `X-PocketBase-Url` |
+| `DEFAULT_REMOTE_API_URL` | `https://file.any1.tech` | Cloudflare Worker API：`/api/library/*`、`/api/file-conversion/*`、`/api/models/catalog/refresh` | `Authorization: Bearer <pbToken>` + `X-PocketBase-Url` |
 | R2 公开 PDF CDN | `https://ocr-files.any1.tech/<uuid>.pdf` | 仅用于访问已上传的公开 PDF 原文件 | 能力链接（所有 `/api/*` 在该域名会返回 `404 FILE_NOT_FOUND`） |
 
 ### 会话登出规则 (`WorkflowRepository.executeJson`)
@@ -62,3 +62,12 @@ python3 tools/antigravity/verify-workflow-e2e.py \
   git add .github/workflows/visual-verify.yml && git commit -m "ci: enable workflow visual & API verification" && git push
   ```
 - 启用后，建议在仓库 Settings → Secrets and variables → Actions 中配置 `WORKFLOW_TEST_IDENTITY` 与 `WORKFLOW_TEST_PASSWORD`。
+
+## 5. 构建缓存与版本校验
+
+- Debug APK 的实际版本以 `app/build.gradle.kts` 为准（当前 `3.3.0`）。发布流程从 AGP 的 `output-metadata.json` 读取版本，并用 `aapt dump badging` 核对每个 APK；发布标题、下载文件名共用这个值。
+- Interactions 与日志脱敏回归测试和 APK 打包在一次 Gradle 调用中完成，减少 JVM 启动和工程配置开销。
+- `org.gradle.caching=true` 使可缓存的编译、资源和测试任务复用产物。`setup-gradle` 在当前分支和 `main` 均允许写入缓存；GitHub 仍限制跨分支缓存可见性。
+- 仓库 Actions Secret `GRADLE_ENCRYPTION_KEY` 用于加密配置缓存。签名密钥继续从原有 Secret 恢复，产物仍逐一验证固定证书。
+- Web UI 静态资源构建已声明相对路径输入、环境文件和 Node/pnpm/系统版本；输入不变时可以从 Gradle 构建缓存恢复。
+- `file.any1.tech` 是 `anyworkflow-remote` 的自定义域名，提供资料库与转换 API；PocketBase 和公开 PDF 域名仍各自承担表中用途。
