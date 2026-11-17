@@ -7,16 +7,18 @@ plugins {
 val webUiDir = rootProject.layout.projectDirectory.dir("web-ui")
 val webStaticResourcesDir = layout.projectDirectory.dir("src/main/resources/static")
 
+fun webUiCommand(command: String): List<String> = when {
+    Os.isFamily(Os.FAMILY_MAC) -> listOf("zsh", "-ic", command)
+    Os.isFamily(Os.FAMILY_WINDOWS) -> listOf("cmd", "/c", command)
+    else -> listOf("sh", "-c", command)
+}
+
 val buildWebUi = tasks.register<Exec>("buildWebUi") {
     group = "build"
     description = "Build web-ui and copy its static output into the web module resources."
 
     workingDir = webUiDir.asFile
-    when {
-        Os.isFamily(Os.FAMILY_MAC) -> commandLine("zsh", "-ic", "pnpm run build")
-        Os.isFamily(Os.FAMILY_WINDOWS) -> commandLine("cmd", "/c", "pnpm run build")
-        else -> commandLine("pnpm", "run", "build")
-    }
+    commandLine(webUiCommand("pnpm run build"))
 
     inputs.files(
         webUiDir.file("package.json"),
@@ -27,10 +29,22 @@ val buildWebUi = tasks.register<Exec>("buildWebUi") {
         webUiDir.file("tsconfig.json"),
         webUiDir.file("vite.config.ts"),
         webUiDir.file("vite-env.d.ts")
-    )
-    inputs.dir(webUiDir.dir("app"))
-    inputs.dir(webUiDir.dir("public"))
+    ).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(webUiDir.dir("app")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(webUiDir.dir("public")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(fileTree(webUiDir) { include(".env*") })
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.property("nodeVersion", providers.exec {
+        commandLine(webUiCommand("node --version"))
+    }.standardOutput.asText.map { it.trim() })
+    inputs.property("pnpmVersion", providers.exec {
+        commandLine(webUiCommand("pnpm --version"))
+    }.standardOutput.asText.map { it.trim() })
+    inputs.property("os", System.getProperty("os.name"))
+    inputs.property("arch", System.getProperty("os.arch"))
     outputs.dir(webStaticResourcesDir)
+    // These declared sources fully determine the embedded static bundle.
+    outputs.cacheIf { true }
 }
 
 android {

@@ -120,4 +120,18 @@ val viewModelModule = module {
     viewModelOf(::WorkflowFilesVM)
     viewModelOf(::WorkflowConverterVM)
     viewModelOf(::WorkflowSettingsVM)
+    viewModel<me.rerere.rikkahub.ui.pages.agent.AgentVM> { params ->
+        me.rerere.rikkahub.ui.pages.agent.AgentVM(
+            id = params.get(),
+            repository = get(),
+            cloudClient = get(),
+            settingsStore = get(),
+        )
+    }
+    viewModel {
+        me.rerere.rikkahub.ui.pages.agent.AgentDrawerVM(
+            repository = get(),
+            settingsStore = get(),
+        )
+    }
 }

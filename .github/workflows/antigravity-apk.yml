@@ -46,6 +46,9 @@ jobs:
         working-directory: web-ui
         run: pnpm install --frozen-lockfile
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
       - name: Prepare debug Firebase configuration
         run: python3 tools/antigravity/prepare-debug.py
       - name: Restore persistent debug signing key
@@ -57,29 +60,31 @@ jobs:
           printf '%s' "$DEBUG_KEYSTORE" | base64 --decode > "$KEYSTORE_PATH"
           chmod 600 "$KEYSTORE_PATH"
           echo "RIKKA_DEBUG_KEYSTORE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
-      - name: Test Gemini and Antigravity Interactions
+      - name: Test Interactions and build signed debug APKs
         run: >-
           ./gradlew :ai:testDebugUnitTest
           --tests me.rerere.ai.provider.providers.google.InteractionsApiTest
           --tests me.rerere.ai.util.RequestLogRedactionTest
-          --no-daemon --max-workers=2
-          '-Dorg.gradle.jvmargs=-Xmx5g -Dfile.encoding=UTF-8'
-      - name: Build signed debug APKs
-        run: >-
-          ./gradlew :app:assembleGithubDebug
+          :app:assembleGithubDebug
           --no-daemon --max-workers=2
           '-Dorg.gradle.jvmargs=-Xmx5g -Dfile.encoding=UTF-8'
       - name: Verify APK signatures and prepare downloads
         run: |
+          VERSION_NAME=$(python3 -c 'import json; print(json.load(open("app/build/outputs/apk/github/debug/output-metadata.json"))["elements"][0]["versionName"])')
+          [[ "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+([a-zA-Z0-9.+-]*)$ ]]
+          echo "RIKKA_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           mkdir -p artifacts
           APK_SIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -n 1)
           EXPECTED_CERT=$(keytool -exportcert -keystore "$RIKKA_DEBUG_KEYSTORE" -storepass android -alias androiddebugkey | sha256sum | cut -d ' ' -f 1)
           for apk in app/build/outputs/apk/github/debug/*.apk; do
+            "$AAPT" dump badging "$apk" > "$RUNNER_TEMP/apk-badging.txt"
+            grep -F "versionName='$VERSION_NAME'" "$RUNNER_TEMP/apk-badging.txt"
             "$APK_SIGNER" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/apk-signature.txt"
             cat "$RUNNER_TEMP/apk-signature.txt"
             grep -Fi -- "$EXPECTED_CERT" "$RUNNER_TEMP/apk-signature.txt"
             name=$(basename "$apk")
-            cp "$apk" "artifacts/${name/app-github-/RikkaHub-3.2.0-antigravity-}"
+            cp "$apk" "artifacts/${name/app-github-/RikkaHub-${VERSION_NAME}-antigravity-}"
           done
           cd artifacts
           sha256sum *.apk > SHA256SUMS.txt
@@ -96,7 +101,7 @@ jobs:
         run: |
           gh release create "antigravity-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}" artifacts/* \
             --target "$GITHUB_SHA" --prerelease \
-            --title "RikkaHub 3.2.0 Antigravity · Build ${GITHUB_RUN_NUMBER}" \
+            --title "RikkaHub ${RIKKA_VERSION_NAME} Antigravity · Build ${GITHUB_RUN_NUMBER}" \
             --notes-file docs/ANTIGRAVITY-RELEASE.md
       - name: Upload test reports
         if: always()

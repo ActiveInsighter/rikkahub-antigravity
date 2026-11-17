@@ -21,7 +21,7 @@ jobs:
       - name: Run Workflow API E2E verification
         env:
           WORKFLOW_PB_URL: ${{ vars.WORKFLOW_PB_URL || 'https://pb.any1.tech' }}
-          WORKFLOW_REMOTE_API_URL: ${{ vars.WORKFLOW_REMOTE_API_URL || 'https://anyworkflow-remote.2212148739lbw.workers.dev' }}
+          WORKFLOW_REMOTE_API_URL: ${{ vars.WORKFLOW_REMOTE_API_URL || 'https://file.any1.tech' }}
           WORKFLOW_TEST_IDENTITY: ${{ secrets.WORKFLOW_TEST_IDENTITY }}
           WORKFLOW_TEST_PASSWORD: ${{ secrets.WORKFLOW_TEST_PASSWORD }}
         run: |
