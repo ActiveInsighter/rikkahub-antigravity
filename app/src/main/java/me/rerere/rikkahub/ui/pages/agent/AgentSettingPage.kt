@@ -183,11 +183,12 @@ fun AgentSettingPage() {
                         )
                         ConnectedChoiceButtons(
                             options = options,
-                            selected = uiSettings.chatFontFamily,
-                            onSelect = { family -> update { it.copy(chatFontFamily = family) } },
-                            label = { Text(it.second) },
+                            selected = options.first { it.first == uiSettings.chatFontFamily },
+                            onSelect = { (family, _) -> update { it.copy(chatFontFamily = family) } },
                             modifier = Modifier.fillMaxWidth(),
-                        )
+                        ) { option, _ ->
+                            Text(option.second, maxLines = 1)
+                        }
                     }
                     formItem(
                         headlineContent = { Text("字体缩放") },
@@ -248,16 +249,18 @@ fun AgentSettingPage() {
         }
     }
 
-    if (showResetConfirm) {
-        RikkaConfirmDialog(
-            title = { Text("恢复默认设置") },
-            text = { Text("确定要将 Agent 界面设置恢复为默认值吗？") },
-            onDismissRequest = { showResetConfirm = false },
-            onConfirm = {
-                settingsStore.reset()
-                showResetConfirm = false
-                toaster.show("已恢复默认 Agent 界面设置", type = ToastType.Success)
-            },
-        )
+    RikkaConfirmDialog(
+        show = showResetConfirm,
+        title = "恢复默认设置",
+        confirmText = "确定",
+        dismissText = "取消",
+        onConfirm = {
+            settingsStore.reset()
+            showResetConfirm = false
+            toaster.show("已恢复默认 Agent 界面设置", type = ToastType.Success)
+        },
+        onDismiss = { showResetConfirm = false },
+    ) {
+        Text("确定要将 Agent 界面设置恢复为默认值吗？")
     }
 }

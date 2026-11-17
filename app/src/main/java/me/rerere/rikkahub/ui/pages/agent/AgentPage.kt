@@ -324,16 +324,18 @@ fun AgentPage(id: Uuid) {
         )
     }
 
-    if (showClearConfirm) {
-        RikkaConfirmDialog(
-            title = { Text("清空消息") },
-            text = { Text("确定要清空当前 Agent 会话中的所有消息吗？") },
-            onDismissRequest = { showClearConfirm = false },
-            onConfirm = {
-                vm.clearMessages()
-                showClearConfirm = false
-            },
-        )
+    RikkaConfirmDialog(
+        show = showClearConfirm,
+        title = "清空消息",
+        confirmText = "确定",
+        dismissText = "取消",
+        onConfirm = {
+            vm.clearMessages()
+            showClearConfirm = false
+        },
+        onDismiss = { showClearConfirm = false },
+    ) {
+        Text("确定要清空当前 Agent 会话中的所有消息吗？")
     }
 
     editingMessage?.let { target ->

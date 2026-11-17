@@ -842,5 +842,14 @@ sealed interface Screen : NavKey {
     data object Stats : Screen
 
     @Serializable
+    data object Home : Screen
+
+    @Serializable
+    data class Agent(val id: String) : Screen
+
+    @Serializable
+    data object AgentSetting : Screen
+
+    @Serializable
     data object Workflow : Screen
 }
