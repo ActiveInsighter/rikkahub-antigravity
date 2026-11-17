@@ -729,20 +729,23 @@ def run_android_verification(
         capture_screen(out_dir, "05_tab_runs")
         captured.append("05_tab_runs.png")
 
-        if tap_and_capture(out_dir, "新建工作流", "06_create_run_dialog", wait_sec=1.5):
-            captured.append("06_create_run_dialog.png")
-            adb(["shell", "input", "keyevent", "4"], check=False)
-            time.sleep(1.0)
-
-        for idx, tab_label in enumerate(["重复", "收藏", "资料库", "转换"], start=7):
+        for idx, tab_label in enumerate(["重复", "收藏", "资料库", "转换"], start=6):
             name = f"{idx:02d}_tab_{tab_label}"
             if tap_and_capture(out_dir, tab_label, name, wait_sec=2.0, exact=True):
                 captured.append(f"{name}.png")
 
-        if tap_and_capture(out_dir, "工作流设置", "11_workflow_settings", wait_sec=1.5):
-            captured.append("11_workflow_settings.png")
+        if tap_and_capture(out_dir, "工作流设置", "10_workflow_settings", wait_sec=1.5):
+            captured.append("10_workflow_settings.png")
             adb(["shell", "input", "keyevent", "4"], check=False)
             time.sleep(0.8)
+
+        # Switch back to Runs tab and open Create Run dialog
+        tap_pos = find_node_center(dump_ui_xml(), "工作流", exact=True)
+        if tap_pos:
+            adb(["shell", "input", "tap", str(tap_pos[0]), str(tap_pos[1])])
+            time.sleep(1.0)
+        if tap_and_capture(out_dir, "新建工作流", "11_create_run_dialog", wait_sec=1.5):
+            captured.append("11_create_run_dialog.png")
 
         logs_dir = out_dir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
