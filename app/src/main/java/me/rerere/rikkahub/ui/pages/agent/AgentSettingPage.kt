@@ -19,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
@@ -31,7 +32,6 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.CardGroupValue
 import me.rerere.rikkahub.ui.components.ui.ConnectedChoiceButtons
-import me.rerere.rikkahub.ui.components.ui.ConnectedChoiceLabel
 import me.rerere.rikkahub.ui.components.ui.switchItem
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -39,20 +39,6 @@ import me.rerere.rikkahub.utils.plus
 import me.rerere.ui.components.RikkaConfirmDialog
 import me.rerere.ui.toast.ToastType
 import org.koin.compose.koinInject
-
-/** 字体选项的展示文案；Agent 页不开放自定义字体文件，所以不列 CUSTOM */
-private val AGENT_FONT_FAMILIES = listOf(
-    ChatFontFamily.DEFAULT,
-    ChatFontFamily.SERIF,
-    ChatFontFamily.MONOSPACE,
-)
-
-private fun ChatFontFamily.label(): String = when (this) {
-    ChatFontFamily.DEFAULT -> "默认"
-    ChatFontFamily.SERIF -> "衬线"
-    ChatFontFamily.MONOSPACE -> "等宽"
-    ChatFontFamily.CUSTOM -> "自定义"
-}
 
 @Composable
 fun AgentSettingPage() {
@@ -190,13 +176,18 @@ fun AgentSettingPage() {
                     formItem(
                         headlineContent = { Text("消息字体") },
                     ) {
+                        val options = listOf(
+                            ChatFontFamily.DEFAULT to "默认",
+                            ChatFontFamily.SERIF to "衬线",
+                            ChatFontFamily.MONOSPACE to "等宽",
+                        )
                         ConnectedChoiceButtons(
-                            options = AGENT_FONT_FAMILIES,
-                            selected = uiSettings.chatFontFamily,
-                            onSelect = { family -> update { it.copy(chatFontFamily = family) } },
+                            options = options,
+                            selected = options.first { it.first == uiSettings.chatFontFamily },
+                            onSelect = { (family, _) -> update { it.copy(chatFontFamily = family) } },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { family, selected ->
-                            ConnectedChoiceLabel(text = family.label(), selected = selected)
+                        ) { option, _ ->
+                            Text(option.second, maxLines = 1)
                         }
                     }
                     formItem(
@@ -261,14 +252,15 @@ fun AgentSettingPage() {
     RikkaConfirmDialog(
         show = showResetConfirm,
         title = "恢复默认设置",
-        confirmText = "恢复默认",
+        confirmText = "确定",
         dismissText = "取消",
-        text = { Text("确定要将 Agent 界面设置恢复为默认值吗？") },
         onConfirm = {
             settingsStore.reset()
             showResetConfirm = false
             toaster.show("已恢复默认 Agent 界面设置", type = ToastType.Success)
         },
         onDismiss = { showResetConfirm = false },
-    )
+    ) {
+        Text("确定要将 Agent 界面设置恢复为默认值吗？")
+    }
 }

@@ -76,6 +76,8 @@ import me.rerere.rikkahub.ui.context.LocalSharedTransitionScope
 import me.rerere.rikkahub.ui.context.LocalTTSState
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.context.Navigator
+import me.rerere.rikkahub.ui.hooks.readBooleanPreference
+import me.rerere.rikkahub.ui.hooks.readStringPreference
 import me.rerere.rikkahub.ui.hooks.rememberCustomAsrState
 import me.rerere.rikkahub.ui.hooks.rememberCustomTtsState
 import me.rerere.rikkahub.ui.pages.assistant.AssistantPage
@@ -840,17 +842,14 @@ sealed interface Screen : NavKey {
     data object Stats : Screen
 
     @Serializable
-    data object Workflow : Screen
-
-    /** 首页工作区选择 */
-    @Serializable
     data object Home : Screen
 
-    /** Antigravity Agent 独立工作区 */
     @Serializable
     data class Agent(val id: String) : Screen
 
-    /** Agent 界面设置（与 Chat 设置隔离） */
     @Serializable
     data object AgentSetting : Screen
+
+    @Serializable
+    data object Workflow : Screen
 }
