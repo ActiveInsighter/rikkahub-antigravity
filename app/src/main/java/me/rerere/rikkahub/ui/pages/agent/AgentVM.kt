@@ -103,7 +103,7 @@ class AgentVM(
         }
     }.flatMapLatest { startMs ->
         if (startMs == null) {
-            flowOf(null)
+            flowOf<String?>(null)
         } else {
             flow {
                 while (true) {
