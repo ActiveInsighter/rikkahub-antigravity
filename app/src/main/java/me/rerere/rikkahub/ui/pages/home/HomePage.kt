@@ -57,6 +57,8 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.workflow.WorkflowRepository
+import me.rerere.rikkahub.ui.components.ui.CardGroupIcon
+import me.rerere.rikkahub.ui.components.ui.cardGroupItemShape
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.readBooleanPreference
 import me.rerere.rikkahub.ui.hooks.readStringPreference
@@ -120,10 +122,10 @@ fun HomePage() {
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+            contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Modern editorial header
+            // Expressive Header
             item {
                 AnimatedVisibility(
                     visible = visible,
@@ -132,16 +134,21 @@ fun HomePage() {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 6.dp, bottom = 4.dp),
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
                             Text(
-                                text = "RIKKAHUB · ANTIGRAVITY",
+                                text = "RikkaHub · Antigravity",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             Text(
                                 text = greeting,
@@ -150,17 +157,19 @@ fun HomePage() {
                             )
                         }
 
+                        Spacer(Modifier.width(12.dp))
+
                         Surface(
                             onClick = ::openWorkflow,
                             shape = CircleShape,
                             color = if (session != null) {
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f)
                             } else {
-                                MaterialTheme.colorScheme.surfaceContainerHigh
+                                CustomColors.listItemColors.containerColor
                             },
                             border = BorderStroke(
                                 1.dp,
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
                             ),
                         ) {
                             Row(
@@ -184,6 +193,8 @@ fun HomePage() {
                                     text = if (session != null) "云端已连接" else "未连接",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    softWrap = false,
                                     color = if (session != null) {
                                         MaterialTheme.colorScheme.onPrimaryContainer
                                     } else {
@@ -196,7 +207,7 @@ fun HomePage() {
                 }
             }
 
-            // Featured Hero Card: Antigravity Agent
+            // Hero Card: Antigravity Agent
             item {
                 AnimatedVisibility(
                     visible = visible,
@@ -205,8 +216,8 @@ fun HomePage() {
                     val heroShape = RoundedCornerShape(28.dp)
                     val gradient = Brush.linearGradient(
                         colors = listOf(
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
-                            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.75f),
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
+                            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.72f),
                         )
                     )
                     Surface(
@@ -215,7 +226,7 @@ fun HomePage() {
                         color = Color.Transparent,
                         border = BorderStroke(
                             1.dp,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -233,29 +244,31 @@ fun HomePage() {
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Surface(
-                                        shape = RoundedCornerShape(16.dp),
+                                        shape = CircleShape,
                                         color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(46.dp),
+                                        modifier = Modifier.size(44.dp),
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             Icon(
                                                 imageVector = HugeIcons.Sparkles,
                                                 contentDescription = null,
                                                 tint = MaterialTheme.colorScheme.onPrimary,
-                                                modifier = Modifier.size(24.dp),
+                                                modifier = Modifier.size(22.dp),
                                             )
                                         }
                                     }
 
                                     Surface(
                                         shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.68f),
                                     ) {
                                         Text(
                                             text = "Action 实时驱动",
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.SemiBold,
                                             color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            softWrap = false,
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                                         )
                                     }
@@ -269,9 +282,11 @@ fun HomePage() {
                                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                                     )
                                     Text(
-                                        text = "发送即触发远端 Action，持续写入推理、工具调用与文件转换步骤，本地数据库自动同步。",
+                                        text = "发送即触发远端 Action，实时同步推理步骤、工具调用与文件转换产物。",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
 
@@ -289,7 +304,12 @@ fun HomePage() {
                                         ),
                                         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
                                     ) {
-                                        Text("开始新任务", fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            text = "开始新任务",
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                        )
                                         Spacer(Modifier.width(6.dp))
                                         Icon(
                                             imageVector = HugeIcons.ArrowRight01,
@@ -303,13 +323,15 @@ fun HomePage() {
                                         Surface(
                                             onClick = { openAgent(latest.id) },
                                             shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
                                         ) {
                                             Text(
                                                 text = "继续上次",
                                                 style = MaterialTheme.typography.labelLarge,
                                                 fontWeight = FontWeight.Medium,
                                                 color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                softWrap = false,
                                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                                             )
                                         }
@@ -346,7 +368,7 @@ fun HomePage() {
                         )
                         BentoWorkspaceCard(
                             title = "Workflow",
-                            subtitle = "远程编排 · PDF 转换",
+                            subtitle = "云端编排 · PDF 转换",
                             icon = HugeIcons.GitFork,
                             iconBg = MaterialTheme.colorScheme.tertiaryContainer,
                             iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -359,75 +381,68 @@ fun HomePage() {
                 }
             }
 
-            // Recent Agent Conversations (synced from remote)
+            // Recent Agent Conversations in M3 Expressive CardGroup style
             if (recentAgentConversations.isNotEmpty()) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val items = remember(recentAgentConversations) {
+                        recentAgentConversations.take(3)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
                             text = "最近 Agent 会话",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 4.dp),
+                            style = MaterialTheme.typography.titleSmallEmphasized,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 6.dp),
                         )
-                        Surface(
-                            shape = RoundedCornerShape(22.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerLow,
-                            border = BorderStroke(
-                                1.dp,
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                                recentAgentConversations.take(3).forEach { conv ->
-                                    val timeText = remember(conv.updateAt) {
-                                        conv.updateAt.toLocalDateTime()
-                                    }
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { openAgent(conv.id) }
-                                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        items.forEachIndexed { index, conv ->
+                            val timeText = remember(conv.updateAt) {
+                                conv.updateAt.toLocalDateTime()
+                            }
+                            Surface(
+                                shape = cardGroupItemShape(index, items.size),
+                                color = CustomColors.listItemColors.containerColor,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(cardGroupItemShape(index, items.size))
+                                    .clickable { openAgent(conv.id) },
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                ) {
+                                    CardGroupIcon(
+                                        icon = HugeIcons.Sparkles,
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+                                        contentColor = MaterialTheme.colorScheme.primary,
+                                    )
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp),
                                     ) {
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
-                                            modifier = Modifier.size(34.dp),
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    imageVector = HugeIcons.Sparkles,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(17.dp),
-                                                )
-                                            }
-                                        }
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = conv.title.ifBlank { "Antigravity Agent" },
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Medium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            Text(
-                                                text = timeText,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                            )
-                                        }
-                                        Icon(
-                                            imageVector = HugeIcons.ArrowRight01,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(16.dp),
+                                        Text(
+                                            text = conv.title.ifBlank { "Antigravity Agent" },
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = timeText,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
                                     }
+                                    Icon(
+                                        imageVector = HugeIcons.ArrowRight01,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp),
+                                    )
                                 }
                             }
                         }
@@ -437,22 +452,30 @@ fun HomePage() {
 
             // Quick Settings Strip
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    QuickActionChip(
-                        label = "Chat 设置",
-                        icon = HugeIcons.Settings03,
-                        onClick = { navController.navigate(Screen.Setting) },
-                        modifier = Modifier.weight(1f),
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "偏好设置",
+                        style = MaterialTheme.typography.titleSmallEmphasized,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 4.dp, top = 4.dp),
                     )
-                    QuickActionChip(
-                        label = "Agent 界面",
-                        icon = HugeIcons.Settings03,
-                        onClick = { navController.navigate(Screen.AgentSetting) },
-                        modifier = Modifier.weight(1f),
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        QuickActionChip(
+                            label = "Chat 设置",
+                            icon = HugeIcons.Settings03,
+                            onClick = { navController.navigate(Screen.Setting) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        QuickActionChip(
+                            label = "Agent 界面",
+                            icon = HugeIcons.Settings03,
+                            onClick = { navController.navigate(Screen.AgentSetting) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
         }
@@ -473,11 +496,7 @@ private fun BentoWorkspaceCard(
     Surface(
         onClick = onClick,
         shape = shape,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-        ),
+        color = CustomColors.listItemColors.containerColor,
         modifier = modifier.clip(shape),
     ) {
         Column(
@@ -491,20 +510,11 @@ private fun BentoWorkspaceCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = iconBg,
-                    modifier = Modifier.size(40.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = iconTint,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
+                CardGroupIcon(
+                    icon = icon,
+                    containerColor = iconBg,
+                    contentColor = iconTint,
+                )
                 Icon(
                     imageVector = HugeIcons.ArrowRight01,
                     contentDescription = null,
@@ -540,27 +550,23 @@ private fun QuickActionChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(18.dp)
+    val shape = RoundedCornerShape(20.dp)
     Surface(
         onClick = onClick,
         shape = shape,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-        ),
+        color = CustomColors.listItemColors.containerColor,
         modifier = modifier.clip(shape),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(17.dp),
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
             )
             Spacer(Modifier.width(8.dp))
             Text(
@@ -568,6 +574,7 @@ private fun QuickActionChip(
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
+                softWrap = false,
                 overflow = TextOverflow.Ellipsis,
             )
         }

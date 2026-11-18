@@ -37,6 +37,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,12 +54,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
+import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.ListView
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.MoreVertical
@@ -72,9 +77,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import me.rerere.hugeicons.stroke.Refresh
 import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.ui.components.ai.ChatTopBarCapsule
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.pages.chat.AssistantBackground
 import me.rerere.rikkahub.ui.pages.chat.ChatList
 import me.rerere.rikkahub.ui.pages.chat.ChatSelectionState
 import me.rerere.ui.components.RikkaConfirmDialog
@@ -121,6 +128,16 @@ fun AgentPage(id: Uuid) {
     val hazeState = rememberHazeState()
     val inputState = remember(id) { ChatInputState() }
 
+    BackHandler(enabled = previewMode && !drawerState.isOpen) {
+        previewMode = false
+    }
+
+    val listScrolledUnderTopBar by remember(listState, previewListState) {
+        derivedStateOf {
+            if (previewMode) previewListState.canScrollBackward else listState.canScrollBackward
+        }
+    }
+
     var showMoreMenu by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
@@ -157,138 +174,207 @@ fun AgentPage(id: Uuid) {
                 )
             },
         ) {
-            Scaffold(
-                topBar = {
-                    TopAppBar(
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = Color.Transparent,
-                        ),
-                        navigationIcon = {
-                            IconButton(
-                                onClick = {
-                                    focusManager.clearFocus()
-                                    keyboardController?.hide()
-                                    scope.launch { drawerState.open() }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = HugeIcons.Menu03,
-                                    contentDescription = "打开 Agent 侧边栏",
-                                )
-                            }
-                        },
-                        title = {
-                            Column {
-                                Text(
-                                    text = conversation.title.ifBlank { "Antigravity Agent" },
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    text = "文件转换智能体 · 独立工作区",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                )
-                            }
-                        },
-                        actions = {
-                            IconButton(
-                                onClick = { navigateToAgentConversation(Uuid.random()) }
-                            ) {
-                                Icon(
-                                    imageVector = HugeIcons.MessageAdd01,
-                                    contentDescription = "新建会话",
-                                )
-                            }
-                            Box {
-                                IconButton(onClick = { showMoreMenu = true }) {
-                                    Icon(
-                                        imageVector = HugeIcons.MoreVertical,
-                                        contentDescription = "更多选项",
-                                    )
-                                }
-                                DropdownMenu(
-                                    expanded = showMoreMenu,
-                                    onDismissRequest = { showMoreMenu = false },
+            Surface(
+                color = MaterialTheme.colorScheme.background,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                AssistantBackground(
+                    setting = composedSettings,
+                    modifier = Modifier.hazeSource(hazeState),
+                )
+                Scaffold(
+                    containerColor = Color.Transparent,
+                    topBar = {
+                        TopAppBar(
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = Color.Transparent,
+                            ),
+                            navigationIcon = {
+                                ChatTopBarCapsule(
+                                    hazeState = hazeState,
+                                    displaySetting = composedSettings.displaySetting,
+                                    showBackground = listScrolledUnderTopBar,
+                                    modifier = Modifier.padding(start = 8.dp, end = 4.dp),
                                 ) {
-                                    DropdownMenuItem(
-                                        text = { Text("重命名会话") },
-                                        leadingIcon = { Icon(HugeIcons.PencilEdit01, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                    IconButton(
                                         onClick = {
-                                            showMoreMenu = false
-                                            renameText = conversation.title
-                                            showRenameDialog = true
-                                        },
+                                            focusManager.clearFocus()
+                                            keyboardController?.hide()
+                                            scope.launch { drawerState.open() }
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = HugeIcons.Menu03,
+                                            contentDescription = "打开 Agent 侧边栏",
+                                        )
+                                    }
+                                }
+                            },
+                            title = {
+                                Column {
+                                    Text(
+                                        text = conversation.title.ifBlank { "Antigravity Agent" },
+                                        style = MaterialTheme.typography.titleMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
-                                    DropdownMenuItem(
-                                        text = { Text("Agent 界面设置") },
-                                        leadingIcon = { Icon(HugeIcons.Settings03, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                        onClick = {
-                                            showMoreMenu = false
-                                            navController.navigate(Screen.AgentSetting)
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("清空当前消息", color = MaterialTheme.colorScheme.error) },
-                                        leadingIcon = {
-                                            Icon(
-                                                HugeIcons.Delete01,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.error,
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                        },
-                                        onClick = {
-                                            showMoreMenu = false
-                                            showClearConfirm = true
-                                        },
+                                    val subtitleText = when {
+                                        !activeStatusText.isNullOrBlank() -> activeStatusText!!
+                                        isSyncing -> "正在同步远端记录…"
+                                        session == null -> "未连接云端 · 发送消息时连接"
+                                        else -> "文件转换智能体 · 独立工作区"
+                                    }
+                                    Text(
+                                        text = subtitleText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
-                            }
-                        },
-                    )
-                },
-                bottomBar = {
-                    AgentInput(
-                        state = inputState,
-                        settings = composedSettings,
-                        loading = isGenerating,
-                        hazeState = hazeState,
-                        onSend = { parts -> vm.sendMessage(parts) },
-                        onStop = { vm.stopGeneration() },
-                    )
-                },
-            ) { innerPadding ->
-                if (conversation.messageNodes.isEmpty()) {
-                    AgentEmptyState(
-                        innerPadding = innerPadding,
-                        onPromptClick = { prompt ->
-                            vm.sendMessage(listOf(UIMessagePart.Text(prompt)))
-                        },
-                    )
-                } else {
-                    ChatList(
-                        innerPadding = innerPadding,
-                        conversation = conversation,
-                        state = listState,
-                        previewListState = previewListState,
-                        selectionState = selectionState,
-                        loading = isGenerating,
-                        processingStatus = activeStatusText,
-                        previewMode = previewMode,
-                        onPreviewModeChange = { previewMode = it },
-                        settings = composedSettings,
-                        hazeState = hazeState,
-                        onRegenerate = { msg -> vm.regenerate(msg) },
-                        onEdit = { msg ->
-                            editingMessage = msg
-                            editingText = msg.toText()
-                        },
-                        onDelete = { msg -> vm.deleteMessage(msg) },
-                        onUpdateMessage = { node -> vm.updateMessageNode(node) },
-                    )
+                            },
+                            actions = {
+                                ChatTopBarCapsule(
+                                    hazeState = hazeState,
+                                    displaySetting = composedSettings.displaySetting,
+                                    showBackground = listScrolledUnderTopBar,
+                                    modifier = Modifier.padding(start = 4.dp, end = 8.dp),
+                                ) {
+                                    IconButton(
+                                        onClick = { navigateToAgentConversation(Uuid.random()) }
+                                    ) {
+                                        Icon(
+                                            imageVector = HugeIcons.MessageAdd01,
+                                            contentDescription = "新建会话",
+                                        )
+                                    }
+                                    Box {
+                                        IconButton(onClick = { showMoreMenu = true }) {
+                                            Icon(
+                                                imageVector = HugeIcons.MoreVertical,
+                                                contentDescription = "更多选项",
+                                            )
+                                        }
+                                        DropdownMenu(
+                                            expanded = showMoreMenu,
+                                            onDismissRequest = { showMoreMenu = false },
+                                        ) {
+                                            if (conversation.messageNodes.isNotEmpty()) {
+                                                DropdownMenuItem(
+                                                    text = { Text(if (previewMode) "返回对话" else "对话概览") },
+                                                    leadingIcon = {
+                                                        Icon(HugeIcons.ListView, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                    },
+                                                    onClick = {
+                                                        showMoreMenu = false
+                                                        previewMode = !previewMode
+                                                    },
+                                                )
+                                            }
+                                            DropdownMenuItem(
+                                                text = { Text(if (session == null) "连接云端账号" else "同步远端记录") },
+                                                leadingIcon = {
+                                                    Icon(HugeIcons.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                },
+                                                onClick = {
+                                                    showMoreMenu = false
+                                                    if (session == null) {
+                                                        vm.openConnectDialog()
+                                                    } else {
+                                                        vm.syncFromRemote()
+                                                    }
+                                                },
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("重命名会话") },
+                                                leadingIcon = { Icon(HugeIcons.PencilEdit01, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                                onClick = {
+                                                    showMoreMenu = false
+                                                    renameText = conversation.title
+                                                    showRenameDialog = true
+                                                },
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Agent 界面设置") },
+                                                leadingIcon = { Icon(HugeIcons.Settings03, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                                onClick = {
+                                                    showMoreMenu = false
+                                                    navController.navigate(Screen.AgentSetting)
+                                                },
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("清空当前消息", color = MaterialTheme.colorScheme.error) },
+                                                leadingIcon = {
+                                                    Icon(
+                                                        HugeIcons.Delete01,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.size(18.dp),
+                                                    )
+                                                },
+                                                onClick = {
+                                                    showMoreMenu = false
+                                                    showClearConfirm = true
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                        )
+                    },
+                    bottomBar = {
+                        AgentInput(
+                            state = inputState,
+                            settings = composedSettings,
+                            loading = isGenerating,
+                            hazeState = hazeState,
+                            onSend = { parts ->
+                                vm.sendMessage(parts)
+                                scope.launch {
+                                    delay(100.milliseconds)
+                                    listState.requestScrollToItem(conversation.messageNodes.size + 5)
+                                }
+                            },
+                            onStop = { vm.stopGeneration() },
+                        )
+                    },
+                ) { innerPadding ->
+                    if (conversation.messageNodes.isEmpty()) {
+                        AgentEmptyState(
+                            innerPadding = innerPadding,
+                            onPromptClick = { prompt ->
+                                vm.sendMessage(listOf(UIMessagePart.Text(prompt)))
+                            },
+                        )
+                    } else {
+                        ChatList(
+                            innerPadding = innerPadding,
+                            conversation = conversation,
+                            state = listState,
+                            previewListState = previewListState,
+                            selectionState = selectionState,
+                            loading = isGenerating,
+                            processingStatus = activeStatusText,
+                            previewMode = previewMode,
+                            onPreviewModeChange = { previewMode = it },
+                            settings = composedSettings,
+                            hazeState = hazeState,
+                            onRegenerate = { msg -> vm.regenerate(msg) },
+                            onEdit = { msg ->
+                                editingMessage = msg
+                                editingText = msg.toText()
+                            },
+                            onDelete = { msg -> vm.deleteMessage(msg) },
+                            onUpdateMessage = { node -> vm.updateMessageNode(node) },
+                            onJumpToMessage = { index ->
+                                previewMode = false
+                                scope.launch {
+                                    listState.requestScrollToItem(index)
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }

@@ -5,8 +5,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -16,10 +18,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -35,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Alert01
@@ -389,3 +394,78 @@ internal fun formatDateTime(raw: String): String {
     val formatter = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault())
     return formatter.format(instant)
 }
+
+internal enum class WorkflowButtonTone {
+    PRIMARY,
+    TONAL,
+    OUTLINED,
+    DANGER,
+}
+
+@Composable
+internal fun WorkflowActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    tone: WorkflowButtonTone = WorkflowButtonTone.TONAL,
+    enabled: Boolean = true,
+) {
+    val contentPadding = PaddingValues(horizontal = 14.dp, vertical = 9.dp)
+    val buttonModifier = modifier.defaultMinSize(minHeight = 40.dp)
+    val content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(
+            text = text,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+
+    when (tone) {
+        WorkflowButtonTone.PRIMARY -> Button(
+            onClick = onClick,
+            enabled = enabled,
+            shape = CircleShape,
+            contentPadding = contentPadding,
+            modifier = buttonModifier,
+            content = content,
+        )
+        WorkflowButtonTone.TONAL -> FilledTonalButton(
+            onClick = onClick,
+            enabled = enabled,
+            shape = CircleShape,
+            contentPadding = contentPadding,
+            modifier = buttonModifier,
+            content = content,
+        )
+        WorkflowButtonTone.OUTLINED -> OutlinedButton(
+            onClick = onClick,
+            enabled = enabled,
+            shape = CircleShape,
+            contentPadding = contentPadding,
+            modifier = buttonModifier,
+            content = content,
+        )
+        WorkflowButtonTone.DANGER -> OutlinedButton(
+            onClick = onClick,
+            enabled = enabled,
+            shape = CircleShape,
+            contentPadding = contentPadding,
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.colorScheme.error,
+            ),
+            modifier = buttonModifier,
+            content = content,
+        )
+    }
+}
+

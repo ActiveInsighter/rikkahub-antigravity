@@ -325,34 +325,22 @@ private fun ScheduleExpressiveCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                FilledTonalButton(
+                WorkflowActionButton(
+                    text = if (schedule.enabled) "暂停" else "恢复",
                     onClick = onToggle,
+                    icon = if (schedule.enabled) HugeIcons.Pause else HugeIcons.Play,
+                    tone = WorkflowButtonTone.TONAL,
                     enabled = !busy,
-                    shape = CircleShape,
-                ) {
-                    Icon(
-                        imageVector = if (schedule.enabled) HugeIcons.Pause else HugeIcons.Play,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (schedule.enabled) "暂停" else "恢复")
-                }
+                )
 
                 if (schedule.lastRun.isNotBlank()) {
-                    OutlinedButton(
+                    WorkflowActionButton(
+                        text = "最近执行",
                         onClick = onOpenLastRun,
+                        icon = HugeIcons.Clock01,
+                        tone = WorkflowButtonTone.OUTLINED,
                         enabled = !busy,
-                        shape = CircleShape,
-                    ) {
-                        Icon(
-                            imageVector = HugeIcons.Clock01,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("最近执行")
-                    }
+                    )
                 }
 
                 Spacer(Modifier.weight(1f))

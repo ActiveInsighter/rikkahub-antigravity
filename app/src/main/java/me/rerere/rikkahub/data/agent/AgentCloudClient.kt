@@ -497,6 +497,9 @@ class PocketBaseAgentCloudClient(
             ?: parseIsoMillis(job.created).takeIf { it > 0L }
             ?: 1L
         val messageFinishedInstant = endMs.takeIf { it > 0L }?.let { kotlin.time.Instant.fromEpochMilliseconds(it) }
+        val messageUpdatedInstant = parseIsoMillis(message?.updated.orEmpty())
+            .takeIf { it > 0L }
+            ?.let { kotlin.time.Instant.fromEpochMilliseconds(it) }
 
         var hasTextPart = false
         for (part in parts) {
@@ -510,7 +513,13 @@ class PocketBaseAgentCloudClient(
                             reasoning = part.content,
                             reasoningType = ReasoningType.SUMMARY_TEXT,
                             createdAt = kotlin.time.Instant.fromEpochMilliseconds(baseReasoningMs + part.sequence.coerceAtLeast(0)),
-                            finishedAt = if (part.status == "running") null else (messageFinishedInstant ?: Clock.System.now()),
+                            finishedAt = if (part.status == "running") {
+                                null
+                            } else {
+                                messageFinishedInstant
+                                    ?: messageUpdatedInstant
+                                    ?: kotlin.time.Instant.fromEpochMilliseconds(baseReasoningMs + part.sequence.coerceAtLeast(0) + 1000L)
+                            },
                         )
                     }
                 }
@@ -600,7 +609,8 @@ class PocketBaseAgentCloudClient(
 
         val durationMs = if (startMs > 0L && endMs >= startMs) endMs - startMs else null
         val finishedAt = if (!isRunning) {
-            Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+            (messageFinishedInstant ?: messageUpdatedInstant ?: Clock.System.now())
+                .toLocalDateTime(TimeZone.currentSystemDefault())
         } else null
 
         val usage = message?.usage?.toTokenUsage()

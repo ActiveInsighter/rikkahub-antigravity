@@ -508,21 +508,40 @@ class AgentVM(
                 parts = update.parts,
             )
 
-            val updatedConv = _conversation.value
-                .upsertMessage(nodeId, uiMessage)
-                .copy(
-                    title = update.job.title.ifBlank { _conversation.value.title },
-                    updateAt = Instant.now(),
-                )
-            _conversation.value = updatedConv
+            val currentConv = _conversation.value
+            val existingMsg = currentConv.messageNodes
+                .firstOrNull { it.id == nodeId }
+                ?.currentMessage
+            val nextTitle = update.job.title.ifBlank { currentConv.title }
+            val hasMessageChanged = existingMsg == null ||
+                existingMsg.parts != uiMessage.parts ||
+                existingMsg.annotations != uiMessage.annotations ||
+                existingMsg.usage != uiMessage.usage ||
+                existingMsg.stepCount != uiMessage.stepCount ||
+                existingMsg.generationTimeMs != uiMessage.generationTimeMs ||
+                (existingMsg.finishedAt == null) != (uiMessage.finishedAt == null)
+            val hasTitleChanged = nextTitle != currentConv.title
 
-            repository.saveConversation(
-                conversation = updatedConv,
-                remoteJobId = update.job.id,
-                remoteThreadRoot = update.job.threadRoot.ifBlank { update.job.id },
-                remoteStatus = update.job.status,
-                lastRemoteMessageId = msg?.id,
-            )
+            if (hasMessageChanged || hasTitleChanged || update.isTerminal) {
+                val updatedConv = if (hasMessageChanged || hasTitleChanged) {
+                    currentConv
+                        .upsertMessage(nodeId, uiMessage)
+                        .copy(
+                            title = nextTitle,
+                            updateAt = Instant.now(),
+                        ).also { _conversation.value = it }
+                } else {
+                    currentConv
+                }
+
+                repository.saveConversation(
+                    conversation = updatedConv,
+                    remoteJobId = update.job.id,
+                    remoteThreadRoot = update.job.threadRoot.ifBlank { update.job.id },
+                    remoteStatus = update.job.status,
+                    lastRemoteMessageId = msg?.id,
+                )
+            }
         }
     }
 

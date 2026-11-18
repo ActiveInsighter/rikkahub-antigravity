@@ -1,12 +1,9 @@
 package me.rerere.rikkahub.ui.pages.agent
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
@@ -19,19 +16,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
 import me.rerere.rikkahub.data.agent.AgentUiSettings
+import me.rerere.rikkahub.data.datastore.BackgroundEffectType
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.CardGroupValue
 import me.rerere.rikkahub.ui.components.ui.ConnectedChoiceButtons
+import me.rerere.rikkahub.ui.components.ui.ConnectedChoiceLabel
 import me.rerere.rikkahub.ui.components.ui.switchItem
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
@@ -71,15 +71,128 @@ fun AgentSettingPage() {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item {
-                Text(
-                    text = "消息外观",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                )
+                CardGroup(title = { Text("导航与滚动") }) {
+                    switchItem(
+                        checked = uiSettings.showMessageJumper,
+                        onCheckedChange = { checked -> update { it.copy(showMessageJumper = checked) } },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_show_message_jumper_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_show_message_jumper_title)) },
+                    )
+                    if (uiSettings.showMessageJumper) {
+                        switchItem(
+                            checked = uiSettings.messageJumperOnLeft,
+                            onCheckedChange = { checked -> update { it.copy(messageJumperOnLeft = checked) } },
+                            supportingContent = { Text(stringResource(R.string.setting_display_page_message_jumper_position_desc)) },
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_message_jumper_position_title)) },
+                        )
+                    }
+                    switchItem(
+                        checked = uiSettings.enableAutoScroll,
+                        onCheckedChange = { checked -> update { it.copy(enableAutoScroll = checked) } },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_enable_auto_scroll_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_enable_auto_scroll_title)) },
+                    )
+                    switchItem(
+                        checked = uiSettings.enableVolumeKeyScroll,
+                        onCheckedChange = { checked -> update { it.copy(enableVolumeKeyScroll = checked) } },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_volume_key_scroll_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_volume_key_scroll_title)) },
+                    )
+                    if (uiSettings.enableVolumeKeyScroll) {
+                        formItem(
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_volume_key_scroll_ratio)) },
+                            trailingContent = { CardGroupValue("${(uiSettings.volumeKeyScrollRatio * 100).roundToInt()}%") },
+                        ) {
+                            Slider(
+                                value = uiSettings.volumeKeyScrollRatio,
+                                onValueChange = { value -> update { it.copy(volumeKeyScrollRatio = value) } },
+                                valueRange = 0.25f..1.0f,
+                                steps = 2,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
             }
+
             item {
-                CardGroup {
+                CardGroup(title = { Text("背景与视觉效果") }) {
+                    switchItem(
+                        checked = uiSettings.enableBlurEffect,
+                        onCheckedChange = { checked -> update { it.copy(enableBlurEffect = checked) } },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_background_effect_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_background_effect_title)) },
+                    )
+                    if (uiSettings.enableBlurEffect) {
+                        formItem(
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_background_effect_type)) },
+                        ) {
+                            ConnectedChoiceButtons(
+                                options = BackgroundEffectType.entries,
+                                selected = uiSettings.backgroundEffectType,
+                                onSelect = { type -> update { it.copy(backgroundEffectType = type) } },
+                            ) { type, selected ->
+                                ConnectedChoiceLabel(
+                                    text = when (type) {
+                                        BackgroundEffectType.BLUR -> stringResource(R.string.setting_display_page_background_effect_blur)
+                                        BackgroundEffectType.GLASS -> stringResource(R.string.setting_display_page_background_effect_glass)
+                                    },
+                                    selected = selected,
+                                )
+                            }
+                        }
+                    }
+                    switchItem(
+                        checked = uiSettings.enableMessageGenerationHapticEffect,
+                        onCheckedChange = { checked ->
+                            update { it.copy(enableMessageGenerationHapticEffect = checked) }
+                        },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_enable_message_generation_haptic_effect_title)) },
+                    )
+                }
+            }
+
+            item {
+                CardGroup(title = { Text("输入与附件") }) {
+                    switchItem(
+                        checked = uiSettings.sendOnEnter,
+                        onCheckedChange = { checked -> update { it.copy(sendOnEnter = checked) } },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_send_on_enter_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_send_on_enter_title)) },
+                    )
+                    switchItem(
+                        checked = uiSettings.skipCropImage,
+                        onCheckedChange = { checked -> update { it.copy(skipCropImage = checked) } },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_skip_crop_image_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_skip_crop_image_title)) },
+                    )
+                    switchItem(
+                        checked = uiSettings.pasteLongTextAsFile,
+                        onCheckedChange = { checked -> update { it.copy(pasteLongTextAsFile = checked) } },
+                        supportingContent = { Text(stringResource(R.string.setting_display_page_paste_long_text_as_file_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_paste_long_text_as_file_title)) },
+                    )
+                    if (uiSettings.pasteLongTextAsFile) {
+                        formItem(
+                            headlineContent = { Text(stringResource(R.string.setting_display_page_paste_long_text_threshold_title)) },
+                            trailingContent = { CardGroupValue("${uiSettings.pasteLongTextThreshold}") },
+                        ) {
+                            Slider(
+                                value = uiSettings.pasteLongTextThreshold.toFloat(),
+                                onValueChange = { value ->
+                                    update { it.copy(pasteLongTextThreshold = value.toInt()) }
+                                },
+                                valueRange = 100f..10000f,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                CardGroup(title = { Text("消息外观") }) {
                     switchItem(
                         checked = uiSettings.showUserAvatar,
                         onCheckedChange = { checked -> update { it.copy(showUserAvatar = checked) } },
@@ -105,6 +218,7 @@ fun AgentSettingPage() {
                             value = uiSettings.bubbleOpacity,
                             onValueChange = { value -> update { it.copy(bubbleOpacity = value) } },
                             valueRange = 0.3f..1.0f,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                     switchItem(
@@ -121,15 +235,7 @@ fun AgentSettingPage() {
             }
 
             item {
-                Text(
-                    text = "思考与渲染",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                )
-            }
-            item {
-                CardGroup {
+                CardGroup(title = { Text("思考与渲染") }) {
                     switchItem(
                         checked = uiSettings.showThinkingContent,
                         onCheckedChange = { checked -> update { it.copy(showThinkingContent = checked) } },
@@ -164,15 +270,7 @@ fun AgentSettingPage() {
             }
 
             item {
-                Text(
-                    text = "字体与交互",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                )
-            }
-            item {
-                CardGroup {
+                CardGroup(title = { Text("字体设置") }) {
                     formItem(
                         headlineContent = { Text("消息字体") },
                     ) {
@@ -186,8 +284,8 @@ fun AgentSettingPage() {
                             selected = options.first { it.first == uiSettings.chatFontFamily },
                             onSelect = { (family, _) -> update { it.copy(chatFontFamily = family) } },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { option, _ ->
-                            Text(option.second, maxLines = 1)
+                        ) { option, selected ->
+                            ConnectedChoiceLabel(text = option.second, selected = selected)
                         }
                     }
                     formItem(
@@ -200,33 +298,9 @@ fun AgentSettingPage() {
                             value = uiSettings.fontSizeRatio,
                             onValueChange = { value -> update { it.copy(fontSizeRatio = value) } },
                             valueRange = 0.8f..1.4f,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
-                    switchItem(
-                        checked = uiSettings.showMessageJumper,
-                        onCheckedChange = { checked -> update { it.copy(showMessageJumper = checked) } },
-                        headlineContent = { Text("显示消息快速跳转") },
-                    )
-                    switchItem(
-                        checked = uiSettings.messageJumperOnLeft,
-                        onCheckedChange = { checked -> update { it.copy(messageJumperOnLeft = checked) } },
-                        headlineContent = { Text("消息跳转按钮靠左") },
-                    )
-                    switchItem(
-                        checked = uiSettings.sendOnEnter,
-                        onCheckedChange = { checked -> update { it.copy(sendOnEnter = checked) } },
-                        headlineContent = { Text("回车发送消息") },
-                    )
-                    switchItem(
-                        checked = uiSettings.enableAutoScroll,
-                        onCheckedChange = { checked -> update { it.copy(enableAutoScroll = checked) } },
-                        headlineContent = { Text("生成时自动滚动") },
-                    )
-                    switchItem(
-                        checked = uiSettings.enableMessageGenerationHapticEffect,
-                        onCheckedChange = { checked -> update { it.copy(enableMessageGenerationHapticEffect = checked) } },
-                        headlineContent = { Text("生成触感反馈") },
-                    )
                 }
             }
 

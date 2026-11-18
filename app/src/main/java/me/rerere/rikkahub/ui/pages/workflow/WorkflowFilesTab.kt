@@ -973,22 +973,19 @@ private fun MarkdownPreviewDialog(
                                 .padding(horizontal = 16.dp, vertical = 10.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            OutlinedButton(
+                            WorkflowActionButton(
+                                text = "关闭",
                                 onClick = onDismiss,
-                                shape = CircleShape,
+                                tone = WorkflowButtonTone.OUTLINED,
                                 modifier = Modifier.weight(1f),
-                            ) {
-                                Text("关闭")
-                            }
-                            Button(
+                            )
+                            WorkflowActionButton(
+                                text = "新建 Run",
                                 onClick = onUseInRun,
-                                shape = CircleShape,
+                                icon = HugeIcons.Play,
+                                tone = WorkflowButtonTone.PRIMARY,
                                 modifier = Modifier.weight(1f),
-                            ) {
-                                Icon(HugeIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("用此文件新建 Run")
-                            }
+                            )
                         }
                     }
                 },

@@ -768,6 +768,13 @@ private fun PdfJobExpressiveCard(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        if (job.fileSize > 0L) {
+                            Text(
+                                text = "· ${formatByteSize(job.fileSize)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.width(8.dp))
@@ -789,40 +796,34 @@ private fun PdfJobExpressiveCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (job.status.isActive) {
-                    OutlinedButton(
+                    WorkflowActionButton(
+                        text = if (job.cancelRequested) "取消中…" else "取消",
                         onClick = onCancel,
+                        icon = HugeIcons.StopCircle,
+                        tone = WorkflowButtonTone.OUTLINED,
                         enabled = !busy && !job.cancelRequested,
-                        shape = CircleShape,
                         modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(HugeIcons.StopCircle, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (job.cancelRequested) "取消中…" else "取消")
-                    }
+                    )
                 }
                 if (job.status.isTerminal) {
-                    FilledTonalButton(
+                    WorkflowActionButton(
+                        text = "重跑",
                         onClick = onRerun,
+                        icon = HugeIcons.Refresh03,
+                        tone = WorkflowButtonTone.TONAL,
                         enabled = !busy,
-                        shape = CircleShape,
                         modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(HugeIcons.Refresh03, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("重跑")
-                    }
+                    )
                 }
                 if (job.file.isNotBlank()) {
-                    Button(
+                    WorkflowActionButton(
+                        text = "下载产物",
                         onClick = onDownload,
+                        icon = HugeIcons.Download01,
+                        tone = WorkflowButtonTone.PRIMARY,
                         enabled = !busy,
-                        shape = CircleShape,
                         modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(HugeIcons.Download01, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (job.fileSize > 0L) "下载 (${formatByteSize(job.fileSize)})" else "下载")
-                    }
+                    )
                 }
             }
         }
@@ -968,15 +969,13 @@ private fun ConversionJobDetailSheet(
             }
 
             job.githubActionsUrl?.let { url ->
-                OutlinedButton(
+                WorkflowActionButton(
+                    text = "查看 GitHub Actions 日志",
                     onClick = { onOpenActions(url) },
-                    shape = CircleShape,
+                    icon = HugeIcons.Link01,
+                    tone = WorkflowButtonTone.OUTLINED,
                     modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(HugeIcons.Link01, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("查看 GitHub Actions 运行日志")
-                }
+                )
             }
 
             Row(
@@ -984,34 +983,31 @@ private fun ConversionJobDetailSheet(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (job.status.isActive) {
-                    OutlinedButton(
+                    WorkflowActionButton(
+                        text = if (job.cancelRequested) "取消中…" else "取消任务",
                         onClick = onCancel,
+                        tone = WorkflowButtonTone.OUTLINED,
                         enabled = !busy && !job.cancelRequested,
-                        shape = CircleShape,
                         modifier = Modifier.weight(1f),
-                    ) {
-                        Text(if (job.cancelRequested) "取消中…" else "取消任务")
-                    }
+                    )
                 }
                 if (job.status.isTerminal) {
-                    FilledTonalButton(
+                    WorkflowActionButton(
+                        text = "重跑任务",
                         onClick = onRerun,
+                        tone = WorkflowButtonTone.TONAL,
                         enabled = !busy,
-                        shape = CircleShape,
                         modifier = Modifier.weight(1f),
-                    ) {
-                        Text("重跑任务")
-                    }
+                    )
                 }
                 if (job.file.isNotBlank()) {
-                    Button(
+                    WorkflowActionButton(
+                        text = "下载产物",
                         onClick = onDownload,
+                        tone = WorkflowButtonTone.PRIMARY,
                         enabled = !busy,
-                        shape = CircleShape,
                         modifier = Modifier.weight(1f),
-                    ) {
-                        Text("下载产物")
-                    }
+                    )
                 }
             }
         }

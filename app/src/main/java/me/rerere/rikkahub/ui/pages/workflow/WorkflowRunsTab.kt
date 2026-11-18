@@ -486,6 +486,8 @@ private fun RunCardItem(
                                 text = run.versionLabel,
                                 style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                softWrap = false,
                             )
                         }
 
@@ -499,6 +501,8 @@ private fun RunCardItem(
                             text = formatRelativeTime(run.updated),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }

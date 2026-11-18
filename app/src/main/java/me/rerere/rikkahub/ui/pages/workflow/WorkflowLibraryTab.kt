@@ -830,28 +830,28 @@ private fun TemplateExpressiveCard(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
                     text = "更新于 ${formatWorkflowTime(template.updated)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
+                    WorkflowActionButton(
+                        text = "详情",
                         onClick = onEdit,
-                        shape = CircleShape,
-                    ) {
-                        Text("详情")
-                    }
-                    FilledTonalButton(
+                        tone = WorkflowButtonTone.OUTLINED,
+                    )
+                    WorkflowActionButton(
+                        text = "使用模板",
                         onClick = onUse,
-                        shape = CircleShape,
-                    ) {
-                        Icon(HugeIcons.Play, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("使用模板")
-                    }
+                        icon = HugeIcons.Play,
+                        tone = WorkflowButtonTone.TONAL,
+                    )
                 }
             }
         }

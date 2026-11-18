@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
+import me.rerere.rikkahub.data.datastore.BackgroundEffectType
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.datastore.DisplaySetting
@@ -38,7 +39,14 @@ data class AgentUiSettings(
     val enableLatexRendering: Boolean = true,
     val sendOnEnter: Boolean = false,
     val enableAutoScroll: Boolean = true,
+    val enableVolumeKeyScroll: Boolean = false,
+    val volumeKeyScrollRatio: Float = 0.5f,
+    val enableBlurEffect: Boolean = true,
+    val backgroundEffectType: BackgroundEffectType = BackgroundEffectType.BLUR,
     val enableMessageGenerationHapticEffect: Boolean = false,
+    val pasteLongTextAsFile: Boolean = true,
+    val pasteLongTextThreshold: Int = 2000,
+    val skipCropImage: Boolean = false,
     val chatFontFamily: ChatFontFamily = ChatFontFamily.DEFAULT,
     val conversationSortOrder: ConversationSortOrder = ConversationSortOrder.UPDATE_TIME,
 ) {
@@ -62,7 +70,14 @@ data class AgentUiSettings(
         enableLatexRendering = enableLatexRendering,
         sendOnEnter = sendOnEnter,
         enableAutoScroll = enableAutoScroll,
+        enableVolumeKeyScroll = enableVolumeKeyScroll,
+        volumeKeyScrollRatio = volumeKeyScrollRatio,
+        enableBlurEffect = enableBlurEffect,
+        backgroundEffectType = backgroundEffectType,
         enableMessageGenerationHapticEffect = enableMessageGenerationHapticEffect,
+        pasteLongTextAsFile = pasteLongTextAsFile,
+        pasteLongTextThreshold = pasteLongTextThreshold,
+        skipCropImage = skipCropImage,
         chatFontFamily = chatFontFamily,
         conversationSortOrder = conversationSortOrder,
     )

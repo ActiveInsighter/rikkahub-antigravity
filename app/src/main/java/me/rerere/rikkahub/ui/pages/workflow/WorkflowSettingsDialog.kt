@@ -506,27 +506,24 @@ private fun ModelsSettingsContent(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
+                        WorkflowActionButton(
+                            text = "添加",
                             onClick = {
                                 onAddSavedModel(customModelId.trim(), customModelName.trim().ifBlank { null })
                                 customModelId = ""
                                 customModelName = ""
                             },
+                            icon = HugeIcons.Add01,
+                            tone = WorkflowButtonTone.PRIMARY,
                             enabled = !state.isMutating && customModelId.isNotBlank(),
-                            shape = CircleShape,
                             modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(HugeIcons.Add01, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("添加")
-                        }
-                        FilledTonalButton(
+                        )
+                        WorkflowActionButton(
+                            text = "从目录选择 (${state.catalog.models.size})",
                             onClick = { showCatalogSheet = true },
+                            tone = WorkflowButtonTone.TONAL,
                             enabled = state.catalog.models.isNotEmpty(),
-                            shape = CircleShape,
-                        ) {
-                            Text("从目录选择 (${state.catalog.models.size})")
-                        }
+                        )
                     }
                 }
             }
