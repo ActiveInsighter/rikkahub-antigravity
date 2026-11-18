@@ -67,6 +67,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
@@ -191,6 +193,18 @@ fun AgentPage(id: Uuid) {
         }
     }
 
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+        if (draftLoaded) {
+            vm.saveDraft(inputState.textContent.text.toString())
+        }
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        if (draftLoaded) {
+            vm.saveDraft(inputState.textContent.text.toString())
+        }
+    }
+
     var listInitialized by remember(id) { mutableStateOf(false) }
     LaunchedEffect(id, conversation.messageNodes.size) {
         if (!listInitialized && conversation.messageNodes.isNotEmpty()) {
@@ -222,6 +236,8 @@ fun AgentPage(id: Uuid) {
     var showClearConfirm by remember { mutableStateOf(false) }
     var editingMessage by remember { mutableStateOf<UIMessage?>(null) }
     var editingText by remember { mutableStateOf("") }
+    var insightsMessage by remember { mutableStateOf<UIMessage?>(null) }
+    var showLiveInsights by remember { mutableStateOf(false) }
 
     fun navigateToAgentConversation(targetId: Uuid) {
         navController.navigate(Screen.Agent(targetId.toString())) {
@@ -294,6 +310,7 @@ fun AgentPage(id: Uuid) {
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                     val subtitleText = when {
+                                        isGenerating && !activeStatusText.isNullOrBlank() -> "运行中 · $activeStatusText"
                                         !activeStatusText.isNullOrBlank() -> activeStatusText!!
                                         isSyncing -> "正在同步…"
                                         session == null -> "未连接云端 · $selectedAgentModelName"
@@ -425,12 +442,29 @@ fun AgentPage(id: Uuid) {
                                         listState.requestScrollToItem(index)
                                     }
                                 },
+                                onProcessingStatusClick = { showLiveInsights = true },
+                                onOpenAgentInsights = { msg -> insightsMessage = msg },
                             )
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showLiveInsights || insightsMessage != null) {
+        val targetMessage = insightsMessage ?: conversation.currentMessages.lastOrNull {
+            it.role == me.rerere.ai.core.MessageRole.ASSISTANT
+        }
+        AgentInsightsSheet(
+            message = targetMessage,
+            isRunning = isGenerating && (insightsMessage == null || insightsMessage?.id == targetMessage?.id),
+            liveElapsedText = activeStatusText,
+            onDismiss = {
+                showLiveInsights = false
+                insightsMessage = null
+            },
+        )
     }
 
     if (showAttachSheet) {

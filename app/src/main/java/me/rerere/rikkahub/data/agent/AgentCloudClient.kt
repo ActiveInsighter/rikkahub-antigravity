@@ -143,6 +143,8 @@ data class RemoteGeminiMessage(
     val updated: String,
     val streamRevision: Int?,
     val usage: RemoteGeminiUsage,
+    val agentSummaryJson: String? = null,
+    val agentTimingsJson: String? = null,
 )
 
 data class RemoteGeminiUsage(
@@ -784,6 +786,8 @@ class PocketBaseAgentCloudClient(
             usage = usage,
             generationTimeMs = durationMs,
             stepCount = stepCount,
+            agentSummaryJson = message?.agentSummaryJson,
+            agentTimingsJson = message?.agentTimingsJson,
         )
     }
 
@@ -920,7 +924,23 @@ class PocketBaseAgentCloudClient(
             method = "GET",
             token = session.token,
         ).jsonObject
-        return parseMessage(obj)
+        val base = parseMessage(obj)
+        if (base.agentSummaryJson != null || base.agentTimingsJson != null) {
+            return base
+        }
+        val extra = runCatching {
+            workflowRepository.executeJsonCancellable(
+                baseUrl = session.baseUrl,
+                path = "/api/collections/$MESSAGES_COLLECTION/records/$messageId",
+                method = "GET",
+                query = mapOf("fields" to "agentSummary,agentTimings"),
+                token = session.token,
+            ).jsonObject
+        }.getOrNull() ?: return base
+        return base.copy(
+            agentSummaryJson = jsonFieldString(extra, "agentSummary") ?: base.agentSummaryJson,
+            agentTimingsJson = jsonFieldString(extra, "agentTimings") ?: base.agentTimingsJson,
+        )
     }
 
     private suspend fun drainParts(
@@ -1054,7 +1074,18 @@ class PocketBaseAgentCloudClient(
             updated = obj.str("updated"),
             streamRevision = obj["streamRevision"]?.jsonPrimitive?.intOrNull,
             usage = usage,
+            agentSummaryJson = jsonFieldString(obj, "agentSummary"),
+            agentTimingsJson = jsonFieldString(obj, "agentTimings"),
         )
+    }
+
+    private fun jsonFieldString(obj: JsonObject, key: String): String? {
+        val el = obj[key] ?: return null
+        return when (el) {
+            is JsonObject -> if (el.isEmpty()) null else el.toString()
+            is JsonPrimitive -> el.contentOrNull?.trim()?.takeIf { it.isNotEmpty() && it != "null" }
+            else -> null
+        }
     }
 
     private fun parsePart(obj: JsonObject): RemoteAgentPart {
