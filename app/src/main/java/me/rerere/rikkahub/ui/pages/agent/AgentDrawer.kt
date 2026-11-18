@@ -46,18 +46,23 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Folder01
-import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
+import me.rerere.hugeicons.stroke.TransactionHistory
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Folder
+import me.rerere.rikkahub.ui.components.ui.Greeting
+import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.pages.chat.ConversationList
 import me.rerere.rikkahub.ui.pages.chat.ConversationSortButton
 import me.rerere.rikkahub.ui.pages.chat.DrawerAction
+import me.rerere.rikkahub.ui.pages.chat.DrawerEntry
 import me.rerere.rikkahub.ui.pages.chat.FolderBar
+import me.rerere.rikkahub.utils.toLocalDateTime
 import org.koin.androidx.compose.koinViewModel
 import kotlin.uuid.Uuid
 
@@ -69,17 +74,22 @@ fun AgentDrawerContent(
     onCloseDrawer: () -> Unit,
 ) {
     val navController = LocalNavController.current
+    val settings = LocalSettings.current
     val scope = rememberCoroutineScope()
     val activity = LocalContext.current as ComponentActivity
     val drawerVm: AgentDrawerVM = koinViewModel(viewModelStoreOwner = activity)
 
     val conversations = drawerVm.conversationsPaging.collectAsLazyPagingItems()
+    val allConversations by drawerVm.allConversations.collectAsStateWithLifecycle()
     val folders by drawerVm.folders.collectAsStateWithLifecycle()
     val selectedFolderId by drawerVm.selectedFolderId.collectAsStateWithLifecycle()
     val sortOrder by drawerVm.sortOrder.collectAsStateWithLifecycle()
-    val searchQuery by drawerVm.searchQuery.collectAsStateWithLifecycle()
     val activeConversationIds by drawerVm.activeConversationIds.collectAsStateWithLifecycle()
+    val conversationStatuses by drawerVm.conversationStatuses.collectAsStateWithLifecycle()
     val conversationListState = rememberLazyListState()
+
+    var showHistorySearchSheet by remember { mutableStateOf(false) }
+    var historySearchQuery by remember { mutableStateOf("") }
 
     var showMoveToFolderSheet by remember { mutableStateOf(false) }
     var conversationToMoveFolder by remember { mutableStateOf<Conversation?>(null) }
@@ -98,34 +108,51 @@ fun AgentDrawerContent(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // 搜索框（官方样式）
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { drawerVm.updateSearchQuery(it) },
-                placeholder = { Text(stringResource(R.string.chat_page_search_chats)) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = HugeIcons.Search01,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-                trailingIcon = if (searchQuery.isNotEmpty()) {
-                    {
-                        IconButton(onClick = { drawerVm.updateSearchQuery("") }) {
-                            Icon(
-                                imageVector = HugeIcons.Cancel01,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
-                    }
-                } else null,
-                singleLine = true,
-                shape = RoundedCornerShape(24.dp),
+            // 用户头像与昵称（与官方 Chat 侧边栏一致）
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                UIAvatar(
+                    name = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
+                    value = settings.displaySetting.userAvatar,
+                    onUpdate = {},
+                    modifier = Modifier.size(50.dp),
+                )
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Greeting(
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+            }
+
+            // 历史记录入口 + 尾随搜索图标（与官方 Chat 侧边栏一致，不在抽屉内放输入框，避免弹出软键盘）
+            DrawerEntry(
+                icon = HugeIcons.TransactionHistory,
+                text = stringResource(R.string.chat_page_history),
+                onClick = {
+                    historySearchQuery = ""
+                    showHistorySearchSheet = true
+                },
+                trailingIcon = HugeIcons.Search01,
+                trailingDescription = stringResource(R.string.chat_page_search_chats),
+                onTrailingClick = {
+                    historySearchQuery = ""
+                    showHistorySearchSheet = true
+                },
             )
 
             // 文件夹栏与排序按钮（复用官方组件）
@@ -168,13 +195,15 @@ fun AgentDrawerContent(
                 drawerHeader()
             }
 
-            // 复用官方 ConversationList（含置顶、按时间分组、运行状态显示等）
+            // 复用官方 ConversationList（含置顶、按时间分组、运行/未读/失败状态显示等）
             ConversationList(
                 current = currentConversation,
                 conversations = conversations,
                 conversationJobs = activeConversationIds,
                 listState = conversationListState,
                 header = if (scrollableHeader) drawerHeader else null,
+                statusMap = conversationStatuses,
+                showMoveToAssistant = false,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
@@ -202,7 +231,7 @@ fun AgentDrawerContent(
                 },
             )
 
-            // 底部栏（官方样式，保留：助手设置、用量统计、设置）
+            // 底部栏（去除助手相关项；保留用量统计与设置，设置直接进入 AgentSetting）
             Row(
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically,
@@ -210,22 +239,6 @@ fun AgentDrawerContent(
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp)
             ) {
-                DrawerAction(
-                    icon = {
-                        Icon(
-                            imageVector = HugeIcons.LookTop,
-                            contentDescription = "助手设置",
-                        )
-                    },
-                    label = {
-                        Text("助手设置")
-                    },
-                    onClick = {
-                        onCloseDrawer()
-                        navController.navigate(Screen.AgentSetting)
-                    },
-                )
-
                 DrawerAction(
                     icon = {
                         Icon(
@@ -256,7 +269,7 @@ fun AgentDrawerContent(
                     },
                     onClick = {
                         onCloseDrawer()
-                        navController.navigate(Screen.Setting)
+                        navController.navigate(Screen.AgentSetting)
                     },
                 )
             }
@@ -472,5 +485,83 @@ fun AgentDrawerContent(
                 }
             },
         )
+    }
+
+    if (showHistorySearchSheet) {
+        val searchSheetState = rememberBottomSheetState(initialValue = SheetValue.Expanded)
+        val filtered = remember(allConversations, historySearchQuery) {
+            val q = historySearchQuery.trim()
+            if (q.isEmpty()) allConversations
+            else allConversations.filter { it.title.contains(q, ignoreCase = true) }
+        }
+        ModalBottomSheet(
+            onDismissRequest = { showHistorySearchSheet = false },
+            sheetState = searchSheetState,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.chat_page_history),
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                OutlinedTextField(
+                    value = historySearchQuery,
+                    onValueChange = { historySearchQuery = it },
+                    placeholder = { Text(stringResource(R.string.chat_page_search_chats)) },
+                    leadingIcon = {
+                        Icon(HugeIcons.Search01, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    trailingIcon = if (historySearchQuery.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { historySearchQuery = "" }) {
+                                Icon(HugeIcons.Cancel01, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    } else null,
+                    singleLine = true,
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(bottom = 16.dp),
+                ) {
+                    items(filtered, key = { it.id.toString() }) { conv ->
+                        Surface(
+                            onClick = {
+                                showHistorySearchSheet = false
+                                onSelectConversation(conv.id)
+                                onCloseDrawer()
+                            },
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = conv.title.ifBlank { "Agent" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = conv.updateAt.toLocalDateTime(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

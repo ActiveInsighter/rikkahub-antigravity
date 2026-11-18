@@ -32,6 +32,8 @@ data class AgentConversationEntity(
     val lastRemoteMessageId: String? = null,
     @ColumnInfo("last_synced_at", defaultValue = "0")
     val lastSyncedAt: Long = 0L,
+    @ColumnInfo("has_unread", defaultValue = "0")
+    val hasUnread: Boolean = false,
 )
 
 @Entity(
@@ -157,3 +159,17 @@ object SyncStatus {
     const val PENDING = "PENDING"
     const val DELETED = "DELETED"
 }
+
+/**
+ * Local-only per-conversation input draft cache (supports both new and existing conversations).
+ */
+@Entity(tableName = "agent_draft")
+data class AgentDraftEntity(
+    @PrimaryKey
+    @ColumnInfo("conversation_id")
+    val conversationId: String,
+    @ColumnInfo("text")
+    val text: String,
+    @ColumnInfo("updated_at")
+    val updatedAt: Long,
+)

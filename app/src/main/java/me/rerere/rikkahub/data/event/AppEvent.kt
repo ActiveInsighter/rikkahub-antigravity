@@ -23,4 +23,12 @@ sealed class AppEvent {
         val senderName: String,
         val contentPreview: String?,
     ) : AppEvent()
+
+    /** Agent 云端任务结束（完成或失败），用于 APP 内与后台通知。 */
+    data class AgentJobFinished(
+        val conversationId: Uuid,
+        val title: String,
+        val success: Boolean,
+        val preview: String,
+    ) : AppEvent()
 }

@@ -75,6 +75,13 @@ sealed class ConversationListItem {
     ) : ConversationListItem()
 }
 
+enum class ConversationStatusBadge {
+    NONE,
+    RUNNING,
+    COMPLETED_UNREAD,
+    FAILED,
+}
+
 @Composable
 fun ColumnScope.ConversationList(
     current: Conversation,
@@ -83,6 +90,8 @@ fun ColumnScope.ConversationList(
     listState: LazyListState,
     modifier: Modifier = Modifier,
     header: (@Composable () -> Unit)? = null,
+    statusMap: Map<Uuid, ConversationStatusBadge> = emptyMap(),
+    showMoveToAssistant: Boolean = true,
     onClick: (Conversation) -> Unit = {},
     onDelete: (Conversation) -> Unit = {},
     onRegenerateTitle: (Conversation) -> Unit = {},
@@ -169,6 +178,8 @@ fun ColumnScope.ConversationList(
                         conversation = item.conversation,
                         selected = item.conversation.id == current.id,
                         loading = item.conversation.id in conversationJobs,
+                        statusBadge = statusMap[item.conversation.id] ?: ConversationStatusBadge.NONE,
+                        showMoveToAssistant = showMoveToAssistant,
                         onClick = onClick,
                         onDelete = onDelete,
                         onRegenerateTitle = onRegenerateTitle,
@@ -240,6 +251,8 @@ private fun ConversationItem(
     conversation: Conversation,
     selected: Boolean,
     loading: Boolean,
+    statusBadge: ConversationStatusBadge = ConversationStatusBadge.NONE,
+    showMoveToAssistant: Boolean = true,
     modifier: Modifier = Modifier,
     onDelete: (Conversation) -> Unit = {},
     onRegenerateTitle: (Conversation) -> Unit = {},
@@ -277,14 +290,20 @@ private fun ConversationItem(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
                 text = conversation.title.ifBlank { stringResource(id = R.string.chat_page_new_message) },
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = if (statusBadge == ConversationStatusBadge.COMPLETED_UNREAD) {
+                    FontWeight.SemiBold
+                } else {
+                    FontWeight.Normal
+                },
+                modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.weight(1f))
 
             // 置顶图标
             AnimatedVisibility(conversation.isPinned) {
@@ -295,16 +314,45 @@ private fun ConversationItem(
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
-            AnimatedVisibility(loading) {
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(MaterialTheme.extendColors.green6)
-                        .size(4.dp)
-                        .semantics {
-                            contentDescription = "Loading"
-                        }
-                )
+            when {
+                statusBadge == ConversationStatusBadge.RUNNING -> {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .semantics { contentDescription = "Running" },
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.extendColors.green6,
+                    )
+                }
+                statusBadge == ConversationStatusBadge.COMPLETED_UNREAD -> {
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
+                            .size(8.dp)
+                            .semantics { contentDescription = "Unread" }
+                    )
+                }
+                statusBadge == ConversationStatusBadge.FAILED -> {
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.error)
+                            .size(8.dp)
+                            .semantics { contentDescription = "Failed" }
+                    )
+                }
+                loading -> {
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(MaterialTheme.extendColors.green6)
+                            .size(4.dp)
+                            .semantics {
+                                contentDescription = "Loading"
+                            }
+                    )
+                }
             }
             DropdownMenu(
                 expanded = showDropdownMenu,
@@ -341,18 +389,20 @@ private fun ConversationItem(
                     }
                 )
 
-                DropdownMenuItem(
-                    text = {
-                        Text(stringResource(R.string.chat_page_move_to_assistant))
-                    },
-                    onClick = {
-                        onMoveToAssistant(conversation)
-                        showDropdownMenu = false
-                    },
-                    leadingIcon = {
-                        Icon(HugeIcons.Forward02, null, modifier = Modifier.mirrorForRtl())
-                    }
-                )
+                if (showMoveToAssistant) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(stringResource(R.string.chat_page_move_to_assistant))
+                        },
+                        onClick = {
+                            onMoveToAssistant(conversation)
+                            showDropdownMenu = false
+                        },
+                        leadingIcon = {
+                            Icon(HugeIcons.Forward02, null, modifier = Modifier.mirrorForRtl())
+                        }
+                    )
+                }
 
                 DropdownMenuItem(
                     text = {

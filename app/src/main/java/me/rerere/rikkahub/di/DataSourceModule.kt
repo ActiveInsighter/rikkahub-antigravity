@@ -347,4 +347,8 @@ val dataSourceModule = module {
     single {
         get<me.rerere.rikkahub.data.agent.AgentDatabase>().usageRecordDao()
     }
+
+    single {
+        get<me.rerere.rikkahub.data.agent.AgentDatabase>().draftDao()
+    }
 }

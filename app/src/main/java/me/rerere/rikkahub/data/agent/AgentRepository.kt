@@ -20,6 +20,11 @@ data class AgentConversationSnapshot(
     val isActive: Boolean = false,
 )
 
+data class AgentConversationStatusInfo(
+    val remoteStatus: String?,
+    val hasUnread: Boolean,
+)
+
 /**
  * Repository backed by [AgentDatabase], synchronized with the remote
  * AnyWorkflow / PocketBase database as the source of truth.
@@ -30,6 +35,7 @@ class AgentRepository(
     private val assistantDao: AgentAssistantDao,
     private val folderDao: AgentFolderDao,
     private val usageRecordDao: AgentUsageRecordDao,
+    private val draftDao: AgentDraftDao,
     private val cloudClient: AgentCloudClient,
 ) {
     fun observeConversations(sortOrder: ConversationSortOrder): Flow<List<Conversation>> {
@@ -62,6 +68,23 @@ class AgentRepository(
                 .filter { it.remoteStatus != null && PocketBaseAgentCloudClient.isActiveStatus(it.remoteStatus) }
                 .mapNotNull { runCatching { Uuid.parse(it.id) }.getOrNull() }
                 .toSet()
+        }
+    }
+
+    fun observeConversationStatusMap(): Flow<Map<Uuid, AgentConversationStatusInfo>> {
+        return conversationDao.getAllSortedByUpdateFlow().map { list ->
+            buildMap {
+                for (entity in list) {
+                    val uuid = runCatching { Uuid.parse(entity.id) }.getOrNull() ?: continue
+                    put(
+                        uuid,
+                        AgentConversationStatusInfo(
+                            remoteStatus = entity.remoteStatus,
+                            hasUnread = entity.hasUnread,
+                        )
+                    )
+                }
+            }
         }
     }
 
@@ -120,6 +143,16 @@ class AgentRepository(
             val updatedMs = PocketBaseAgentCloudClient.parseIsoMillis(thread.updated)
                 .takeIf { it > 0L } ?: existing?.updateAt ?: createdMs
 
+            val resolvedFolderId = when {
+                !thread.hasFolderIdField -> existing?.folderId
+                thread.folderId.isNullOrBlank() -> null
+                else -> thread.folderId
+            }
+            val wasActive = existing?.remoteStatus?.let { PocketBaseAgentCloudClient.isActiveStatus(it) } == true
+            val becameCompleted = thread.status.equals("completed", ignoreCase = true) &&
+                (wasActive || (existing != null && updatedMs > existing.updateAt && existing.remoteStatus != "completed"))
+            val nextUnread = if (becameCompleted) true else (existing?.hasUnread ?: false)
+
             conversationDao.upsert(
                 AgentConversationEntity(
                     id = localId,
@@ -127,13 +160,14 @@ class AgentRepository(
                     createAt = createdMs,
                     updateAt = updatedMs,
                     isPinned = thread.pinned,
-                    folderId = thread.folderId?.takeIf { it.isNotBlank() } ?: existing?.folderId,
+                    folderId = resolvedFolderId,
                     assistantId = existing?.assistantId,
                     remoteJobId = thread.jobId,
                     remoteThreadRoot = thread.threadRoot,
                     remoteStatus = thread.status,
                     lastRemoteMessageId = existing?.lastRemoteMessageId,
                     lastSyncedAt = now,
+                    hasUnread = nextUnread,
                 )
             )
         }
@@ -205,6 +239,7 @@ class AgentRepository(
         remoteThreadRoot: String? = null,
         remoteStatus: String? = null,
         lastRemoteMessageId: String? = null,
+        hasUnread: Boolean? = null,
     ) {
         val convId = conversation.id.toString()
         val existing = conversationDao.getById(convId)
@@ -221,9 +256,37 @@ class AgentRepository(
             remoteStatus = remoteStatus ?: existing?.remoteStatus,
             lastRemoteMessageId = lastRemoteMessageId ?: existing?.lastRemoteMessageId,
             lastSyncedAt = System.currentTimeMillis(),
+            hasUnread = hasUnread ?: existing?.hasUnread ?: false,
         )
         conversationDao.upsert(entity)
         saveNodesForConversation(convId, conversation.messageNodes)
+    }
+
+    suspend fun markAsRead(conversationId: Uuid) {
+        conversationDao.updateUnread(conversationId.toString(), false)
+    }
+
+    suspend fun getDraft(conversationId: Uuid): String? {
+        return draftDao.getByConversationId(conversationId.toString())?.text
+    }
+
+    suspend fun saveDraft(conversationId: Uuid, text: String) {
+        val id = conversationId.toString()
+        if (text.isEmpty()) {
+            draftDao.deleteByConversationId(id)
+        } else {
+            draftDao.upsert(
+                AgentDraftEntity(
+                    conversationId = id,
+                    text = text,
+                    updatedAt = System.currentTimeMillis(),
+                )
+            )
+        }
+    }
+
+    suspend fun clearDraft(conversationId: Uuid) {
+        draftDao.deleteByConversationId(conversationId.toString())
     }
 
     private suspend fun saveNodesForConversation(convId: String, nodes: List<MessageNode>) {

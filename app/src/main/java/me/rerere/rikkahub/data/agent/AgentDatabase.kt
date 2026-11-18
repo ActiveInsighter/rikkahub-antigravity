@@ -14,8 +14,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AgentAssistantEntity::class,
         AgentFolderEntity::class,
         AgentUsageRecordEntity::class,
+        AgentDraftEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AgentDatabase : RoomDatabase() {
@@ -24,6 +25,7 @@ abstract class AgentDatabase : RoomDatabase() {
     abstract fun assistantDao(): AgentAssistantDao
     abstract fun folderDao(): AgentFolderDao
     abstract fun usageRecordDao(): AgentUsageRecordDao
+    abstract fun draftDao(): AgentDraftDao
 
     companion object {
         const val DATABASE_NAME = "agent.db"
@@ -104,9 +106,24 @@ abstract class AgentDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE agent_conversation ADD COLUMN has_unread INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `agent_draft` (
+                        `conversation_id` TEXT NOT NULL PRIMARY KEY,
+                        `text` TEXT NOT NULL,
+                        `updated_at` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun create(context: Context): AgentDatabase =
             Room.databaseBuilder(context, AgentDatabase::class.java, DATABASE_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .build()
     }

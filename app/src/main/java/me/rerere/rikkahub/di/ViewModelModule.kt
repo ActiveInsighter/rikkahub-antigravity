@@ -127,6 +127,7 @@ val viewModelModule = module {
             cloudClient = get(),
             settingsStore = get(),
             workflowRepository = get(),
+            appEventBus = get(),
         )
     }
     viewModel {

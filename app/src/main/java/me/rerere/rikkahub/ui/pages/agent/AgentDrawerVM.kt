@@ -18,13 +18,14 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
-import me.rerere.rikkahub.data.agent.AgentAssistantEntity
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
+import me.rerere.rikkahub.data.agent.PocketBaseAgentCloudClient
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Folder
 import me.rerere.rikkahub.ui.pages.chat.ConversationListItem
+import me.rerere.rikkahub.ui.pages.chat.ConversationStatusBadge
 import me.rerere.rikkahub.utils.toLocalString
 import java.time.LocalDate
 import java.time.ZoneId
@@ -47,11 +48,30 @@ class AgentDrawerVM(
     val folders: StateFlow<List<Folder>> = repository.observeFolders()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val assistants: StateFlow<List<AgentAssistantEntity>> = repository.observeAssistants()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
     val activeConversationIds: StateFlow<Set<Uuid>> = repository.observeActiveConversationIds()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    val conversationStatuses: StateFlow<Map<Uuid, ConversationStatusBadge>> =
+        repository.observeConversationStatusMap()
+            .map { map ->
+                map.mapValues { (_, info) ->
+                    val status = info.remoteStatus
+                    when {
+                        status != null && PocketBaseAgentCloudClient.isActiveStatus(status) ->
+                            ConversationStatusBadge.RUNNING
+                        status.equals("failed", ignoreCase = true) ->
+                            ConversationStatusBadge.FAILED
+                        info.hasUnread ->
+                            ConversationStatusBadge.COMPLETED_UNREAD
+                        else ->
+                            ConversationStatusBadge.NONE
+                    }
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    val allConversations: StateFlow<List<Conversation>> = repository.observeConversations(ConversationSortOrder.UPDATE_TIME)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val conversationsPaging: Flow<PagingData<ConversationListItem>> = combine(

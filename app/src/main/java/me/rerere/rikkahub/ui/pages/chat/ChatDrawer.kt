@@ -774,7 +774,7 @@ private fun DrawerActions(navController: Navigator) {
 }
 
 @Composable
-private fun DrawerEntry(
+internal fun DrawerEntry(
     icon: ImageVector,
     text: String,
     onClick: () -> Unit,

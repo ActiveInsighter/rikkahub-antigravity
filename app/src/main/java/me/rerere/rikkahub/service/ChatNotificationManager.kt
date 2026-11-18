@@ -62,6 +62,7 @@ class ChatNotificationManager(
                 when (event) {
                     is AppEvent.ChatGenerationUpdate -> handleGenerationUpdate(event)
                     is AppEvent.ChatGenerationEnded -> handleGenerationEnded(event)
+                    is AppEvent.AgentJobFinished -> handleAgentJobFinished(event)
                     else -> {}
                 }
             }
@@ -89,6 +90,17 @@ class ChatNotificationManager(
         if (isForeground.value) return
         if (!settingsStore.settingsFlow.value.displaySetting.enableNotificationOnMessageGeneration) return
         sendGenerationDoneNotification(event.conversationId, event.senderName, contentPreview)
+    }
+
+    private fun handleAgentJobFinished(event: AppEvent.AgentJobFinished) {
+        if (isForeground.value) return
+        if (!settingsStore.settingsFlow.value.displaySetting.enableNotificationOnMessageGeneration) return
+        val title = if (event.success) {
+            "Agent 已完成：${event.title.ifBlank { "Agent" }}"
+        } else {
+            "Agent 执行失败：${event.title.ifBlank { "Agent" }}"
+        }
+        sendGenerationDoneNotification(event.conversationId, title, event.preview)
     }
 
     private fun sendGenerationDoneNotification(

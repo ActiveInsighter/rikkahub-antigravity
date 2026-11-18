@@ -23,6 +23,8 @@ import me.rerere.rikkahub.data.agent.AgentUiSettings
 import me.rerere.rikkahub.data.agent.PocketBaseAgentCloudClient
 import me.rerere.rikkahub.data.agent.RemoteAgentSourceInput
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
+import me.rerere.rikkahub.data.event.AppEvent
+import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
@@ -41,6 +43,7 @@ class AgentVM(
     private val cloudClient: AgentCloudClient,
     private val settingsStore: AgentSettingsStore,
     private val workflowRepository: WorkflowRepository,
+    private val appEventBus: AppEventBus,
 ) : ViewModel() {
     private val conversationId: Uuid = Uuid.parse(id)
 
@@ -95,6 +98,9 @@ class AgentVM(
     val uiSettings: StateFlow<AgentUiSettings> = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current)
 
+    private val _initialDraft = MutableStateFlow<String?>(null)
+    val initialDraft: StateFlow<String?> = _initialDraft.asStateFlow()
+
     private var generationJob: Job? = null
     private var activeJobId: String? = null
     private var activeThreadRoot: String? = null
@@ -105,6 +111,9 @@ class AgentVM(
             try {
                 val localAssistant = repository.ensureDefaultAssistant()
                 _agentAssistant.value = localAssistant.toDomainAssistant()
+
+                _initialDraft.value = repository.getDraft(conversationId) ?: ""
+                repository.markAsRead(conversationId)
 
                 val snapshot = repository.getConversationSnapshot(conversationId)
                 if (snapshot != null) {
@@ -119,6 +128,18 @@ class AgentVM(
             } finally {
                 _isInitialLoading.value = false
             }
+        }
+    }
+
+    fun saveDraft(text: String) {
+        viewModelScope.launch {
+            repository.saveDraft(conversationId, text)
+        }
+    }
+
+    fun clearDraft() {
+        viewModelScope.launch {
+            repository.clearDraft(conversationId)
         }
     }
 
@@ -241,6 +262,7 @@ class AgentVM(
             return
         }
         _errorMessage.value = null
+        clearDraft()
 
         val userMessage = UIMessage(
             role = MessageRole.USER,
@@ -499,6 +521,14 @@ class AgentVM(
                 )
             } catch (e: Throwable) {
                 _errorMessage.value = e.message ?: "触发 Agent Action 失败"
+                appEventBus.tryEmit(
+                    AppEvent.AgentJobFinished(
+                        conversationId = conversationId,
+                        title = _conversation.value.title,
+                        success = false,
+                        preview = e.message ?: "无法连接到远端数据库",
+                    )
+                )
                 val errConv = _conversation.value.upsertMessage(
                     nodeId,
                     UIMessage(
@@ -557,6 +587,7 @@ class AgentVM(
         nodeId: Uuid,
         assistantMsgId: Uuid,
     ) {
+        var terminalNotified = false
         cloudClient.observeJobUpdates(jobId).collect { update ->
             val msg = update.message
             if (msg != null) {
@@ -626,6 +657,33 @@ class AgentVM(
                         reasoningTokens = msg.usage.thoughtsTokenCount.toLong(),
                         durationMs = uiMessage.generationTimeMs ?: 0L,
                     )
+                }
+                if (update.isTerminal && !terminalNotified) {
+                    when (update.job.status) {
+                        "completed" -> {
+                            terminalNotified = true
+                            val preview = uiMessage.toText().trim().replace('\n', ' ').take(60)
+                            appEventBus.tryEmit(
+                                AppEvent.AgentJobFinished(
+                                    conversationId = updatedConv.id,
+                                    title = updatedConv.title,
+                                    success = true,
+                                    preview = preview,
+                                )
+                            )
+                        }
+                        "failed" -> {
+                            terminalNotified = true
+                            appEventBus.tryEmit(
+                                AppEvent.AgentJobFinished(
+                                    conversationId = updatedConv.id,
+                                    title = updatedConv.title,
+                                    success = false,
+                                    preview = update.job.error.ifBlank { "任务执行失败" }.take(60),
+                                )
+                            )
+                        }
+                    }
                 }
             }
         }

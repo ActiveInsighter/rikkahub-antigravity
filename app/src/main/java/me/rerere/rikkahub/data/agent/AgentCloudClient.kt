@@ -62,6 +62,7 @@ data class RemoteAgentThread(
     val archived: Boolean,
     val pinned: Boolean,
     val folderId: String? = null,
+    val hasFolderIdField: Boolean = false,
 )
 
 data class RemoteAgentFolder(
@@ -280,7 +281,7 @@ class PocketBaseAgentCloudClient(
                     "perPage" to "100",
                     "sort" to "-created,-id",
                     "filter" to "owner=\"${workflowRepository.quoteFilter(session.userId)}\"",
-                    "fields" to "id,owner,title,status,created,updated,parentMessage,archived,threadRoot,pinned",
+                    "fields" to "id,owner,title,status,created,updated,parentMessage,archived,threadRoot,pinned,folder_id",
                 ),
                 token = session.token,
             ).jsonObject
@@ -298,6 +299,8 @@ class PocketBaseAgentCloudClient(
             if (id.isBlank()) continue
             val threadRoot = obj.str("threadRoot").ifBlank { id }
             if (latestByRoot.containsKey(threadRoot)) continue
+            val hasFolderId = obj.containsKey("folder_id")
+            val folderIdValue = if (hasFolderId) obj.str("folder_id").trim() else null
             latestByRoot[threadRoot] = RemoteAgentThread(
                 jobId = id,
                 threadRoot = threadRoot,
@@ -308,6 +311,8 @@ class PocketBaseAgentCloudClient(
                 parentMessage = obj.str("parentMessage"),
                 archived = obj["archived"]?.jsonPrimitive?.booleanOrNull ?: false,
                 pinned = obj["pinned"]?.jsonPrimitive?.booleanOrNull ?: false,
+                folderId = folderIdValue,
+                hasFolderIdField = hasFolderId,
             )
         }
         latestByRoot.values.filterNot { it.archived }

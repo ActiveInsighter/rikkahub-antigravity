@@ -58,6 +58,7 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import coil3.svg.SvgDecoder
 import me.rerere.ui.toast.Toaster
+import me.rerere.ui.toast.ToastType
 import me.rerere.ui.toast.rememberToasterState
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -291,6 +292,20 @@ class RouteActivity : ComponentActivity() {
                     is AppEvent.OpenUsageAccessSettings -> this@RouteActivity.openUsageAccessSettings()
                     is AppEvent.ChatGenerationUpdate -> Unit // 由 ChatNotificationManager 消费
                     is AppEvent.ChatGenerationEnded -> Unit // 由 ChatNotificationManager 消费
+                    is AppEvent.AgentJobFinished -> {
+                        val label = event.title.ifBlank { "Agent" }
+                        if (event.success) {
+                            toastState.show(
+                                message = "Agent 已完成：$label",
+                                type = ToastType.Success,
+                            )
+                        } else {
+                            toastState.show(
+                                message = "Agent 执行失败：$label${if (event.preview.isNotBlank()) " · ${event.preview}" else ""}",
+                                type = ToastType.Error,
+                            )
+                        }
+                    }
                 }
             }
         }
