@@ -60,11 +60,12 @@ jobs:
           printf '%s' "$DEBUG_KEYSTORE" | base64 --decode > "$KEYSTORE_PATH"
           chmod 600 "$KEYSTORE_PATH"
           echo "RIKKA_DEBUG_KEYSTORE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
-      - name: Test Interactions and build signed debug APKs
+      - name: Test Interactions and Agent sync and build signed debug APKs
         run: >-
           ./gradlew :ai:testDebugUnitTest
           --tests me.rerere.ai.provider.providers.google.InteractionsApiTest
           --tests me.rerere.ai.util.RequestLogRedactionTest
+          :app:testGithubDebugUnitTest --tests 'me.rerere.rikkahub.data.agent.*'
           :app:assembleGithubDebug
           --no-daemon --max-workers=2
           '-Dorg.gradle.jvmargs=-Xmx5g -Dfile.encoding=UTF-8'
@@ -96,6 +97,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - name: Publish downloadable APK release
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

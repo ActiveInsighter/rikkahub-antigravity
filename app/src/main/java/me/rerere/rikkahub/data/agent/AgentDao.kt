@@ -1,10 +1,11 @@
 package me.rerere.rikkahub.data.agent
 
 import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Transaction
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -24,7 +25,7 @@ interface AgentConversationDao {
     @Query("SELECT * FROM agent_conversation")
     suspend fun getAll(): List<AgentConversationEntity>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(entity: AgentConversationEntity)
 
     @Query("UPDATE agent_conversation SET title = :title, update_at = :updateAt WHERE id = :id")
@@ -57,16 +58,8 @@ interface AgentMessageNodeDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(nodes: List<AgentMessageNodeEntity>)
 
-    @Query("DELETE FROM agent_message_node WHERE conversation_id = :conversationId")
-    suspend fun deleteByConversationId(conversationId: String)
-
-    @Transaction
-    suspend fun replaceForConversation(conversationId: String, nodes: List<AgentMessageNodeEntity>) {
-        deleteByConversationId(conversationId)
-        if (nodes.isNotEmpty()) {
-            upsertAll(nodes)
-        }
-    }
+    @Delete
+    suspend fun deleteNodes(nodes: List<AgentMessageNodeEntity>)
 }
 
 @Dao
@@ -127,6 +120,9 @@ interface AgentUsageRecordDao {
 
     @Query("SELECT * FROM agent_usage_record WHERE sync_status = 'PENDING' ORDER BY created_at ASC")
     suspend fun getPendingSync(): List<AgentUsageRecordEntity>
+
+    @Query("SELECT * FROM agent_usage_record WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): AgentUsageRecordEntity?
 
     @Query("SELECT * FROM agent_usage_record WHERE remote_id = :remoteId LIMIT 1")
     suspend fun getByRemoteId(remoteId: String): AgentUsageRecordEntity?

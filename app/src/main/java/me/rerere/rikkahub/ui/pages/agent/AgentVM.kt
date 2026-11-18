@@ -2,11 +2,12 @@ package me.rerere.rikkahub.ui.pages.agent
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
@@ -16,11 +17,10 @@ import me.rerere.ai.ui.ModelSnapshot
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentAssistantEntity
-import me.rerere.rikkahub.data.agent.AgentCloudClient
+import me.rerere.rikkahub.data.agent.AgentConversationSnapshot
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
 import me.rerere.rikkahub.data.agent.AgentUiSettings
-import me.rerere.rikkahub.data.agent.PocketBaseAgentCloudClient
 import me.rerere.rikkahub.data.agent.RemoteAgentSourceInput
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import me.rerere.rikkahub.data.model.Assistant
@@ -38,7 +38,6 @@ import kotlin.uuid.Uuid
 class AgentVM(
     id: String,
     private val repository: AgentRepository,
-    private val cloudClient: AgentCloudClient,
     private val settingsStore: AgentSettingsStore,
     private val workflowRepository: WorkflowRepository,
 ) : ViewModel() {
@@ -69,14 +68,28 @@ class AgentVM(
     private val _selectedModel = MutableStateFlow<Model?>(null)
     val selectedModel: StateFlow<Model?> = _selectedModel.asStateFlow()
 
-    private val _isGenerating = MutableStateFlow(false)
-    val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
+    private val snapshot = MutableStateFlow<AgentConversationSnapshot?>(null)
+
+    val isGenerating: StateFlow<Boolean> = combine(snapshot, repository.submittingIds) { cached, submitting ->
+        cached?.isActive == true || conversationId in submitting
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
 
-    private val _activeStatusText = MutableStateFlow<String?>(null)
-    val activeStatusText: StateFlow<String?> = _activeStatusText.asStateFlow()
+    val activeStatusText: StateFlow<String?> = combine(snapshot, repository.submittingIds) { cached, submitting ->
+        if (conversationId in submitting) {
+            "正在触发云端 Action..."
+        } else {
+            when (cached?.remoteStatus) {
+                "queued" -> "排队中 · 等待执行器领取"
+                "running" -> "执行中 · 正在同步远端步骤"
+                "failed" -> "执行失败"
+                "canceled" -> "已取消"
+                else -> null
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
@@ -95,30 +108,31 @@ class AgentVM(
     val uiSettings: StateFlow<AgentUiSettings> = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current)
 
-    private var generationJob: Job? = null
-    private var activeJobId: String? = null
-    private var activeThreadRoot: String? = null
-    private var lastRemoteMessageId: String? = null
+    private var submission: Deferred<Result<Unit>>? = null
+    private val isBusy: Boolean
+        get() = snapshot.value?.isActive == true || conversationId in repository.submittingIds.value ||
+            _isInitialLoading.value
 
     init {
         viewModelScope.launch {
-            try {
-                val localAssistant = repository.ensureDefaultAssistant()
-                _agentAssistant.value = localAssistant.toDomainAssistant()
-
-                val snapshot = repository.getConversationSnapshot(conversationId)
-                if (snapshot != null) {
-                    _conversation.value = snapshot.conversation
-                    activeJobId = snapshot.remoteJobId
-                    activeThreadRoot = snapshot.remoteThreadRoot
-                    lastRemoteMessageId = snapshot.lastRemoteMessageId
+            repository.observeConversation(conversationId).collect { cached ->
+                if (cached != null) {
+                    _conversation.value = cached.conversation
+                } else if (snapshot.value != null) {
+                    _conversation.value = Conversation(
+                        id = conversationId,
+                        assistantId = DEFAULT_ASSISTANT_ID,
+                        title = "",
+                        messageNodes = emptyList(),
+                        newConversation = true,
+                    )
                 }
-                if (cloudClient.hasSession()) {
-                    syncFromRemoteInternal()
-                }
-            } finally {
+                snapshot.value = cached
                 _isInitialLoading.value = false
             }
+        }
+        viewModelScope.launch {
+            _agentAssistant.value = repository.ensureDefaultAssistant().toDomainAssistant()
         }
     }
 
@@ -195,8 +209,7 @@ class AgentVM(
             _isConnecting.value = false
             result.onSuccess {
                 _showConnectDialog.value = false
-                repository.syncThreadsFromRemote()
-                syncFromRemoteInternal()
+                repository.syncUsageWithRemote()
             }.onFailure { err ->
                 _connectError.value = err.message ?: "连接失败"
             }
@@ -205,38 +218,21 @@ class AgentVM(
 
     fun syncFromRemote() {
         if (_isSyncing.value) return
-        viewModelScope.launch {
-            syncFromRemoteInternal()
-        }
-    }
-
-    private suspend fun syncFromRemoteInternal() {
-        if (!cloudClient.hasSession()) return
         _isSyncing.value = true
-        try {
-            val synced = repository.syncConversationFromRemote(conversationId).getOrNull()
-            if (synced != null) {
-                _conversation.value = synced.conversation
-                activeJobId = synced.remoteJobId
-                activeThreadRoot = synced.remoteThreadRoot
-                lastRemoteMessageId = synced.lastRemoteMessageId
-                if (synced.isActive && !synced.remoteJobId.isNullOrBlank()) {
-                    val lastNodeId = synced.conversation.messageNodes.lastOrNull()?.id
-                    observeRemoteJob(
-                        jobId = synced.remoteJobId,
-                        targetNodeId = lastNodeId,
-                        existingAssistantId = synced.conversation.messageNodes.lastOrNull()?.currentMessage?.id,
-                    )
+        viewModelScope.launch {
+            try {
+                repository.syncConversationFromRemote(conversationId).onFailure {
+                    _errorMessage.value = it.message ?: "同步 Agent 步骤失败"
                 }
+            } finally {
+                _isSyncing.value = false
             }
-        } finally {
-            _isSyncing.value = false
         }
     }
 
     fun sendMessage(parts: List<UIMessagePart>) {
-        if (parts.isEmpty() || _isGenerating.value) return
-        if (!cloudClient.hasSession()) {
+        if (parts.isEmpty() || isBusy) return
+        if (session.value == null) {
             openConnectDialog()
             return
         }
@@ -263,25 +259,14 @@ class AgentVM(
             updateAt = Instant.now(),
             newConversation = false,
         )
-        _conversation.value = updatedWithUser
-
-        viewModelScope.launch {
-            repository.saveConversation(
-                conversation = updatedWithUser,
-                remoteJobId = activeJobId,
-                remoteThreadRoot = activeThreadRoot,
-                lastRemoteMessageId = lastRemoteMessageId,
-            )
-        }
-
         val prompt = buildPromptFromParts(parts)
         val sources = extractSourcesFromParts(parts)
 
-        submitAndObserveRemote(
+        submitRemote(
             baseConversation = updatedWithUser,
             prompt = prompt,
             sources = sources,
-            parentMessageId = lastRemoteMessageId,
+            parentMessageId = snapshot.value?.lastRemoteMessageId,
             replacesMessageId = null,
             title = if (current.title.isBlank()) nextTitle else "",
             targetNodeId = null,
@@ -289,29 +274,17 @@ class AgentVM(
     }
 
     fun stopGeneration() {
-        val jobIdToCancel = activeJobId
-        generationJob?.cancel()
-        generationJob = null
-        _isGenerating.value = false
-        _activeStatusText.value = null
-        if (!jobIdToCancel.isNullOrBlank() && cloudClient.hasSession()) {
-            viewModelScope.launch {
-                runCatching { cloudClient.cancelJob(jobIdToCancel) }
-                syncFromRemoteInternal()
-            }
-        } else {
-            val snapshot = _conversation.value
-            if (!snapshot.newConversation) {
-                viewModelScope.launch {
-                    repository.saveConversation(snapshot)
-                }
+        viewModelScope.launch {
+            if (submission?.await()?.isFailure == true) return@launch
+            repository.cancelConversationJob(conversationId).onFailure {
+                _errorMessage.value = it.message ?: "取消 Agent 任务失败"
             }
         }
     }
 
     fun regenerate(message: UIMessage) {
-        if (_isGenerating.value) return
-        if (!cloudClient.hasSession()) {
+        if (isBusy) return
+        if (session.value == null) {
             openConnectDialog()
             return
         }
@@ -328,19 +301,19 @@ class AgentVM(
         val prompt = buildPromptFromParts(userMsg.parts)
         val sources = extractSourcesFromParts(userMsg.parts)
 
-        submitAndObserveRemote(
+        submitRemote(
             baseConversation = current,
             prompt = prompt,
             sources = sources,
             parentMessageId = null,
-            replacesMessageId = lastRemoteMessageId,
+            replacesMessageId = snapshot.value?.lastRemoteMessageId,
             title = "",
             targetNodeId = node.id,
         )
     }
 
     fun editMessage(message: UIMessage, newParts: List<UIMessagePart>) {
-        if (_isGenerating.value || newParts.isEmpty()) return
+        if (isBusy || newParts.isEmpty()) return
         val current = _conversation.value
         val newNodes = current.messageNodes.map { node ->
             if (node.messages.any { it.id == message.id }) {
@@ -357,14 +330,13 @@ class AgentVM(
             messageNodes = newNodes,
             updateAt = Instant.now(),
         )
-        _conversation.value = updated
         viewModelScope.launch {
             repository.saveConversation(updated)
         }
     }
 
     fun deleteMessage(message: UIMessage) {
-        if (_isGenerating.value) return
+        if (isBusy) return
         val current = _conversation.value
         val newNodes = current.messageNodes.mapNotNull { node ->
             if (node.messages.any { it.id == message.id }) {
@@ -385,13 +357,13 @@ class AgentVM(
             messageNodes = newNodes,
             updateAt = Instant.now(),
         )
-        _conversation.value = updated
         viewModelScope.launch {
             repository.saveConversation(updated)
         }
     }
 
     fun updateMessageNode(node: MessageNode) {
+        if (isBusy) return
         val current = _conversation.value
         val newNodes = current.messageNodes.map {
             if (it.id == node.id) node else it
@@ -400,7 +372,6 @@ class AgentVM(
             messageNodes = newNodes,
             updateAt = Instant.now(),
         )
-        _conversation.value = updated
         viewModelScope.launch {
             repository.saveConversation(updated)
         }
@@ -413,29 +384,29 @@ class AgentVM(
             title = trimmed,
             updateAt = Instant.now(),
         )
-        _conversation.value = updated
-        viewModelScope.launch {
-            if (!updated.newConversation) {
+        if (updated.newConversation) {
+            _conversation.value = updated
+        } else {
+            viewModelScope.launch {
                 repository.renameConversation(conversationId, trimmed)
             }
         }
     }
 
     fun clearMessages() {
-        if (_isGenerating.value) return
+        if (isBusy) return
         val updated = _conversation.value.copy(
             messageNodes = emptyList(),
             updateAt = Instant.now(),
         )
-        _conversation.value = updated
-        viewModelScope.launch {
-            if (!updated.newConversation) {
+        if (!updated.newConversation) {
+            viewModelScope.launch {
                 repository.saveConversation(updated)
             }
         }
     }
 
-    private fun submitAndObserveRemote(
+    private fun submitRemote(
         baseConversation: Conversation,
         prompt: String,
         sources: List<RemoteAgentSourceInput>,
@@ -444,10 +415,6 @@ class AgentVM(
         title: String,
         targetNodeId: Uuid?,
     ) {
-        generationJob?.cancel()
-        _isGenerating.value = true
-        _activeStatusText.value = "正在触发云端 Action..."
-
         val assistantMsgId = Uuid.random()
         val nodeId = targetNodeId ?: Uuid.random()
         val placeholderMsg = UIMessage(
@@ -470,164 +437,16 @@ class AgentVM(
             )
             baseConversation.copy(messageNodes = baseConversation.messageNodes + newNode)
         }
-        _conversation.value = initialConv
-
-        generationJob = viewModelScope.launch {
-            try {
-                val submitted = cloudClient.submitMessage(
-                    prompt = prompt,
-                    sources = sources,
-                    parentMessageId = parentMessageId,
-                    replacesMessageId = replacesMessageId,
-                    title = title,
-                )
-                activeJobId = submitted.jobId
-                activeThreadRoot = submitted.threadRoot
-                _activeStatusText.value = "Action 已触发 · 等待步骤写入"
-
-                repository.saveConversation(
-                    conversation = _conversation.value,
-                    remoteJobId = submitted.jobId,
-                    remoteThreadRoot = submitted.threadRoot,
-                    remoteStatus = submitted.status,
-                )
-
-                collectJobUpdates(
-                    jobId = submitted.jobId,
-                    nodeId = nodeId,
-                    assistantMsgId = assistantMsgId,
-                )
-            } catch (e: Throwable) {
-                _errorMessage.value = e.message ?: "触发 Agent Action 失败"
-                val errConv = _conversation.value.upsertMessage(
-                    nodeId,
-                    UIMessage(
-                        id = assistantMsgId,
-                        role = MessageRole.ASSISTANT,
-                        parts = listOf(
-                            UIMessagePart.Notice(
-                                title = "请求失败",
-                                text = e.message ?: "无法连接到远端数据库",
-                            )
-                        ),
-                        modelSnapshot = ModelSnapshot(
-                            displayName = "Antigravity Agent",
-                            modelId = "Antigravity",
-                        ),
-                    ),
-                ).copy(updateAt = Instant.now())
-                _conversation.value = errConv
-                repository.saveConversation(errConv)
-            } finally {
-                _isGenerating.value = false
-                _activeStatusText.value = null
+        val task = repository.submitMessage(initialConv, prompt, sources, parentMessageId, replacesMessageId, title)
+        submission = task
+        viewModelScope.launch {
+            task.await().onFailure { error ->
+                val message = error.message ?: "触发 Agent Action 失败"
+                _errorMessage.value = message
+                val errorMessage = placeholderMsg.copy(parts = listOf(UIMessagePart.Notice(title = "请求失败", text = message)))
+                repository.saveConversation(initialConv.upsertMessage(nodeId, errorMessage))
             }
-        }
-    }
-
-    private fun observeRemoteJob(
-        jobId: String,
-        targetNodeId: Uuid?,
-        existingAssistantId: Uuid?,
-    ) {
-        generationJob?.cancel()
-        _isGenerating.value = true
-        _activeStatusText.value = "正在同步远端步骤..."
-        val nodeId = targetNodeId ?: Uuid.random()
-        val assistantMsgId = existingAssistantId ?: Uuid.random()
-
-        generationJob = viewModelScope.launch {
-            try {
-                collectJobUpdates(
-                    jobId = jobId,
-                    nodeId = nodeId,
-                    assistantMsgId = assistantMsgId,
-                )
-            } catch (e: Throwable) {
-                _errorMessage.value = e.message ?: "同步 Agent 步骤失败"
-            } finally {
-                _isGenerating.value = false
-                _activeStatusText.value = null
-            }
-        }
-    }
-
-    private suspend fun collectJobUpdates(
-        jobId: String,
-        nodeId: Uuid,
-        assistantMsgId: Uuid,
-    ) {
-        cloudClient.observeJobUpdates(jobId).collect { update ->
-            val msg = update.message
-            if (msg != null) {
-                lastRemoteMessageId = msg.id
-            }
-            val statusLabel = when (update.job.status) {
-                "queued" -> "排队中 · 等待执行器领取"
-                "running" -> "执行中 · 已同步 ${update.parts.size} 个步骤"
-                "completed" -> null
-                "failed" -> "执行失败"
-                "canceled" -> "已取消"
-                else -> update.job.status
-            }
-            _activeStatusText.value = statusLabel
-
-            val uiMessage = cloudClient.buildAssistantUIMessage(
-                messageId = assistantMsgId,
-                job = update.job,
-                message = msg,
-                parts = update.parts,
-            )
-
-            val currentConv = _conversation.value
-            val existingMsg = currentConv.messageNodes
-                .firstOrNull { it.id == nodeId }
-                ?.currentMessage
-            val nextTitle = update.job.title.ifBlank { currentConv.title }
-            val hasMessageChanged = existingMsg == null ||
-                existingMsg.parts != uiMessage.parts ||
-                existingMsg.annotations != uiMessage.annotations ||
-                existingMsg.usage != uiMessage.usage ||
-                existingMsg.stepCount != uiMessage.stepCount ||
-                existingMsg.generationTimeMs != uiMessage.generationTimeMs ||
-                (existingMsg.finishedAt == null) != (uiMessage.finishedAt == null)
-            val hasTitleChanged = nextTitle != currentConv.title
-
-            if (hasMessageChanged || hasTitleChanged || update.isTerminal) {
-                val updatedConv = if (hasMessageChanged || hasTitleChanged) {
-                    currentConv
-                        .upsertMessage(nodeId, uiMessage)
-                        .copy(
-                            title = nextTitle,
-                            updateAt = Instant.now(),
-                        ).also { _conversation.value = it }
-                } else {
-                    currentConv
-                }
-
-                repository.saveConversation(
-                    conversation = updatedConv,
-                    remoteJobId = update.job.id,
-                    remoteThreadRoot = update.job.threadRoot.ifBlank { update.job.id },
-                    remoteStatus = update.job.status,
-                    lastRemoteMessageId = msg?.id,
-                )
-
-                if (update.isTerminal && msg != null && (msg.usage.totalTokenCount > 0 || msg.usage.promptTokenCount > 0)) {
-                    repository.recordUsage(
-                        conversationId = updatedConv.id.toString(),
-                        assistantId = _agentAssistant.value.id.toString(),
-                        modelId = update.job.model.ifBlank { "Antigravity" },
-                        modelName = update.job.model.ifBlank { "Antigravity" },
-                        providerId = "anyworkflow",
-                        promptTokens = msg.usage.promptTokenCount.toLong(),
-                        completionTokens = msg.usage.candidatesTokenCount.toLong(),
-                        cachedTokens = msg.usage.cachedContentTokenCount.toLong(),
-                        reasoningTokens = msg.usage.thoughtsTokenCount.toLong(),
-                        durationMs = uiMessage.generationTimeMs ?: 0L,
-                    )
-                }
-            }
+            if (submission === task) submission = null
         }
     }
 

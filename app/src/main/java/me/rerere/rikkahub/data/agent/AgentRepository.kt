@@ -1,12 +1,26 @@
 package me.rerere.rikkahub.data.agent
 
+import androidx.room.withTransaction
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import me.rerere.rikkahub.AppScope
 import kotlinx.coroutines.flow.map
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.workflow.WorkflowRepository
+import me.rerere.rikkahub.data.workflow.WorkflowSession
 import me.rerere.rikkahub.utils.JsonInstant
 import java.time.Instant
 import kotlin.uuid.Uuid
@@ -14,7 +28,6 @@ import kotlin.uuid.Uuid
 data class AgentConversationSnapshot(
     val conversation: Conversation,
     val remoteJobId: String? = null,
-    val remoteThreadRoot: String? = null,
     val remoteStatus: String? = null,
     val lastRemoteMessageId: String? = null,
     val isActive: Boolean = false,
@@ -25,13 +38,23 @@ data class AgentConversationSnapshot(
  * AnyWorkflow / PocketBase database as the source of truth.
  */
 class AgentRepository(
-    private val conversationDao: AgentConversationDao,
-    private val messageNodeDao: AgentMessageNodeDao,
-    private val assistantDao: AgentAssistantDao,
-    private val folderDao: AgentFolderDao,
-    private val usageRecordDao: AgentUsageRecordDao,
+    private val database: AgentDatabase,
     private val cloudClient: AgentCloudClient,
+    private val workflowRepository: WorkflowRepository,
+    private val appScope: AppScope,
 ) {
+    private val conversationDao = database.conversationDao()
+    private val messageNodeDao = database.messageNodeDao()
+    private val assistantDao = database.assistantDao()
+    private val folderDao = database.folderDao()
+    private val usageRecordDao = database.usageRecordDao()
+
+    // A job creation event can arrive before its HTTP response binds the remote root to the local ID.
+    private val threadSyncMutex = Mutex()
+    private val conversationLocks = List(16) { Mutex() }
+    private val _submittingIds = MutableStateFlow<Set<Uuid>>(emptySet())
+    val submittingIds = _submittingIds.asStateFlow()
+
     fun observeConversations(sortOrder: ConversationSortOrder): Flow<List<Conversation>> {
         val source = when (sortOrder) {
             ConversationSortOrder.UPDATE_TIME -> conversationDao.getAllSortedByUpdateFlow()
@@ -65,13 +88,20 @@ class AgentRepository(
         }
     }
 
-    suspend fun getConversation(id: Uuid): Conversation? {
-        return getConversationSnapshot(id)?.conversation
-    }
+    internal fun observeRemoteConversations(): Flow<List<AgentConversationEntity>> =
+        conversationDao.getAllSortedByUpdateFlow()
 
-    suspend fun getConversationSnapshot(id: Uuid): AgentConversationSnapshot? {
-        val entity = conversationDao.getById(id.toString()) ?: return null
-        val nodes = messageNodeDao.getByConversationId(entity.id).map { nodeEntity ->
+    fun observeConversation(id: Uuid): Flow<AgentConversationSnapshot?> = database.invalidationTracker
+        .createFlow("agent_conversation", "agent_message_node")
+        .map { getConversationSnapshot(id) }
+        .distinctUntilChanged()
+
+    private suspend fun getConversationSnapshot(id: Uuid): AgentConversationSnapshot? {
+        val (entity, storedNodes) = database.withTransaction {
+            val entity = conversationDao.getById(id.toString()) ?: return@withTransaction null
+            entity to messageNodeDao.getByConversationId(entity.id)
+        } ?: return null
+        val nodes = storedNodes.map { nodeEntity ->
             val messages = runCatching {
                 JsonInstant.decodeFromString<List<UIMessage>>(nodeEntity.messages)
             }.getOrDefault(emptyList())
@@ -81,19 +111,19 @@ class AgentRepository(
                 selectIndex = nodeEntity.selectIndex.coerceIn(0, (messages.size - 1).coerceAtLeast(0)),
             )
         }
-        val conversation = Conversation(
-            id = Uuid.parse(entity.id),
-            assistantId = DEFAULT_ASSISTANT_ID,
-            title = entity.title,
-            messageNodes = nodes,
-            isPinned = entity.isPinned,
-            createAt = Instant.ofEpochMilli(entity.createAt),
-            updateAt = Instant.ofEpochMilli(entity.updateAt),
-        )
         return AgentConversationSnapshot(
-            conversation = conversation,
+            conversation = Conversation(
+                id = id,
+                assistantId = entity.assistantId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+                    ?: DEFAULT_ASSISTANT_ID,
+                folderId = entity.folderId?.let { runCatching { Uuid.parse(it) }.getOrNull() },
+                title = entity.title,
+                messageNodes = nodes,
+                isPinned = entity.isPinned,
+                createAt = Instant.ofEpochMilli(entity.createAt),
+                updateAt = Instant.ofEpochMilli(entity.updateAt),
+            ),
             remoteJobId = entity.remoteJobId,
-            remoteThreadRoot = entity.remoteThreadRoot,
             remoteStatus = entity.remoteStatus,
             lastRemoteMessageId = entity.lastRemoteMessageId,
             isActive = entity.remoteStatus?.let { PocketBaseAgentCloudClient.isActiveStatus(it) } == true,
@@ -101,142 +131,193 @@ class AgentRepository(
     }
 
     suspend fun syncThreadsFromRemote(): Result<Unit> = runCatching {
-        if (!cloudClient.hasSession()) return@runCatching
-        val remoteThreads = cloudClient.listRemoteThreads()
-        val now = System.currentTimeMillis()
-        val remoteRoots = HashSet<String>(remoteThreads.size)
+        val session = workflowRepository.session.value ?: return@runCatching
+        syncFoldersWithRemote()
+        syncThreads(session)
+    }.onFailure { if (it is CancellationException) throw it }
 
-        for (thread in remoteThreads) {
-            remoteRoots += thread.threadRoot
-            val existing = conversationDao.getByRemoteThreadRoot(thread.threadRoot)
-                ?: conversationDao.getById(
-                    PocketBaseAgentCloudClient.stableUuid("aw-agent:${thread.threadRoot}").toString()
-                )
-            val localId = existing?.id
-                ?: PocketBaseAgentCloudClient.stableUuid("aw-agent:${thread.threadRoot}").toString()
-
-            val createdMs = PocketBaseAgentCloudClient.parseIsoMillis(thread.created)
-                .takeIf { it > 0L } ?: existing?.createAt ?: now
-            val updatedMs = PocketBaseAgentCloudClient.parseIsoMillis(thread.updated)
-                .takeIf { it > 0L } ?: existing?.updateAt ?: createdMs
-
-            conversationDao.upsert(
-                AgentConversationEntity(
-                    id = localId,
+    internal suspend fun syncThreads(session: WorkflowSession, root: String? = null) = threadSyncMutex.withLock {
+        if (workflowRepository.session.value != session) return@withLock
+        val remoteThreads = cloudClient.listRemoteThreads(root)
+        database.withTransaction {
+            if (workflowRepository.session.value != session) return@withTransaction
+            for (thread in remoteThreads) {
+                val fallbackId = PocketBaseAgentCloudClient.stableUuid("aw-agent:${thread.threadRoot}").toString()
+                val existing = conversationDao.getByRemoteThreadRoot(thread.threadRoot)
+                    ?: conversationDao.getById(fallbackId)
+                val now = System.currentTimeMillis()
+                val created = existing?.createAt ?: remoteTime(thread.created, now)
+                val sameJob = existing?.remoteJobId == thread.jobId
+                val folderId = thread.folderId?.let { folderDao.getByRemoteId(it)?.id ?: it }
+                val updated = AgentConversationEntity(
+                    id = existing?.id ?: fallbackId,
                     title = thread.title.ifBlank { existing?.title ?: "Agent" },
-                    createAt = createdMs,
-                    updateAt = updatedMs,
+                    createAt = created,
+                    updateAt = maxOf(existing?.updateAt ?: 0L, remoteTime(thread.updated, created)),
                     isPinned = thread.pinned,
-                    folderId = thread.folderId?.takeIf { it.isNotBlank() } ?: existing?.folderId,
+                    folderId = folderId,
                     assistantId = existing?.assistantId,
                     remoteJobId = thread.jobId,
                     remoteThreadRoot = thread.threadRoot,
-                    remoteStatus = thread.status,
-                    lastRemoteMessageId = existing?.lastRemoteMessageId,
-                    lastSyncedAt = now,
+                    // Only the message sync can mark a tracked job terminal, after saving its final parts.
+                    remoteStatus = if (sameJob) existing?.remoteStatus ?: thread.status else thread.status,
+                    lastRemoteMessageId = existing?.lastRemoteMessageId?.takeIf { sameJob },
+                    lastSyncedAt = existing?.lastSyncedAt ?: 0L,
                 )
-            )
-        }
-        syncFoldersWithRemote()
-
-        // Remote database is authoritative: remove synced local threads no longer present remotely.
-        val localAll = conversationDao.getAll()
-        for (local in localAll) {
-            val root = local.remoteThreadRoot
-            if (root != null && root !in remoteRoots) {
-                conversationDao.deleteById(local.id)
+                if (updated != existing) conversationDao.upsert(updated)
+            }
+            if (root != null) {
+                if (remoteThreads.isEmpty()) {
+                    conversationDao.getByRemoteThreadRoot(root)?.let { conversationDao.deleteById(it.id) }
+                }
+            } else {
+                val roots = remoteThreads.mapTo(HashSet()) { it.threadRoot }
+                for (local in conversationDao.getAll()) {
+                    if (local.remoteThreadRoot != null && local.remoteThreadRoot !in roots) {
+                        conversationDao.deleteById(local.id)
+                    }
+                }
             }
         }
     }
 
-    suspend fun syncConversationFromRemote(id: Uuid): Result<AgentConversationSnapshot?> = runCatching {
-        if (!cloudClient.hasSession()) return@runCatching getConversationSnapshot(id)
-        val existing = conversationDao.getById(id.toString()) ?: return@runCatching null
-        val jobId = existing.remoteJobId ?: return@runCatching getConversationSnapshot(id)
-        val remote = cloudClient.fetchThreadConversation(jobId) ?: return@runCatching getConversationSnapshot(id)
+    suspend fun syncConversationFromRemote(id: Uuid): Result<Unit> = runCatching {
+        val session = workflowRepository.session.value ?: return@runCatching
+        val jobId = conversationDao.getById(id.toString())?.remoteJobId ?: return@runCatching
+        syncRemoteJob(session, id, jobId, previous = null)
+        Unit
+    }.onFailure { if (it is CancellationException) throw it }
 
-        val now = System.currentTimeMillis()
-        val threadRoot = remote.job.threadRoot.ifBlank { remote.job.id }
-        val updatedMs = PocketBaseAgentCloudClient.parseIsoMillis(remote.job.updated)
-            .takeIf { it > 0L } ?: now
-        val createdMs = PocketBaseAgentCloudClient.parseIsoMillis(remote.job.created)
-            .takeIf { it > 0L } ?: existing.createAt
+    internal suspend fun syncRemoteJob(
+        session: WorkflowSession,
+        id: Uuid,
+        jobId: String,
+        previous: RemoteThreadConversation?,
+    ): RemoteThreadConversation? = conversationLock(id).withLock {
+        if (workflowRepository.session.value != session || id in submittingIds.value) return@withLock null
+        val remote = cloudClient.fetchThreadConversation(jobId, previous)
+        val usage = database.withTransaction {
+            val existing = conversationDao.getById(id.toString()) ?: return@withTransaction null
+            if (existing.remoteJobId != jobId || workflowRepository.session.value != session || id in submittingIds.value) {
+                return@withTransaction null
+            }
 
-        val title = remote.job.title.ifBlank {
-            remote.job.prompt.trim().replace('\n', ' ').take(36)
-                .ifBlank { existing.title.ifBlank { "Antigravity Agent" } }
+            val status = if (remote.isActive && !PocketBaseAgentCloudClient.isActiveStatus(remote.job.status)) {
+                remote.message?.status ?: remote.job.status
+            } else {
+                remote.job.status
+            }
+            val updated = existing.copy(
+                title = remote.job.title.ifBlank { existing.title },
+                updateAt = maxOf(
+                    existing.updateAt,
+                    remoteTime(remote.job.updated, existing.updateAt),
+                    remoteTime(remote.message?.updated.orEmpty(), existing.updateAt),
+                ),
+                remoteStatus = status,
+                lastRemoteMessageId = remote.message?.id,
+            )
+            saveNodesForConversation(existing.id, remote.messageNodes)
+            val completion = if (!remote.isActive && PocketBaseAgentCloudClient.isActiveStatus(existing.remoteStatus.orEmpty())) {
+                saveCompletedUsage(existing, remote)
+            } else {
+                null
+            }
+            if (updated != existing) conversationDao.upsert(updated.copy(lastSyncedAt = System.currentTimeMillis()))
+            completion
         }
-
-        val updatedEntity = existing.copy(
-            title = title,
-            createAt = createdMs,
-            updateAt = updatedMs,
-            remoteJobId = remote.job.id,
-            remoteThreadRoot = threadRoot,
-            remoteStatus = remote.job.status,
-            lastRemoteMessageId = remote.lastRemoteMessageId ?: existing.lastRemoteMessageId,
-            lastSyncedAt = now,
-        )
-        conversationDao.upsert(updatedEntity)
-        saveNodesForConversation(existing.id, remote.messageNodes)
-
-        val conv = Conversation(
-            id = id,
-            assistantId = DEFAULT_ASSISTANT_ID,
-            title = title,
-            messageNodes = remote.messageNodes,
-            isPinned = updatedEntity.isPinned,
-            createAt = Instant.ofEpochMilli(createdMs),
-            updateAt = Instant.ofEpochMilli(updatedMs),
-        )
-        AgentConversationSnapshot(
-            conversation = conv,
-            remoteJobId = updatedEntity.remoteJobId,
-            remoteThreadRoot = updatedEntity.remoteThreadRoot,
-            remoteStatus = updatedEntity.remoteStatus,
-            lastRemoteMessageId = updatedEntity.lastRemoteMessageId,
-            isActive = remote.isActive,
-        )
+        if (usage != null) {
+            appScope.launch {
+                if (workflowRepository.session.value == session) uploadUsage(usage)
+            }
+        }
+        remote
     }
+
+    fun submitMessage(
+        conversation: Conversation,
+        prompt: String,
+        sources: List<RemoteAgentSourceInput>,
+        parentMessageId: String?,
+        replacesMessageId: String?,
+        title: String,
+    ): Deferred<Result<Unit>> {
+        val session = workflowRepository.session.value
+        _submittingIds.update { it + conversation.id }
+        // Commit the job-to-conversation mapping even if navigation clears the submitting ViewModel.
+        return appScope.async {
+            try {
+                runCatching {
+                    threadSyncMutex.withLock {
+                        check(session != null && workflowRepository.session.value == session) { "请先连接 AnyWorkflow" }
+                        val submitted = cloudClient.submitMessage(prompt, sources, parentMessageId, replacesMessageId, title)
+                        if (workflowRepository.session.value == session) {
+                            saveConversation(conversation, submitted.jobId, submitted.threadRoot, submitted.status)
+                        }
+                    }
+                }.onFailure { if (it is CancellationException) throw it }
+            } finally {
+                _submittingIds.update { it - conversation.id }
+            }
+        }
+    }
+
+    suspend fun cancelConversationJob(id: Uuid): Result<Unit> = runCatching {
+        val existing = conversationDao.getById(id.toString()) ?: return@runCatching
+        val jobId = existing.remoteJobId ?: return@runCatching
+        if (PocketBaseAgentCloudClient.isActiveStatus(existing.remoteStatus.orEmpty())) {
+            cloudClient.cancelJob(jobId)
+            syncConversationFromRemote(id).getOrThrow()
+        }
+    }.onFailure { if (it is CancellationException) throw it }
 
     suspend fun saveConversation(
         conversation: Conversation,
         remoteJobId: String? = null,
         remoteThreadRoot: String? = null,
         remoteStatus: String? = null,
-        lastRemoteMessageId: String? = null,
-    ) {
-        val convId = conversation.id.toString()
-        val existing = conversationDao.getById(convId)
-        val entity = AgentConversationEntity(
-            id = convId,
-            title = conversation.title,
-            createAt = conversation.createAt.toEpochMilli(),
-            updateAt = conversation.updateAt.toEpochMilli(),
-            isPinned = conversation.isPinned,
-            folderId = conversation.folderId?.toString() ?: existing?.folderId,
-            assistantId = conversation.assistantId.toString(),
-            remoteJobId = remoteJobId ?: existing?.remoteJobId,
-            remoteThreadRoot = remoteThreadRoot ?: existing?.remoteThreadRoot,
-            remoteStatus = remoteStatus ?: existing?.remoteStatus,
-            lastRemoteMessageId = lastRemoteMessageId ?: existing?.lastRemoteMessageId,
-            lastSyncedAt = System.currentTimeMillis(),
-        )
-        conversationDao.upsert(entity)
-        saveNodesForConversation(convId, conversation.messageNodes)
+    ) = conversationLock(conversation.id).withLock {
+        database.withTransaction {
+            val convId = conversation.id.toString()
+            val existing = conversationDao.getById(convId)
+            val entity = AgentConversationEntity(
+                id = convId,
+                title = conversation.title,
+                createAt = conversation.createAt.toEpochMilli(),
+                updateAt = conversation.updateAt.toEpochMilli(),
+                isPinned = existing?.isPinned ?: conversation.isPinned,
+                folderId = existing?.folderId ?: conversation.folderId?.toString(),
+                assistantId = conversation.assistantId.toString(),
+                remoteJobId = remoteJobId ?: existing?.remoteJobId,
+                remoteThreadRoot = remoteThreadRoot ?: existing?.remoteThreadRoot,
+                remoteStatus = remoteStatus ?: existing?.remoteStatus,
+                lastRemoteMessageId = existing?.lastRemoteMessageId?.takeIf { remoteJobId == null || remoteJobId == existing.remoteJobId },
+                lastSyncedAt = existing?.lastSyncedAt ?: 0L,
+            )
+            if (entity != existing) conversationDao.upsert(entity)
+            saveNodesForConversation(convId, conversation.messageNodes)
+        }
     }
 
+    private fun conversationLock(id: Uuid): Mutex = conversationLocks[(id.hashCode() and Int.MAX_VALUE) % conversationLocks.size]
+
+    private fun remoteTime(value: String, fallback: Long): Long =
+        PocketBaseAgentCloudClient.parseIsoMillis(value).takeIf { it > 0 } ?: fallback
+
     private suspend fun saveNodesForConversation(convId: String, nodes: List<MessageNode>) {
-        val nodeEntities = nodes.mapIndexed { index, node ->
-            AgentMessageNodeEntity(
+        val existing = messageNodeDao.getByConversationId(convId).associateByTo(HashMap()) { it.id }
+        val changed = nodes.mapIndexedNotNull { index, node ->
+            val entity = AgentMessageNodeEntity(
                 id = node.id.toString(),
                 conversationId = convId,
                 nodeIndex = index,
                 messages = JsonInstant.encodeToString(node.messages),
                 selectIndex = node.selectIndex,
             )
+            entity.takeUnless { it == existing.remove(it.id) }
         }
-        messageNodeDao.replaceForConversation(convId, nodeEntities)
+        if (existing.isNotEmpty()) messageNodeDao.deleteNodes(existing.values.toList())
+        if (changed.isNotEmpty()) messageNodeDao.upsertAll(changed)
     }
 
     suspend fun renameConversation(id: Uuid, title: String) {
@@ -456,90 +537,64 @@ class AgentRepository(
     fun observeRecentUsage(since: Long = 0L, limit: Int = 100): Flow<List<AgentUsageRecordEntity>> =
         usageRecordDao.observeRecent(since, limit)
 
-    suspend fun recordUsage(
-        conversationId: String?,
-        assistantId: String?,
-        modelId: String?,
-        modelName: String?,
-        providerId: String?,
-        promptTokens: Long,
-        completionTokens: Long,
-        cachedTokens: Long = 0L,
-        reasoningTokens: Long = 0L,
-        durationMs: Long = 0L,
-    ) {
-        val now = System.currentTimeMillis()
-        val total = promptTokens + completionTokens
-        var entity = AgentUsageRecordEntity(
-            id = Uuid.random().toString(),
-            conversationId = conversationId,
-            assistantId = assistantId,
-            modelId = modelId,
-            modelName = modelName,
-            providerId = providerId,
-            promptTokens = promptTokens,
-            completionTokens = completionTokens,
-            cachedTokens = cachedTokens,
-            reasoningTokens = reasoningTokens,
-            totalTokens = total,
-            durationMs = durationMs,
+    private suspend fun saveCompletedUsage(
+        conversation: AgentConversationEntity,
+        remote: RemoteThreadConversation,
+    ): AgentUsageRecordEntity? {
+        val message = remote.message ?: return null
+        val usage = message.usage
+        if (usage.totalTokenCount <= 0 && usage.promptTokenCount <= 0 && usage.candidatesTokenCount <= 0) return null
+        val id = PocketBaseAgentCloudClient.stableUuid("aw-agent-usage:${message.id}").toString()
+        if (usageRecordDao.getById(id) != null) return null
+        val model = remote.job.model.ifBlank { "Antigravity" }
+        return AgentUsageRecordEntity(
+            id = id,
+            conversationId = conversation.id,
+            assistantId = conversation.assistantId ?: DEFAULT_ASSISTANT_ID.toString(),
+            modelId = model,
+            modelName = model,
+            providerId = "anyworkflow",
+            promptTokens = usage.promptTokenCount.toLong(),
+            completionTokens = usage.candidatesTokenCount.toLong(),
+            cachedTokens = usage.cachedContentTokenCount.toLong(),
+            reasoningTokens = usage.thoughtsTokenCount.toLong(),
+            totalTokens = usage.totalTokenCount.takeIf { it > 0 }?.toLong()
+                ?: (usage.promptTokenCount.toLong() + usage.candidatesTokenCount),
+            durationMs = remote.messageNodes.lastOrNull()?.currentMessage?.generationTimeMs ?: 0L,
             source = "agent",
             syncStatus = SyncStatus.PENDING,
-            createdAt = now,
-        )
-        usageRecordDao.upsert(entity)
-        if (cloudClient.hasSession()) {
-            val remote = cloudClient.uploadUsageRecord(
-                RemoteAgentUsageRecord(
-                    clientId = entity.id,
-                    conversationId = entity.conversationId,
-                    assistantId = entity.assistantId,
-                    modelId = entity.modelId,
-                    modelName = entity.modelName,
-                    providerId = entity.providerId,
-                    promptTokens = entity.promptTokens,
-                    completionTokens = entity.completionTokens,
-                    cachedTokens = entity.cachedTokens,
-                    reasoningTokens = entity.reasoningTokens,
-                    totalTokens = entity.totalTokens,
-                    durationMs = entity.durationMs,
-                    source = entity.source,
-                    createdAt = entity.createdAt,
-                )
+            createdAt = System.currentTimeMillis(),
+        ).also { usageRecordDao.upsert(it) }
+    }
+
+    private suspend fun uploadUsage(item: AgentUsageRecordEntity) {
+        val remote = cloudClient.uploadUsageRecord(
+            RemoteAgentUsageRecord(
+                clientId = item.id,
+                conversationId = item.conversationId,
+                assistantId = item.assistantId,
+                modelId = item.modelId,
+                modelName = item.modelName,
+                providerId = item.providerId,
+                promptTokens = item.promptTokens,
+                completionTokens = item.completionTokens,
+                cachedTokens = item.cachedTokens,
+                reasoningTokens = item.reasoningTokens,
+                totalTokens = item.totalTokens,
+                durationMs = item.durationMs,
+                source = item.source,
+                createdAt = item.createdAt,
             )
-            if (remote != null) {
-                entity = entity.copy(remoteId = remote.id, syncStatus = SyncStatus.SYNCED)
-                usageRecordDao.upsert(entity)
-            }
+        )
+        if (remote != null) {
+            usageRecordDao.upsert(item.copy(remoteId = remote.id, syncStatus = SyncStatus.SYNCED))
         }
     }
 
     suspend fun syncUsageWithRemote(): Result<Unit> = runCatching {
         if (!cloudClient.hasSession()) return@runCatching
         val pending = usageRecordDao.getPendingSync()
-        for (item in pending) {
-            val remote = cloudClient.uploadUsageRecord(
-                RemoteAgentUsageRecord(
-                    clientId = item.id,
-                    conversationId = item.conversationId,
-                    assistantId = item.assistantId,
-                    modelId = item.modelId,
-                    modelName = item.modelName,
-                    providerId = item.providerId,
-                    promptTokens = item.promptTokens,
-                    completionTokens = item.completionTokens,
-                    cachedTokens = item.cachedTokens,
-                    reasoningTokens = item.reasoningTokens,
-                    totalTokens = item.totalTokens,
-                    durationMs = item.durationMs,
-                    source = item.source,
-                    createdAt = item.createdAt,
-                )
-            )
-            if (remote != null) {
-                usageRecordDao.upsert(item.copy(remoteId = remote.id, syncStatus = SyncStatus.SYNCED))
-            }
-        }
+        for (item in pending) uploadUsage(item)
         val remoteRecords = cloudClient.listRemoteUsageRecords()
         for (remote in remoteRecords) {
             val existing = usageRecordDao.getByRemoteId(remote.id)

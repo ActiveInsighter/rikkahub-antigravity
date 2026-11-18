@@ -33,6 +33,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
@@ -41,6 +42,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -61,6 +64,7 @@ import me.rerere.ui.toast.Toaster
 import me.rerere.ui.toast.rememberToasterState
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import me.rerere.rikkahub.data.agent.AgentRealtimeSync
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
 import me.rerere.rikkahub.data.db.MigrationState
@@ -305,6 +309,16 @@ class RouteActivity : ComponentActivity() {
         }
 
         val navigator = remember(backStack) { Navigator(backStack) }
+        val agentRealtime = koinInject<AgentRealtimeSync>()
+        if (backStack.lastOrNull() is Screen.Agent) {
+            LaunchedEffect(agentRealtime, backStack) {
+                lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    agentRealtime.keepSynced(snapshotFlow {
+                        (backStack.lastOrNull() as? Screen.Agent)?.id?.let { Uuid.parse(it) }
+                    })
+                }
+            }
+        }
 
         SharedTransitionLayout {
             CompositionLocalProvider(

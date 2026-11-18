@@ -103,8 +103,8 @@ class AgentDrawerVM(
     init {
         viewModelScope.launch {
             repository.ensureDefaultAssistant()
+            repository.syncUsageWithRemote()
         }
-        refreshFromRemote()
     }
 
     fun refreshFromRemote() {

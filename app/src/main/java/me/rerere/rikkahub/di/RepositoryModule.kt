@@ -127,6 +127,13 @@ val repositoryModule = module {
     }
 
     single {
-        me.rerere.rikkahub.data.agent.AgentRepository(get(), get(), get(), get(), get(), get())
+        me.rerere.rikkahub.data.agent.AgentRepository(get(), get(), get(), get())
+    }
+    single {
+        me.rerere.rikkahub.data.agent.PocketBaseAgentRealtime(get())
+    }
+
+    single {
+        me.rerere.rikkahub.data.agent.AgentRealtimeSync(get(), get(), get())
     }
 }

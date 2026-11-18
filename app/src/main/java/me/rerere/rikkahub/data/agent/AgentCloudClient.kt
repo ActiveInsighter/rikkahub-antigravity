@@ -1,12 +1,6 @@
 package me.rerere.rikkahub.data.agent
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
@@ -44,8 +38,8 @@ import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 private const val GEMINI_API = "/api/anyworkflow/gemini"
-private const val JOBS_COLLECTION = "aw_gemini_jobs"
-private const val MESSAGES_COLLECTION = "aw_gemini_messages"
+internal const val JOBS_COLLECTION = "aw_gemini_jobs"
+internal const val MESSAGES_COLLECTION = "aw_gemini_messages"
 private const val RECORD_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 private const val FOLDERS_COLLECTION = "aw_agent_folders"
@@ -197,26 +191,24 @@ data class RemoteSubmittedJob(
     val status: String,
 )
 
-data class RemoteJobUpdate(
-    val job: RemoteGeminiJob,
-    val message: RemoteGeminiMessage?,
-    val parts: List<RemoteAgentPart>,
-    val isTerminal: Boolean,
-)
-
 data class RemoteThreadConversation(
     val job: RemoteGeminiJob,
+    val message: RemoteGeminiMessage?,
     val messageNodes: List<MessageNode>,
-    val lastRemoteMessageId: String?,
     val isActive: Boolean,
+    val parts: List<RemoteAgentPart>,
+    val partsCursor: Int,
 )
 
 interface AgentCloudClient {
     fun hasSession(): Boolean
 
-    suspend fun listRemoteThreads(): List<RemoteAgentThread>
+    suspend fun listRemoteThreads(threadRoot: String? = null): List<RemoteAgentThread>
 
-    suspend fun fetchThreadConversation(latestJobId: String): RemoteThreadConversation?
+    suspend fun fetchThreadConversation(
+        latestJobId: String,
+        previous: RemoteThreadConversation? = null,
+    ): RemoteThreadConversation
 
     suspend fun submitMessage(
         prompt: String,
@@ -225,8 +217,6 @@ interface AgentCloudClient {
         replacesMessageId: String? = null,
         title: String = "",
     ): RemoteSubmittedJob
-
-    fun observeJobUpdates(jobId: String): Flow<RemoteJobUpdate>
 
     suspend fun cancelJob(jobId: String)
 
@@ -265,88 +255,99 @@ class PocketBaseAgentCloudClient(
 
     override fun hasSession(): Boolean = workflowRepository.session.value != null
 
-    override suspend fun listRemoteThreads(): List<RemoteAgentThread> = withContext(Dispatchers.IO) {
+    override suspend fun listRemoteThreads(threadRoot: String?): List<RemoteAgentThread> = withContext(Dispatchers.IO) {
         val session = workflowRepository.requireSession()
-        val rawItems = mutableListOf<JsonObject>()
+        val owner = workflowRepository.quoteFilter(session.userId)
+        val filter = if (threadRoot == null) {
+            "owner=\"$owner\""
+        } else {
+            val root = workflowRepository.quoteFilter(threadRoot)
+            "owner=\"$owner\" && (threadRoot=\"$root\" || id=\"$root\")"
+        }
+        val latestByRoot = LinkedHashMap<String, RemoteAgentThread>()
         var page = 1
-        var totalPages = 1
-        while (page <= totalPages && page <= 10) {
-            val root = workflowRepository.executeJson(
+        do {
+            val response = workflowRepository.executeJson(
                 baseUrl = session.baseUrl,
                 path = "/api/collections/$JOBS_COLLECTION/records",
                 method = "GET",
                 query = mapOf(
                     "page" to page.toString(),
-                    "perPage" to "100",
+                    "perPage" to if (threadRoot == null) "100" else "1",
                     "sort" to "-created,-id",
-                    "filter" to "owner=\"${workflowRepository.quoteFilter(session.userId)}\"",
-                    "fields" to "id,owner,title,status,created,updated,parentMessage,archived,threadRoot,pinned",
+                    "filter" to filter,
+                    "fields" to "id,title,status,created,updated,parentMessage,archived,threadRoot,pinned,folder_id",
                 ),
                 token = session.token,
             ).jsonObject
-            totalPages = root["totalPages"]?.jsonPrimitive?.intOrNull ?: 1
-            val items = root["items"]?.jsonArray.orEmpty()
-            for (item in items) {
-                rawItems += item.jsonObject
+            val totalPages = response["totalPages"]?.jsonPrimitive?.intOrNull ?: 1
+            for (item in response["items"]?.jsonArray.orEmpty()) {
+                val obj = item.jsonObject
+                val id = obj.str("id").ifBlank { continue }
+                val root = obj.str("threadRoot").ifBlank { id }
+                if (root in latestByRoot) continue
+                latestByRoot[root] = RemoteAgentThread(
+                    jobId = id,
+                    threadRoot = root,
+                    title = obj.str("title"),
+                    status = obj.str("status"),
+                    created = obj.str("created"),
+                    updated = obj.str("updated"),
+                    parentMessage = obj.str("parentMessage"),
+                    archived = obj["archived"]?.jsonPrimitive?.booleanOrNull ?: false,
+                    pinned = obj["pinned"]?.jsonPrimitive?.booleanOrNull ?: false,
+                    folderId = obj.str("folder_id").ifBlank { null },
+                )
             }
             page++
-        }
+        } while (threadRoot == null && page <= totalPages)
 
-        val latestByRoot = LinkedHashMap<String, RemoteAgentThread>()
-        for (obj in rawItems) {
-            val id = obj.str("id")
-            if (id.isBlank()) continue
-            val threadRoot = obj.str("threadRoot").ifBlank { id }
-            if (latestByRoot.containsKey(threadRoot)) continue
-            latestByRoot[threadRoot] = RemoteAgentThread(
-                jobId = id,
-                threadRoot = threadRoot,
-                title = obj.str("title"),
-                status = obj.str("status"),
-                created = obj.str("created"),
-                updated = obj.str("updated"),
-                parentMessage = obj.str("parentMessage"),
-                archived = obj["archived"]?.jsonPrimitive?.booleanOrNull ?: false,
-                pinned = obj["pinned"]?.jsonPrimitive?.booleanOrNull ?: false,
-            )
-        }
         latestByRoot.values.filterNot { it.archived }
     }
 
-    override suspend fun fetchThreadConversation(latestJobId: String): RemoteThreadConversation? =
-        withContext(Dispatchers.IO) {
-            val session = workflowRepository.requireSession()
-            val view = fetchJobView(session, latestJobId)
-            val job = view.first
-            val primarySummaryId = view.second.firstOrNull() ?: return@withContext null
-            val message = fetchMessage(session, latestJobId, primarySummaryId)
-            val parts = drainParts(session, latestJobId, message.id, startCursor = 0).first
-
-            val ancestors = fetchAncestors(session, job)
-            val ancestorParts = LinkedHashMap<String, List<RemoteAgentPart>>()
-            for (anc in ancestors) {
-                if (anc.streamRevision != null) {
-                    val fetched = runCatching {
-                        drainParts(session, anc.job, anc.id, startCursor = 0).first
-                    }.getOrDefault(emptyList())
-                    ancestorParts[anc.id] = fetched
+    override suspend fun fetchThreadConversation(
+        latestJobId: String,
+        previous: RemoteThreadConversation?,
+    ): RemoteThreadConversation = withContext(Dispatchers.IO) {
+        val session = workflowRepository.requireSession()
+        val (job, messageIds) = fetchJobView(session, latestJobId)
+        val message = messageIds.firstOrNull()?.let { fetchMessage(session, latestJobId, it) }
+        val cached = previous?.takeIf { it.job.id == job.id && it.message?.id == message?.id }
+        var cursor = cached?.partsCursor ?: 0
+        var parts = cached?.parts.orEmpty()
+        if (message != null && (cached == null || message.streamRevision == null || message.streamRevision > cursor)) {
+            val (newParts, nextCursor) = drainParts(session, job.id, message.id, startCursor = cursor)
+            val partsByKey = parts.associateByTo(LinkedHashMap()) { it.key }
+            for (part in newParts) {
+                if (part.revision > (partsByKey[part.key]?.revision ?: -1)) {
+                    partsByKey[part.key] = part
                 }
             }
-
-            val nodes = buildConversationNodes(
-                job = job,
-                currentMessage = message,
-                currentParts = parts,
-                ancestors = ancestors,
-                ancestorParts = ancestorParts,
-            )
-            RemoteThreadConversation(
-                job = job,
-                messageNodes = nodes,
-                lastRemoteMessageId = message.id,
-                isActive = isActiveStatus(job.status) || isActiveStatus(message.status),
-            )
+            parts = partsByKey.values.sortedBy { it.sequence }
+            cursor = nextCursor
         }
+
+        val nodes = if (cached != null) {
+            val assistantNode = cached.messageNodes.last()
+            cached.messageNodes.dropLast(1) + assistantNode.copy(
+                messages = listOf(buildAssistantUIMessage(assistantNode.currentMessage.id, job, message, parts)),
+            )
+        } else {
+            val ancestors = fetchAncestors(session, job)
+            val ancestorParts = ancestors.filter { (it.streamRevision ?: 0) > 0 }.associate { ancestor ->
+                ancestor.id to drainParts(session, ancestor.job, ancestor.id, startCursor = 0).first
+            }
+            buildConversationNodes(job, message, parts, ancestors, ancestorParts)
+        }
+        RemoteThreadConversation(
+            job = job,
+            message = message,
+            messageNodes = nodes,
+            isActive = isActiveStatus(job.status) || message?.status?.let(::isActiveStatus) == true,
+            parts = parts,
+            partsCursor = cursor,
+        )
+    }
 
     override suspend fun submitMessage(
         prompt: String,
@@ -387,55 +388,6 @@ class PocketBaseAgentCloudClient(
             status = status,
         )
     }
-
-    override fun observeJobUpdates(jobId: String): Flow<RemoteJobUpdate> = flow {
-        var cursor = 0
-        val partsByKey = LinkedHashMap<String, RemoteAgentPart>()
-        var consecutiveErrors = 0
-
-        while (currentCoroutineContext().isActive) {
-            val session = workflowRepository.session.value ?: break
-            val result = runCatching {
-                val (job, messageIds) = fetchJobView(session, jobId)
-                val primaryId = messageIds.firstOrNull()
-                val message = primaryId?.let { fetchMessage(session, jobId, it) }
-                if (message != null) {
-                    val (newParts, nextCursor) = drainParts(session, jobId, message.id, cursor)
-                    for (part in newParts) {
-                        val existing = partsByKey[part.key]
-                        if (existing == null || existing.revision < part.revision) {
-                            partsByKey[part.key] = part
-                        }
-                    }
-                    cursor = nextCursor
-                }
-                val sortedParts = partsByKey.values.sortedBy { it.sequence }
-                val active = isActiveStatus(job.status) || (message != null && isActiveStatus(message.status))
-                RemoteJobUpdate(
-                    job = job,
-                    message = message,
-                    parts = sortedParts,
-                    isTerminal = !active,
-                )
-            }
-
-            if (result.isSuccess) {
-                consecutiveErrors = 0
-                val update = result.getOrThrow()
-                emit(update)
-                if (update.isTerminal) {
-                    break
-                }
-            } else {
-                consecutiveErrors++
-                if (consecutiveErrors >= 5) {
-                    throw result.exceptionOrNull()!!
-                }
-            }
-
-            delay(2500L)
-        }
-    }.flowOn(Dispatchers.IO)
 
     override suspend fun cancelJob(jobId: String) = withContext(Dispatchers.IO) {
         val session = workflowRepository.requireSession()
@@ -764,7 +716,7 @@ class PocketBaseAgentCloudClient(
 
         val durationMs = if (startMs > 0L && endMs >= startMs) endMs - startMs else null
         val finishedAt = if (!isRunning) {
-            (messageFinishedInstant ?: messageUpdatedInstant ?: Clock.System.now())
+            (messageFinishedInstant ?: messageUpdatedInstant ?: kotlin.time.Instant.fromEpochMilliseconds(parseIsoMillis(job.updated)))
                 .toLocalDateTime(TimeZone.currentSystemDefault())
         } else null
 
@@ -776,6 +728,7 @@ class PocketBaseAgentCloudClient(
             role = MessageRole.ASSISTANT,
             parts = uiParts,
             annotations = annotations,
+            createdAt = parseLocalDateTime(message?.startedAt?.ifBlank { job.created } ?: job.created),
             finishedAt = finishedAt,
             modelSnapshot = ModelSnapshot(
                 displayName = "Antigravity Agent",
@@ -789,7 +742,7 @@ class PocketBaseAgentCloudClient(
 
     private fun buildConversationNodes(
         job: RemoteGeminiJob,
-        currentMessage: RemoteGeminiMessage,
+        currentMessage: RemoteGeminiMessage?,
         currentParts: List<RemoteAgentPart>,
         ancestors: List<RemoteGeminiMessage>,
         ancestorParts: Map<String, List<RemoteAgentPart>>,
@@ -843,12 +796,13 @@ class PocketBaseAgentCloudClient(
             i += 2
         }
 
+        val currentId = currentMessage?.id ?: job.id
         val currentUserParts = mutableListOf<UIMessagePart>()
-        val source = job.sources.firstOrNull { it.id == currentMessage.sourceId || it.name == currentMessage.sourceName }
+        val source = job.sources.firstOrNull { it.id == currentMessage?.sourceId || it.name == currentMessage?.sourceName }
         val userPromptText = if (source != null) {
             job.prompt
         } else {
-            listOf(job.prompt, currentMessage.inputText).filter { it.isNotBlank() }.joinToString("\n\n")
+            listOf(job.prompt, currentMessage?.inputText.orEmpty()).filter { it.isNotBlank() }.joinToString("\n\n")
         }
         currentUserParts += UIMessagePart.Text(userPromptText)
         if (source != null) {
@@ -859,20 +813,20 @@ class PocketBaseAgentCloudClient(
             )
         }
         val currentUserMsg = UIMessage(
-            id = stableUuid("aw-user:${currentMessage.id}"),
+            id = stableUuid("aw-user:$currentId"),
             role = MessageRole.USER,
             parts = currentUserParts,
             createdAt = parseLocalDateTime(job.created),
         )
-        nodes += MessageNode(id = stableUuid("aw-node-u:${currentMessage.id}"), messages = listOf(currentUserMsg), selectIndex = 0)
+        nodes += MessageNode(id = stableUuid("aw-node-u:$currentId"), messages = listOf(currentUserMsg), selectIndex = 0)
 
         val currentAssistantMsg = buildAssistantUIMessage(
-            messageId = stableUuid("aw-asst:${currentMessage.id}"),
+            messageId = stableUuid("aw-asst:$currentId"),
             job = job,
             message = currentMessage,
             parts = currentParts,
         )
-        nodes += MessageNode(id = stableUuid("aw-node-a:${currentMessage.id}"), messages = listOf(currentAssistantMsg), selectIndex = 0)
+        nodes += MessageNode(id = stableUuid("aw-node-a:$currentId"), messages = listOf(currentAssistantMsg), selectIndex = 0)
         return nodes
     }
 
