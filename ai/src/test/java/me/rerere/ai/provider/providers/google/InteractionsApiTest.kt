@@ -243,7 +243,10 @@ class InteractionsApiTest {
         assertEquals("agent_turn1", nextBody["previous_interaction_id"]!!.jsonPrimitive.content)
         assertTrue(nextBody["store"]!!.jsonPrimitive.boolean)
         assertEquals(1, nextBody["input"]!!.jsonArray.size)
-        assertEquals("Run tests", nextBody["input"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content)
+        assertEquals(
+            "Run tests",
+            nextBody["input"]!!.jsonArray[0].jsonObject["content"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content,
+        )
     }
 
     @Test
