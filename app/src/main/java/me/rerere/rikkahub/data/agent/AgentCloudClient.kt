@@ -1115,7 +1115,7 @@ class PocketBaseAgentCloudClient(
         ).jsonObject
         val items = root["items"]?.jsonArray ?: return@withContext emptyList()
         items.mapNotNull { elem ->
-            val obj = elem.asObj() ?: return@mapNotNull null
+            val obj = elem as? JsonObject ?: return@mapNotNull null
             obj.toAgentSchedule()
         }
     }
@@ -1193,7 +1193,7 @@ class PocketBaseAgentCloudClient(
         thinkingLevel = str("thinkingLevel"),
         cron = str("cron").ifBlank { "0 9 * * *" },
         timezone = str("timezone").ifBlank { "Asia/Shanghai" },
-        enabled = bool("enabled") ?: true,
+        enabled = this["enabled"]?.jsonPrimitive?.booleanOrNull ?: true,
         lastRunAt = str("lastRunAt"),
         nextRunAt = str("nextRunAt"),
         lastJobId = str("lastJobId"),

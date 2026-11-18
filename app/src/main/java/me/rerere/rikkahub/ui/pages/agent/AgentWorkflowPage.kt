@@ -85,7 +85,7 @@ fun AgentWorkflowPage() {
 
     LaunchedEffect(statusMessage) {
         statusMessage?.let { msg ->
-            toaster.show(msg, type = ToastType.INFO)
+            toaster.show(msg, type = ToastType.Info)
             vm.clearStatusMessage()
         }
     }
@@ -265,25 +265,18 @@ fun AgentWorkflowPage() {
 
     deletingSchedule?.let { target ->
         RikkaConfirmDialog(
-            onDismissRequest = { deletingSchedule = null },
-            title = { Text("删除定时任务") },
-            text = { Text("确定要删除「${target.title.ifBlank { "未命名任务" }}」吗？") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        vm.deleteSchedule(target.id)
-                        deletingSchedule = null
-                    }
-                ) {
-                    Text("删除", color = MaterialTheme.colorScheme.error)
-                }
+            show = true,
+            title = "删除定时任务",
+            confirmText = "删除",
+            dismissText = "取消",
+            onConfirm = {
+                vm.deleteSchedule(target.id)
+                deletingSchedule = null
             },
-            dismissButton = {
-                TextButton(onClick = { deletingSchedule = null }) {
-                    Text("取消")
-                }
-            },
-        )
+            onDismiss = { deletingSchedule = null },
+        ) {
+            Text("确定要删除「${target.title.ifBlank { "未命名任务" }}」吗？")
+        }
     }
 }
 
