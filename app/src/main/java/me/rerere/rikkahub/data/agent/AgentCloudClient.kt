@@ -315,47 +315,16 @@ class PocketBaseAgentCloudClient(
     ): RemoteSubmittedJob = withContext(Dispatchers.IO) {
         val session = workflowRepository.requireSession()
         val config = fetchConfigBestEffort(session)
-        val selectedModel = config.agentModel.ifBlank {
-            if (config.model.startsWith("antigravity", ignoreCase = true)) {
-                config.model
-            } else {
-                "Antigravity"
-            }
-        }
         val jobId = newRecordId()
-        val payload = buildJsonObject {
-            put("id", jobId)
-            put("responseVersion", 1)
-            put("title", title)
-            put("prompt", prompt)
-            put("systemPrompt", config.systemPrompt)
-            put("text", "")
-            put(
-                "sources",
-                buildJsonArray {
-                    for (src in sources) {
-                        add(
-                            buildJsonObject {
-                                put("id", src.id)
-                                put("name", src.name)
-                                put("content", src.content)
-                            }
-                        )
-                    }
-                }
-            )
-            put("delimiter", config.delimiter.ifBlank { "<!-- aw:split -->" })
-            put("model", selectedModel)
-            put("concurrency", config.concurrency.coerceIn(1, 16))
-            put("thinkingLevel", config.thinkingLevel)
-            put("maxOutputTokens", config.maxOutputTokens.coerceIn(256, 65536))
-            if (!parentMessageId.isNullOrBlank()) {
-                put("parentMessage", parentMessageId)
-            }
-            if (!replacesMessageId.isNullOrBlank()) {
-                put("replacesMessage", replacesMessageId)
-            }
-        }
+        val payload = buildSubmitJobPayload(
+            jobId = jobId,
+            config = config,
+            prompt = prompt,
+            sources = sources,
+            parentMessageId = parentMessageId,
+            replacesMessageId = replacesMessageId,
+            title = title,
+        )
 
         val created = workflowRepository.executeJson(
             baseUrl = session.baseUrl,
@@ -950,6 +919,61 @@ class PocketBaseAgentCloudClient(
     }
 
     companion object {
+        internal fun buildSubmitJobPayload(
+            jobId: String,
+            config: RemoteAgentConfig,
+            prompt: String,
+            sources: List<RemoteAgentSourceInput>,
+            parentMessageId: String? = null,
+            replacesMessageId: String? = null,
+            title: String = "",
+        ): JsonObject {
+            val selectedModel = if (
+                config.model.equals("antigravity", ignoreCase = true) ||
+                config.model.startsWith("antigravity-", ignoreCase = true)
+            ) {
+                config.model
+            } else {
+                "Antigravity"
+            }
+            return buildJsonObject {
+                put("id", jobId)
+                put("responseVersion", 1)
+                put("title", title)
+                put("prompt", prompt)
+                put("systemPrompt", config.systemPrompt)
+                put("text", "")
+                put(
+                    "sources",
+                    buildJsonArray {
+                        for (src in sources) {
+                            add(
+                                buildJsonObject {
+                                    put("id", src.id)
+                                    put("name", src.name)
+                                    put("content", src.content)
+                                }
+                            )
+                        }
+                    }
+                )
+                put("delimiter", config.delimiter.ifBlank { "<!-- aw:split -->" })
+                put("model", selectedModel)
+                if (config.agentModel.isNotBlank()) {
+                    put("agentModel", config.agentModel)
+                }
+                put("concurrency", config.concurrency.coerceIn(1, 16))
+                put("thinkingLevel", config.thinkingLevel)
+                put("maxOutputTokens", config.maxOutputTokens.coerceIn(256, 65536))
+                if (!parentMessageId.isNullOrBlank()) {
+                    put("parentMessage", parentMessageId)
+                }
+                if (!replacesMessageId.isNullOrBlank()) {
+                    put("replacesMessage", replacesMessageId)
+                }
+            }
+        }
+
         fun isActiveStatus(status: String): Boolean = status == "queued" || status == "running"
 
         fun stableUuid(seed: String): Uuid {
