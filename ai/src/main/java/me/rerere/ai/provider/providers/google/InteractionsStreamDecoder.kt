@@ -26,6 +26,7 @@ internal class InteractionsStreamDecoder(
 ) : StreamChunkDecoder {
     private val steps = linkedMapOf<Int, StepState>()
     private var interactionId: String? = null
+    private var environmentId: String? = null
     private var model: String? = null
     private var status: String? = null
     private var finished = false
@@ -78,6 +79,7 @@ internal class InteractionsStreamDecoder(
     private fun captureInteraction(interaction: JsonObject?) {
         if (interaction == null) return
         interaction.stringOrNull("id")?.let { interactionId = it }
+        interaction.stringOrNull("environment_id")?.let { environmentId = it }
         interaction.stringOrNull("model")?.let { model = it }
         interaction.stringOrNull("status")?.let { status = it }
     }
@@ -256,7 +258,7 @@ internal class InteractionsStreamDecoder(
             // 连接提前断开时，未完成的服务端工具结果没有可回传的内容，不物化
             steps.values.filterNot { isInteractionsServerToolResult(it.type) }.forEach { addAll(closeStep(it)) }
             steps.clear()
-            add(StreamChunk.Finish(status, interactionId, model ?: fallbackModel))
+            add(StreamChunk.Finish(status, interactionId, model ?: fallbackModel, environmentId))
         }
     }
 

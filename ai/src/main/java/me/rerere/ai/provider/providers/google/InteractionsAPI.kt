@@ -204,15 +204,37 @@ internal class InteractionsAPI(
         params: TextGenerationParams,
         stream: Boolean,
     ): JsonObject = buildJsonObject {
-        val isAntigravity = params.model.modelId.startsWith("antigravity-preview-")
+        val isAntigravity = params.model.modelId.equals("antigravity", ignoreCase = true) ||
+            params.model.modelId.startsWith("antigravity-preview-")
+        val reusedEnvironmentId = if (isAntigravity) {
+            messages.lastOrNull {
+                it.role == MessageRole.ASSISTANT && !it.antigravityEnvironmentId.isNullOrBlank()
+            }?.antigravityEnvironmentId
+        } else {
+            null
+        }
+        val previousInteractionId = if (isAntigravity && messages.size >= 2) {
+            val lastUser = messages.lastOrNull()
+            val prevAssistant = messages.getOrNull(messages.size - 2)
+            if (lastUser?.role == MessageRole.USER && prevAssistant?.role == MessageRole.ASSISTANT) {
+                prevAssistant.interactionId?.takeIf { it.isNotBlank() }
+            } else {
+                null
+            }
+        } else {
+            null
+        }
         if (isAntigravity) {
             put("agent", params.model.modelId)
-            put("environment", "remote")
+            put("environment", reusedEnvironmentId ?: "remote")
+            if (previousInteractionId != null) {
+                put("previous_interaction_id", previousInteractionId)
+            }
         } else {
             put("model", params.model.modelId)
         }
         put("stream", stream)
-        put("store", false)
+        put("store", isAntigravity)
 
         val outputsImage = params.model.outputModalities.contains(Modality.IMAGE)
 
@@ -224,7 +246,8 @@ internal class InteractionsAPI(
             )
         }
 
-        put("input", buildInput(messages))
+        val inputMessages = if (previousInteractionId != null) listOf(messages.last()) else messages
+        put("input", buildInput(inputMessages))
 
         val generationConfig = buildJsonObject {
             if (params.temperature != null) put("temperature", params.temperature)
@@ -557,6 +580,8 @@ internal class InteractionsAPI(
                 role = MessageRole.ASSISTANT,
                 parts = parts,
                 annotations = annotations.distinct(),
+                interactionId = interaction.stringOrNull("id"),
+                antigravityEnvironmentId = interaction.stringOrNull("environment_id"),
             ),
             finishReason = interaction.stringOrNull("status"),
             usage = parseInteractionsUsage(interaction["usage"]?.jsonObjectOrNull),
