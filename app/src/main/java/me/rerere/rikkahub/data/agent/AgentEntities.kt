@@ -18,6 +18,16 @@ data class AgentConversationEntity(
     val updateAt: Long,
     @ColumnInfo("is_pinned", defaultValue = "0")
     val isPinned: Boolean = false,
+    @ColumnInfo("remote_job_id")
+    val remoteJobId: String? = null,
+    @ColumnInfo("remote_thread_root")
+    val remoteThreadRoot: String? = null,
+    @ColumnInfo("remote_status")
+    val remoteStatus: String? = null,
+    @ColumnInfo("last_remote_message_id")
+    val lastRemoteMessageId: String? = null,
+    @ColumnInfo("last_synced_at", defaultValue = "0")
+    val lastSyncedAt: Long = 0L,
 )
 
 @Entity(

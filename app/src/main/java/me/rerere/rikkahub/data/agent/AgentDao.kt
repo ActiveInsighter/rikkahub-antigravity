@@ -18,6 +18,12 @@ interface AgentConversationDao {
     @Query("SELECT * FROM agent_conversation WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): AgentConversationEntity?
 
+    @Query("SELECT * FROM agent_conversation WHERE remote_thread_root = :threadRoot LIMIT 1")
+    suspend fun getByRemoteThreadRoot(threadRoot: String): AgentConversationEntity?
+
+    @Query("SELECT * FROM agent_conversation")
+    suspend fun getAll(): List<AgentConversationEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: AgentConversationEntity)
 

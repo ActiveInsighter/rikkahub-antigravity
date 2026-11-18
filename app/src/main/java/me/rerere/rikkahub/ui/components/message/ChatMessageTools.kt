@@ -73,12 +73,19 @@ import kotlin.time.DurationUnit
 @Composable
 fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool) {
     val loading = !tool.isFinished
+    val failed = tool.status == me.rerere.ai.ui.ServerToolStatus.FAILED
+    val hasDetails = tool.input != null || tool.output != null
     ChainOfThoughtStep(
         icon = {
-            if (loading) {
-                DotLoading(size = 10.dp)
-            } else {
-                Icon(
+            when {
+                loading -> DotLoading(size = 10.dp)
+                failed -> Icon(
+                    imageVector = HugeIcons.Cancel01,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.error,
+                )
+                else -> Icon(
                     imageVector = HugeIcons.Tools,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
@@ -90,13 +97,55 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
             Text(
                 text = stringResource(R.string.chat_message_tool_call_generic, tool.toolName),
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.secondary,
+                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.shimmer(isLoading = loading),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         },
+        content = if (hasDetails) {
+            {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    tool.input?.let { inputEl ->
+                        val text = remember(inputEl) { formatServerToolJson(inputEl) }
+                        if (text.isNotBlank()) {
+                            Text(
+                                text = "输入:\n$text",
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 12,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    tool.output?.let { outputEl ->
+                        val text = remember(outputEl) { formatServerToolJson(outputEl) }
+                        if (text.isNotBlank()) {
+                            Text(
+                                text = "输出:\n$text",
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 16,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            null
+        },
     )
+}
+
+private fun formatServerToolJson(element: kotlinx.serialization.json.JsonElement): String {
+    return when (element) {
+        is JsonPrimitive -> element.contentOrNull ?: element.toString()
+        else -> element.toString()
+    }
 }
 
 /** 发给模型的运行时通知，例如后台命令结束；展开后显示发给模型的原文 */

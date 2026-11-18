@@ -122,11 +122,11 @@ val repositoryModule = module {
         me.rerere.rikkahub.data.workflow.WorkflowSettingsRepository(get())
     }
 
-    single {
-        me.rerere.rikkahub.data.agent.AgentRepository(get(), get())
+    single<me.rerere.rikkahub.data.agent.AgentCloudClient> {
+        me.rerere.rikkahub.data.agent.PocketBaseAgentCloudClient(get())
     }
 
-    single<me.rerere.rikkahub.data.agent.AgentCloudClient> {
-        me.rerere.rikkahub.data.agent.LocalPreviewAgentCloudClient()
+    single {
+        me.rerere.rikkahub.data.agent.AgentRepository(get(), get(), get())
     }
 }

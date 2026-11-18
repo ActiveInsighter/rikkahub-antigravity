@@ -49,6 +49,7 @@ import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.LookTop
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.PencilEdit01
+import me.rerere.hugeicons.stroke.Refresh
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sorting01
@@ -77,6 +78,7 @@ fun AgentDrawerContent(
     val conversations by drawerVm.conversations.collectAsStateWithLifecycle()
     val searchQuery by drawerVm.searchQuery.collectAsStateWithLifecycle()
     val sortOrder by drawerVm.sortOrder.collectAsStateWithLifecycle()
+    val isSyncing by drawerVm.isSyncing.collectAsStateWithLifecycle()
 
     var showSortMenu by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Conversation?>(null) }
@@ -121,23 +123,34 @@ fun AgentDrawerContent(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = "独立会话 · 独立配置",
+                            text = if (isSyncing) "正在同步远端..." else "远端同步 · 独立工作区",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
 
-                IconButton(
-                    onClick = {
-                        onNewConversation()
-                        onCloseDrawer()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { drawerVm.refreshFromRemote() },
+                        enabled = !isSyncing,
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Refresh,
+                            contentDescription = "同步远端会话",
+                        )
                     }
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.MessageAdd01,
-                        contentDescription = "新建 Agent 会话",
-                    )
+                    IconButton(
+                        onClick = {
+                            onNewConversation()
+                            onCloseDrawer()
+                        }
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.MessageAdd01,
+                            contentDescription = "新建 Agent 会话",
+                        )
+                    }
                 }
             }
 

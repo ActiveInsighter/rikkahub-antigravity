@@ -40,6 +40,25 @@ class AgentDrawerVM(
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing
+
+    init {
+        refreshFromRemote()
+    }
+
+    fun refreshFromRemote() {
+        if (_isSyncing.value) return
+        viewModelScope.launch {
+            _isSyncing.value = true
+            try {
+                repository.syncThreadsFromRemote()
+            } finally {
+                _isSyncing.value = false
+            }
+        }
+    }
+
     fun updateSearchQuery(query: String) {
         searchQuery.value = query
     }

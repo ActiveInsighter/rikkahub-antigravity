@@ -65,6 +65,12 @@ import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sparkles
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import me.rerere.hugeicons.stroke.Refresh
+import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
@@ -264,6 +270,7 @@ fun AgentPage(id: Uuid) {
                         previewListState = previewListState,
                         selectionState = selectionState,
                         loading = isGenerating,
+                        processingStatus = activeStatusText,
                         previewMode = previewMode,
                         onPreviewModeChange = { previewMode = it },
                         settings = composedSettings,
@@ -279,6 +286,17 @@ fun AgentPage(id: Uuid) {
                 }
             }
         }
+    }
+
+    if (showConnectDialog) {
+        AgentConnectDialog(
+            isConnecting = isConnecting,
+            error = connectError,
+            onDismiss = { vm.dismissConnectDialog() },
+            onConnect = { identity, password, baseUrl ->
+                vm.connectAccount(identity, password, baseUrl)
+            },
+        )
     }
 
     errorMessage?.let { err ->
@@ -456,4 +474,85 @@ private fun AgentEmptyState(
             }
         }
     }
+}
+
+@Composable
+private fun AgentConnectDialog(
+    isConnecting: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onConnect: (identity: String, password: String, baseUrl: String) -> Unit,
+) {
+    var baseUrl by rememberSaveable { mutableStateOf(DEFAULT_POCKETBASE_URL) }
+    var identity by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = { if (!isConnecting) onDismiss() },
+        title = { Text("连接 AnyWorkflow 远端") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "登录后即可触发云端 Action、实时接收 Antigravity Agent 步骤并同步远端数据库。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    label = { Text("PocketBase 地址") },
+                    singleLine = true,
+                    enabled = !isConnecting,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = identity,
+                    onValueChange = { identity = it },
+                    label = { Text("邮箱") },
+                    singleLine = true,
+                    enabled = !isConnecting,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("密码") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    enabled = !isConnecting,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (!error.isNullOrBlank()) {
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConnect(identity, password, baseUrl) },
+                enabled = !isConnecting && identity.isNotBlank() && password.isNotBlank(),
+            ) {
+                if (isConnecting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Text("连接并同步")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !isConnecting,
+            ) {
+                Text("取消")
+            }
+        },
+    )
 }
