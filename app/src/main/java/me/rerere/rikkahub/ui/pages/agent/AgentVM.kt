@@ -97,7 +97,7 @@ class AgentVM(
                 ?.toInstant(TimeZone.currentSystemDefault())
                 ?.toEpochMilliseconds()
                 ?.takeIf { it > 0L && it <= System.currentTimeMillis() }
-            createdMs ?: cached?.conversation?.updateAt?.toEpochMilliseconds()
+            createdMs ?: cached?.conversation?.updateAt?.toEpochMilli()
                 ?.takeIf { it > 0L && it <= System.currentTimeMillis() }
                 ?: System.currentTimeMillis()
         }
