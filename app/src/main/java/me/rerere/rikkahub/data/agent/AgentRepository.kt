@@ -236,10 +236,11 @@ class AgentRepository(
         previous: RemoteThreadConversation?,
         refreshJob: Boolean = true,
     ): RemoteThreadConversation? = conversationLock(id).withLock {
-        if (workflowRepository.session.value != session || id in submittingIds.value ||
-            conversationDao.getById(id.toString())?.remoteJobId != jobId
-        ) return@withLock null
-        val remote = cloudClient.fetchThreadConversation(jobId, previous, refreshJob)
+        if (workflowRepository.session.value != session || id in submittingIds.value) return@withLock null
+        val stored = conversationDao.getById(id.toString()) ?: return@withLock null
+        if (stored.remoteJobId != jobId) return@withLock null
+        // A manual refresh can have committed a newer job status since this worker last fetched it.
+        val remote = cloudClient.fetchThreadConversation(jobId, previous, refreshJob || stored.remoteStatus != previous?.job?.status)
         // Room observers can stop this worker as soon as the terminal status is committed.
         withContext(NonCancellable) {
             val completion = database.withTransaction {

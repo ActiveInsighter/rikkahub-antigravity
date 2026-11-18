@@ -315,12 +315,20 @@ class PocketBaseAgentCloudClient(
     ): RemoteThreadConversation = withContext(Dispatchers.IO) {
         val session = workflowRepository.requireSession()
         val previousMessage = previous?.message
-        val (job, messageIds) = if (!refreshJob && previous != null && previousMessage != null) {
+        val useCachedJob = !refreshJob && previous != null && previousMessage != null
+        val (snapshotJob, messageIds) = if (useCachedJob && previous != null && previousMessage != null) {
             previous.job to listOf(previousMessage.id)
         } else {
             fetchJobView(session, latestJobId)
         }
         val message = messageIds.firstOrNull()?.let { fetchMessage(session, latestJobId, it) }
+        val job = if (useCachedJob && message != null && isActiveStatus(snapshotJob.status) &&
+            isActiveStatus(previousMessage?.status.orEmpty()) && !isActiveStatus(message.status)
+        ) {
+            fetchJobView(session, latestJobId).first
+        } else {
+            snapshotJob
+        }
         val cached = previous?.takeIf { it.job.id == job.id && it.message?.id == message?.id }
         var cursor = cached?.partsCursor ?: 0
         var parts = cached?.parts.orEmpty()
@@ -717,12 +725,13 @@ class PocketBaseAgentCloudClient(
             }
         }
 
-        if (message != null && message.status != "succeeded" && message.error.isNotBlank()) {
+        val canceled = isCanceledStatus(message?.status) || (!isHistorical && isCanceledStatus(job.status))
+        if (!canceled && message != null && message.status != "succeeded" && message.error.isNotBlank()) {
             uiParts += UIMessagePart.Notice(
                 title = "执行出错",
                 text = message.error,
             )
-        } else if (!isHistorical && message?.status != "succeeded" && job.error.isNotBlank()) {
+        } else if (!canceled && !isHistorical && message?.status != "succeeded" && job.error.isNotBlank()) {
             uiParts += UIMessagePart.Notice(
                 title = "任务异常",
                 text = job.error,
@@ -1132,6 +1141,8 @@ class PocketBaseAgentCloudClient(
                 }
             }
         }
+
+        private fun isCanceledStatus(status: String?): Boolean = status == "canceled" || status == "cancelled"
 
         fun isActiveStatus(status: String): Boolean = when (status) {
             "queued", "dispatching", "pending", "running" -> true

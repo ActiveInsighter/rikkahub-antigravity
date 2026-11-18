@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 import me.rerere.rikkahub.data.workflow.WorkflowApiException
 import me.rerere.rikkahub.data.workflow.WorkflowRepository
 import me.rerere.rikkahub.data.workflow.WorkflowSession
@@ -55,10 +56,9 @@ internal class AgentRealtimeSync(
                 conversations.mapNotNull { conversation ->
                     val jobId = conversation.remoteJobId ?: return@mapNotNull null
                     val id = Uuid.parse(conversation.id)
-                    if (id !in submitting &&
-                        (id == selected || PocketBaseAgentCloudClient.isActiveStatus(conversation.remoteStatus.orEmpty()))
-                    ) {
-                        jobId to id
+                    val active = PocketBaseAgentCloudClient.isActiveStatus(conversation.remoteStatus.orEmpty())
+                    if (id !in submitting && (id == selected || active)) {
+                        jobId to Target(id, active)
                     } else {
                         null
                     }
@@ -66,29 +66,29 @@ internal class AgentRealtimeSync(
             }.distinctUntilChanged().collect { targets ->
                 val obsolete = workers.keys - targets.keys
                 for (jobId in obsolete) workers.remove(jobId)?.task?.cancel()
-                for ((jobId, id) in targets) {
-                    if (jobId in workers) continue
-                    val worker = Worker()
-                    worker.task = launch {
+                for ((jobId, target) in targets) {
+                    val current = workers[jobId]
+                    if (current != null) {
+                        current.updates.setActive(target.active)
+                        continue
+                    }
+                    val updates = AgentJobInvalidations(target.active)
+                    val task = launch {
                         var previous: RemoteThreadConversation? = null
-                        worker.invalidate(refreshJob = true)
-                        for (change in worker.changes) {
-                            // A transaction can publish several notifications for the same update.
-                            delay(150)
-                            worker.changes.tryReceive()
-                            val refreshJob = worker.refreshJob
-                            worker.refreshJob = false
+                        while (true) {
+                            val refreshJob = updates.next()
                             val updated = requests.withPermit {
-                                retrySync { repository.syncRemoteJob(session, id, jobId, previous, refreshJob) }
+                                retrySync { repository.syncRemoteJob(session, target.id, jobId, previous, refreshJob) }
                             }
                             if (updated != null) {
                                 previous = updated
+                                updates.setActive(updated.isActive)
                             } else {
-                                worker.refreshJob = worker.refreshJob || refreshJob
+                                updates.requireJobRefresh(refreshJob)
                             }
                         }
                     }
-                    workers[jobId] = worker
+                    workers[jobId] = Worker(task, updates)
                 }
             }
         }
@@ -127,28 +127,21 @@ internal class AgentRealtimeSync(
                     initialRefresh.cancel()
                     reconcileAll = true
                     metadataChanges.trySend(Unit)
-                    workers.values.forEach { it.invalidate(refreshJob = true) }
+                    workers.values.forEach { it.updates.invalidate(refreshJob = true) }
                 }
                 is AgentRealtimeEvent.JobChanged -> {
                     dirtyRoots += event.threadRoot
                     metadataChanges.trySend(Unit)
-                    workers[event.jobId]?.invalidate(refreshJob = true)
+                    workers[event.jobId]?.updates?.invalidate(refreshJob = true)
                 }
-                is AgentRealtimeEvent.MessageChanged -> workers[event.jobId]?.invalidate(refreshJob = false)
+                is AgentRealtimeEvent.MessageChanged -> workers[event.jobId]?.updates?.invalidate(refreshJob = false)
             }
         }
     }
 
-    private class Worker {
-        val changes = Channel<Unit>(Channel.CONFLATED)
-        var refreshJob = false
-        lateinit var task: Job
+    private data class Target(val id: Uuid, val active: Boolean)
 
-        fun invalidate(refreshJob: Boolean) {
-            this.refreshJob = this.refreshJob || refreshJob
-            changes.trySend(Unit)
-        }
-    }
+    private data class Worker(val task: Job, val updates: AgentJobInvalidations)
 
     private suspend fun <T> retrySync(sync: suspend () -> T): T? {
         repeat(3) { attempt ->
@@ -167,5 +160,45 @@ internal class AgentRealtimeSync(
             }
         }
         return null
+    }
+}
+
+
+// Running executors normally publish a persisted heartbeat every 30 seconds.
+// If one goes quiet, reconcile just this job to cover a stalled stream or a missed terminal event.
+internal class AgentJobInvalidations(initiallyActive: Boolean) {
+    private val changes = Channel<Unit>(Channel.CONFLATED)
+    private var active = initiallyActive
+    private var refreshJob = true
+
+    init {
+        changes.trySend(Unit)
+    }
+
+    fun setActive(value: Boolean) {
+        if (!active && value) invalidate(refreshJob = true)
+        active = value
+    }
+
+    fun requireJobRefresh(value: Boolean) {
+        refreshJob = refreshJob || value
+    }
+
+    fun invalidate(refreshJob: Boolean) {
+        requireJobRefresh(refreshJob)
+        changes.trySend(Unit)
+    }
+
+    suspend fun next(): Boolean {
+        val timedOut = if (active) {
+            withTimeoutOrNull(45_000) { changes.receive() } == null
+        } else {
+            changes.receive()
+            false
+        }
+        // A transaction can publish several notifications for the same update.
+        if (!timedOut) delay(150)
+        changes.tryReceive()
+        return (timedOut || refreshJob).also { refreshJob = false }
     }
 }

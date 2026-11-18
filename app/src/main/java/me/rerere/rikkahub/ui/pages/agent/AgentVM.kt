@@ -85,7 +85,13 @@ class AgentVM(
         } else {
             when (cached?.remoteStatus) {
                 "queued", "dispatching", "pending" -> "排队中 · 等待执行器领取"
-                "running" -> "执行中 · 正在同步远端步骤"
+                "running" -> {
+                    val latest = cached?.conversation?.messageNodes?.lastOrNull()?.currentMessage
+                    val hasProgress = latest?.role == MessageRole.ASSISTANT && latest.parts.any {
+                        it !is UIMessagePart.Text || it.text.isNotBlank()
+                    }
+                    if (hasProgress) "执行中 · 等待新步骤" else "执行中 · 等待模型输出"
+                }
                 "failed" -> "执行失败"
                 "canceled" -> "已取消"
                 else -> null
