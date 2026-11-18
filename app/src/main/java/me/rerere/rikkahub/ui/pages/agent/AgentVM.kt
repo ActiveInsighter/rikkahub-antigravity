@@ -3,13 +3,20 @@ package me.rerere.rikkahub.ui.pages.agent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
@@ -79,22 +86,30 @@ class AgentVM(
         manual || (session != null && cached?.waitingForMessages == true)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    val activeStatusText: StateFlow<String?> = combine(snapshot, repository.submittingIds) { cached, submitting ->
-        if (conversationId in submitting) {
-            "正在触发云端 Action..."
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val activeStatusText: StateFlow<String?> = combine(isGenerating, snapshot) { generating, cached ->
+        if (!generating) {
+            null
         } else {
-            when (cached?.remoteStatus) {
-                "queued", "dispatching", "pending" -> "排队中 · 等待执行器领取"
-                "running" -> {
-                    val latest = cached?.conversation?.messageNodes?.lastOrNull()?.currentMessage
-                    val hasProgress = latest?.role == MessageRole.ASSISTANT && latest.parts.any {
-                        it !is UIMessagePart.Text || it.text.isNotBlank()
-                    }
-                    if (hasProgress) "执行中 · 等待新步骤" else "执行中 · 等待模型输出"
+            val latestAssistant = cached?.conversation?.messageNodes?.lastOrNull()?.currentMessage
+                ?.takeIf { it.role == MessageRole.ASSISTANT }
+            val createdMs = latestAssistant?.createdAt
+                ?.toInstant(TimeZone.currentSystemDefault())
+                ?.toEpochMilliseconds()
+                ?.takeIf { it > 0L && it <= System.currentTimeMillis() }
+            createdMs ?: cached?.conversation?.updateAt?.takeIf { it > 0L && it <= System.currentTimeMillis() }
+                ?: System.currentTimeMillis()
+        }
+    }.flatMapLatest { startMs ->
+        if (startMs == null) {
+            flowOf(null)
+        } else {
+            flow {
+                while (true) {
+                    val elapsedSec = ((System.currentTimeMillis() - startMs) / 1000L).coerceAtLeast(0L)
+                    emit(formatAgentElapsed(elapsedSec))
+                    delay(1000L)
                 }
-                "failed" -> "执行失败"
-                "canceled" -> "已取消"
-                else -> null
             }
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -120,6 +135,7 @@ class AgentVM(
     val initialDraft: StateFlow<String?> = _initialDraft.asStateFlow()
 
     fun saveDraft(text: String) {
+        _initialDraft.value = text
         repository.saveDraft(conversationId, text)
     }
 

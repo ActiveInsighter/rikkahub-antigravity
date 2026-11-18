@@ -92,6 +92,7 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalWorkspaceId
+import me.rerere.rikkahub.ui.pages.agent.AgentMessageInsightsFooter
 import me.rerere.rikkahub.ui.theme.LocalChatFontFamily
 import me.rerere.rikkahub.ui.theme.rememberChatFontFamily
 import me.rerere.rikkahub.utils.JsonInstant
@@ -123,6 +124,7 @@ fun ChatMessage(
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onOpenAgentInsights: ((UIMessage) -> Unit)? = null,
 ) {
     val message = node.messages[node.selectIndex]
     if (message.isContextCheckpoint) {
@@ -246,6 +248,13 @@ fun ChatMessage(
 
         ProvideTextStyle(textStyle) {
             ChatMessageNerdLine(message = message)
+        }
+
+        if (onOpenAgentInsights != null && message.role == MessageRole.ASSISTANT && !loading) {
+            AgentMessageInsightsFooter(
+                message = message,
+                onClick = { onOpenAgentInsights(message) },
+            )
         }
 
     }
