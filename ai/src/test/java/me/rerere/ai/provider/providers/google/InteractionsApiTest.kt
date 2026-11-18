@@ -141,7 +141,7 @@ class InteractionsApiTest {
                 assertEquals(modelId, body["agent"]!!.jsonPrimitive.content)
                 assertEquals("remote", body["environment"]!!.jsonPrimitive.content)
                 assertEquals(stream, body["stream"]!!.jsonPrimitive.boolean)
-                assertFalse(body["store"]!!.jsonPrimitive.boolean)
+                assertTrue(body["store"]!!.jsonPrimitive.boolean)
                 for (key in listOf("model", "generation_config", "response_format", "tools")) {
                     assertFalse("Agent request must omit $key", body.containsKey(key))
                 }
@@ -214,6 +214,36 @@ class InteractionsApiTest {
         assertEquals(ServerToolStatus.COMPLETED, tool.status)
         assertEquals("The answer is 42.", (message.parts[1] as UIMessagePart.Text).text)
         assertEquals("completed", (chunks.last() as StreamChunk.Finish).finishReason)
+    }
+
+    @Test
+    fun `antigravity captures environment_id and reuses it across turns`() {
+        val (_, assistantMsg) = decode(
+            """{"interaction":{"id":"agent_turn1","environment_id":"env_sandbox_42","agent":"antigravity-preview-09-2026","status":"in_progress"},"event_type":"interaction.created"}""",
+            """{"index":0,"step":{"type":"model_output"},"event_type":"step.start"}""",
+            """{"index":0,"delta":{"type":"text","text":"Cloned repo."},"event_type":"step.delta"}""",
+            """{"index":0,"event_type":"step.stop"}""",
+            """{"interaction":{"id":"agent_turn1","environment_id":"env_sandbox_42","status":"completed","agent":"antigravity-preview-09-2026"},"event_type":"interaction.completed"}""",
+        )
+
+        assertEquals("agent_turn1", assistantMsg.interactionId)
+        assertEquals("env_sandbox_42", assistantMsg.antigravityEnvironmentId)
+
+        val nextBody = api.buildRequestBody(
+            messages = listOf(
+                UIMessage.user("Clone repo"),
+                assistantMsg,
+                UIMessage.user("Run tests"),
+            ),
+            params = TextGenerationParams(model = Model(modelId = "antigravity-preview-09-2026")),
+            stream = true,
+        )
+
+        assertEquals("env_sandbox_42", nextBody["environment"]!!.jsonPrimitive.content)
+        assertEquals("agent_turn1", nextBody["previous_interaction_id"]!!.jsonPrimitive.content)
+        assertTrue(nextBody["store"]!!.jsonPrimitive.boolean)
+        assertEquals(1, nextBody["input"]!!.jsonArray.size)
+        assertEquals("Run tests", nextBody["input"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content)
     }
 
     @Test

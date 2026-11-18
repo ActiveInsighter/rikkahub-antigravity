@@ -117,6 +117,8 @@ data class RemoteGeminiMessage(
     val updated: String,
     val streamRevision: Int?,
     val usage: RemoteGeminiUsage,
+    val providerStateId: String = "",
+    val environmentId: String = "",
 )
 
 data class RemoteGeminiUsage(
@@ -192,6 +194,8 @@ interface AgentCloudClient {
         sources: List<RemoteAgentSourceInput> = emptyList(),
         parentMessageId: String? = null,
         replacesMessageId: String? = null,
+        environmentId: String? = null,
+        previousInteractionId: String? = null,
         title: String = "",
     ): RemoteSubmittedJob
 
@@ -311,6 +315,8 @@ class PocketBaseAgentCloudClient(
         sources: List<RemoteAgentSourceInput>,
         parentMessageId: String?,
         replacesMessageId: String?,
+        environmentId: String?,
+        previousInteractionId: String?,
         title: String,
     ): RemoteSubmittedJob = withContext(Dispatchers.IO) {
         val session = workflowRepository.requireSession()
@@ -323,6 +329,8 @@ class PocketBaseAgentCloudClient(
             sources = sources,
             parentMessageId = parentMessageId,
             replacesMessageId = replacesMessageId,
+            environmentId = environmentId,
+            previousInteractionId = previousInteractionId,
             title = title,
         )
 
@@ -849,6 +857,15 @@ class PocketBaseAgentCloudClient(
             toolUseTokenCount = usageObj?.get("toolUseTokenCount")?.jsonPrimitive?.intOrNull ?: 0,
             agentStepCount = usageObj?.get("agentStepCount")?.jsonPrimitive?.intOrNull ?: 0,
         )
+        val providerStateObj = (obj["providerState"] as? JsonObject)
+            ?: (obj["providerState"] as? JsonPrimitive)?.contentOrNull?.let { raw ->
+                runCatching { JsonInstant.parseToJsonElement(raw) as? JsonObject }.getOrNull()
+            }
+        val responseMetaObj = ((obj["response"] as? JsonObject)?.get("metadata") as? JsonObject)
+        val providerStateId = providerStateObj?.str("id").orEmpty()
+            .ifBlank { responseMetaObj?.str("id").orEmpty() }
+        val environmentId = providerStateObj?.str("environmentId").orEmpty()
+            .ifBlank { responseMetaObj?.str("environment_id").orEmpty() }
         return RemoteGeminiMessage(
             id = obj.str("id"),
             owner = obj.str("owner"),
@@ -867,6 +884,8 @@ class PocketBaseAgentCloudClient(
             updated = obj.str("updated"),
             streamRevision = obj["streamRevision"]?.jsonPrimitive?.intOrNull,
             usage = usage,
+            providerStateId = providerStateId,
+            environmentId = environmentId,
         )
     }
 
@@ -926,6 +945,8 @@ class PocketBaseAgentCloudClient(
             sources: List<RemoteAgentSourceInput>,
             parentMessageId: String? = null,
             replacesMessageId: String? = null,
+            environmentId: String? = null,
+            previousInteractionId: String? = null,
             title: String = "",
         ): JsonObject {
             val selectedModel = if (
@@ -970,6 +991,12 @@ class PocketBaseAgentCloudClient(
                 }
                 if (!replacesMessageId.isNullOrBlank()) {
                     put("replacesMessage", replacesMessageId)
+                }
+                if (!environmentId.isNullOrBlank()) {
+                    put("environmentId", environmentId)
+                }
+                if (!previousInteractionId.isNullOrBlank()) {
+                    put("previousInteractionId", previousInteractionId)
                 }
             }
         }

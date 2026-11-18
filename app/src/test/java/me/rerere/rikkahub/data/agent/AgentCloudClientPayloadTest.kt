@@ -54,4 +54,21 @@ class AgentCloudClientPayloadTest {
         assertEquals("antigravity-preview-09-2026", payload["model"]?.jsonPrimitive?.content)
         assertNull(payload["agentModel"])
     }
+
+    @Test
+    fun `forwards environmentId and previousInteractionId when provided`() {
+        val payload = PocketBaseAgentCloudClient.buildSubmitJobPayload(
+            jobId = "job126",
+            config = RemoteAgentConfig(model = "Antigravity"),
+            prompt = "follow up",
+            sources = emptyList(),
+            parentMessageId = "msg_prev",
+            environmentId = "env_abc123",
+            previousInteractionId = "v1_xyz",
+        )
+
+        assertEquals("msg_prev", payload["parentMessage"]?.jsonPrimitive?.content)
+        assertEquals("env_abc123", payload["environmentId"]?.jsonPrimitive?.content)
+        assertEquals("v1_xyz", payload["previousInteractionId"]?.jsonPrimitive?.content)
+    }
 }
