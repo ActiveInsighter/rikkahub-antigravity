@@ -110,6 +110,13 @@ class AgentVM(
     val uiSettings: StateFlow<AgentUiSettings> = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current)
 
+    private val _initialDraft = MutableStateFlow<String?>(null)
+    val initialDraft: StateFlow<String?> = _initialDraft.asStateFlow()
+
+    fun saveDraft(text: String) {
+        repository.saveDraft(conversationId, text)
+    }
+
     private var submission: Deferred<Result<Unit>>? = null
     private val isBusy: Boolean
         get() = snapshot.value?.isActive == true || conversationId in repository.submittingIds.value ||
@@ -134,6 +141,7 @@ class AgentVM(
             }
         }
         viewModelScope.launch {
+            _initialDraft.value = repository.getDraft(conversationId).orEmpty()
             _agentAssistant.value = repository.ensureDefaultAssistant().toDomainAssistant()
         }
     }
@@ -232,11 +240,11 @@ class AgentVM(
         }
     }
 
-    fun sendMessage(parts: List<UIMessagePart>) {
-        if (parts.isEmpty() || isBusy) return
+    fun sendMessage(parts: List<UIMessagePart>): Boolean {
+        if (parts.isEmpty() || isBusy) return false
         if (session.value == null) {
             openConnectDialog()
-            return
+            return false
         }
         _errorMessage.value = null
 
@@ -273,6 +281,8 @@ class AgentVM(
             title = if (current.title.isBlank()) nextTitle else "",
             targetNodeId = null,
         )
+        saveDraft("")
+        return true
     }
 
     fun stopGeneration() {

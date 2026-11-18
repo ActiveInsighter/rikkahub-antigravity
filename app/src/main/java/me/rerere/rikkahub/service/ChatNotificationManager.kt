@@ -62,6 +62,7 @@ class ChatNotificationManager(
                 when (event) {
                     is AppEvent.ChatGenerationUpdate -> handleGenerationUpdate(event)
                     is AppEvent.ChatGenerationEnded -> handleGenerationEnded(event)
+                    is AppEvent.AgentJobFinished -> handleAgentJobFinished(event)
                     else -> {}
                 }
             }
@@ -91,21 +92,33 @@ class ChatNotificationManager(
         sendGenerationDoneNotification(event.conversationId, event.senderName, contentPreview)
     }
 
+    private fun handleAgentJobFinished(event: AppEvent.AgentJobFinished) {
+        if (isForeground.value) return
+        if (!settingsStore.settingsFlow.value.displaySetting.enableNotificationOnMessageGeneration) return
+        val title = if (event.success) {
+            "Agent 已完成：${event.title.ifBlank { "Agent" }}"
+        } else {
+            "Agent 执行失败：${event.title.ifBlank { "Agent" }}"
+        }
+        sendGenerationDoneNotification(event.conversationId, title, event.preview, agent = true)
+    }
+
     private fun sendGenerationDoneNotification(
         conversationId: Uuid,
         senderName: String,
-        contentPreview: String
+        contentPreview: String,
+        agent: Boolean = false,
     ) {
         context.sendNotification(
             channelId = CHAT_COMPLETED_NOTIFICATION_CHANNEL_ID,
-            notificationId = 1
+            notificationId = if (agent) conversationId.hashCode() else 1
         ) {
             title = senderName
             content = contentPreview
             autoCancel = true
             useDefaults = true
             category = NotificationCompat.CATEGORY_MESSAGE
-            contentIntent = getPendingIntent(context, conversationId)
+            contentIntent = getPendingIntent(context, conversationId, agent)
         }
     }
 
@@ -168,11 +181,11 @@ class ChatNotificationManager(
         context.cancelNotification(ChatGenerationForegroundService.NOTIFICATION_ID)
     }
 
-    private fun getPendingIntent(context: Context, conversationId: Uuid): PendingIntent {
+    private fun getPendingIntent(context: Context, conversationId: Uuid, agent: Boolean = false): PendingIntent {
         return PendingIntent.getActivity(
             context,
             conversationId.hashCode(),
-            conversationIntent(context, conversationId.toString()),
+            conversationIntent(context, conversationId.toString(), agent),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
     }

@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -20,11 +22,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuGroup
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenuPopup
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
@@ -39,6 +43,7 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -47,10 +52,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -60,16 +66,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Files02
-import me.rerere.hugeicons.stroke.Image02
-import me.rerere.hugeicons.stroke.ListView
+import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.MoreVertical
@@ -78,6 +85,7 @@ import me.rerere.hugeicons.stroke.Refresh
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
+import me.rerere.rikkahub.ui.components.ai.AgentFilesPicker
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.ChatTopBarCapsule
 import me.rerere.rikkahub.ui.components.ai.rememberChatAttachmentPickerActions
@@ -113,6 +121,7 @@ fun AgentPage(id: Uuid) {
     val isConnecting by vm.isConnecting.collectAsStateWithLifecycle()
     val connectError by vm.connectError.collectAsStateWithLifecycle()
     val uiSettings by vm.uiSettings.collectAsStateWithLifecycle()
+    val initialDraft by vm.initialDraft.collectAsStateWithLifecycle()
     val baseSettings = LocalSettings.current
     val composedSettings = remember(uiSettings, baseSettings) {
         uiSettings.toCompositionSettings(baseSettings)
@@ -127,11 +136,14 @@ fun AgentPage(id: Uuid) {
         scope.launch { drawerState.close() }
     }
 
-    LaunchedEffect(drawerState.isOpen) {
-        if (drawerState.isOpen) {
-            focusManager.clearFocus(force = true)
-            keyboardController?.hide()
-        }
+    LaunchedEffect(id) {
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+    }
+
+    LaunchedEffect(drawerState.currentValue, drawerState.isOpen) {
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
     }
 
     val listState = rememberLazyListState()
@@ -140,6 +152,45 @@ fun AgentPage(id: Uuid) {
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val hazeState = rememberHazeState()
     val inputState = remember(id) { ChatInputState() }
+    var draftLoaded by remember(id) { mutableStateOf(false) }
+
+    LaunchedEffect(id, initialDraft) {
+        val draft = initialDraft
+        if (draft != null && !draftLoaded) {
+            if (draft.isNotEmpty() && inputState.textContent.text.isEmpty()) {
+                inputState.setMessageText(draft)
+            }
+            draftLoaded = true
+        }
+    }
+
+    @OptIn(FlowPreview::class)
+    LaunchedEffect(id, draftLoaded) {
+        if (!draftLoaded) return@LaunchedEffect
+        snapshotFlow { inputState.textContent.text.toString() }
+            .drop(1)
+            .debounce(250)
+            .collectLatest { text ->
+                vm.saveDraft(text)
+            }
+    }
+
+    DisposableEffect(id) {
+        onDispose {
+            if (draftLoaded) {
+                vm.saveDraft(inputState.textContent.text.toString())
+            }
+        }
+    }
+
+    var listInitialized by remember(id) { mutableStateOf(false) }
+    LaunchedEffect(id, conversation.messageNodes.size) {
+        if (!listInitialized && conversation.messageNodes.isNotEmpty()) {
+            listState.requestScrollToItem(conversation.currentMessages.size + 5)
+            listInitialized = true
+        }
+    }
+
     var showAttachSheet by remember { mutableStateOf(false) }
     val attachmentPickerActions = rememberChatAttachmentPickerActions(
         inputState = inputState,
@@ -157,7 +208,6 @@ fun AgentPage(id: Uuid) {
         }
     }
 
-    var showMoreMenu by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
     var showClearConfirm by remember { mutableStateOf(false) }
@@ -264,77 +314,25 @@ fun AgentPage(id: Uuid) {
                                             contentDescription = "新建会话",
                                         )
                                     }
-                                    Box {
-                                        IconButton(onClick = { showMoreMenu = true }) {
-                                            Icon(
-                                                imageVector = HugeIcons.MoreVertical,
-                                                contentDescription = "更多选项",
-                                            )
-                                        }
-                                        DropdownMenu(
-                                            expanded = showMoreMenu,
-                                            onDismissRequest = { showMoreMenu = false },
-                                        ) {
-                                            if (conversation.messageNodes.isNotEmpty()) {
-                                                DropdownMenuItem(
-                                                    text = { Text(if (previewMode) "返回对话" else "对话概览") },
-                                                    leadingIcon = {
-                                                        Icon(HugeIcons.ListView, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                    },
-                                                    onClick = {
-                                                        showMoreMenu = false
-                                                        previewMode = !previewMode
-                                                    },
-                                                )
+                                    AgentPageMenu(
+                                        hasMessages = conversation.messageNodes.isNotEmpty(),
+                                        previewMode = previewMode,
+                                        hasSession = session != null,
+                                        onTogglePreview = { previewMode = !previewMode },
+                                        onSyncOrConnect = {
+                                            if (session == null) {
+                                                vm.openConnectDialog()
+                                            } else {
+                                                vm.syncFromRemote()
                                             }
-                                            DropdownMenuItem(
-                                                text = { Text(if (session == null) "连接云端账号" else "同步远端记录") },
-                                                leadingIcon = {
-                                                    Icon(HugeIcons.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                },
-                                                onClick = {
-                                                    showMoreMenu = false
-                                                    if (session == null) {
-                                                        vm.openConnectDialog()
-                                                    } else {
-                                                        vm.syncFromRemote()
-                                                    }
-                                                },
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("重命名会话") },
-                                                leadingIcon = { Icon(HugeIcons.PencilEdit01, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                                onClick = {
-                                                    showMoreMenu = false
-                                                    renameText = conversation.title
-                                                    showRenameDialog = true
-                                                },
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("Agent 设置") },
-                                                leadingIcon = { Icon(HugeIcons.Settings03, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                                onClick = {
-                                                    showMoreMenu = false
-                                                    navController.navigate(Screen.AgentSetting)
-                                                },
-                                            )
-                                            DropdownMenuItem(
-                                                text = { Text("清空当前消息", color = MaterialTheme.colorScheme.error) },
-                                                leadingIcon = {
-                                                    Icon(
-                                                        HugeIcons.Delete01,
-                                                        contentDescription = null,
-                                                        tint = MaterialTheme.colorScheme.error,
-                                                        modifier = Modifier.size(18.dp),
-                                                    )
-                                                },
-                                                onClick = {
-                                                    showMoreMenu = false
-                                                    showClearConfirm = true
-                                                },
-                                            )
-                                        }
-                                    }
+                                        },
+                                        onRename = {
+                                            renameText = conversation.title
+                                            showRenameDialog = true
+                                        },
+                                        onOpenSettings = { navController.navigate(Screen.AgentSetting) },
+                                        onClear = { showClearConfirm = true },
+                                    )
                                 }
                             },
                         )
@@ -356,8 +354,7 @@ fun AgentPage(id: Uuid) {
                             onCancelClick = { vm.stopGeneration() },
                             onSendClick = {
                                 val parts = inputState.getContents()
-                                if (parts.isNotEmpty()) {
-                                    vm.sendMessage(parts)
+                                if (vm.sendMessage(parts)) {
                                     inputState.clearInput()
                                     scope.launch {
                                         delay(100.milliseconds)
@@ -367,8 +364,7 @@ fun AgentPage(id: Uuid) {
                             },
                             onLongSendClick = {
                                 val parts = inputState.getContents()
-                                if (parts.isNotEmpty()) {
-                                    vm.sendMessage(parts)
+                                if (vm.sendMessage(parts)) {
                                     inputState.clearInput()
                                 }
                             },
@@ -432,72 +428,32 @@ fun AgentPage(id: Uuid) {
             sheetState = sheetState,
             onDismissRequest = { showAttachSheet = false },
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = "添加附件",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(bottom = 4.dp),
-                )
-                Surface(
-                    onClick = {
-                        showAttachSheet = false
-                        attachmentPickerActions.onPickFile()
-                    },
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Icon(HugeIcons.Files02, contentDescription = null)
-                        Text("选择文件 (PDF / 文档)", style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-                Surface(
-                    onClick = {
-                        showAttachSheet = false
-                        attachmentPickerActions.onPickImage()
-                    },
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Icon(HugeIcons.Image02, contentDescription = null)
-                        Text("选择图片", style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-                Surface(
-                    onClick = {
-                        showAttachSheet = false
-                        attachmentPickerActions.onTakePicture()
-                    },
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Icon(HugeIcons.Camera01, contentDescription = null)
-                        Text("拍照", style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-            }
+            AgentFilesPicker(
+                onTakePic = {
+                    showAttachSheet = false
+                    attachmentPickerActions.onTakePicture()
+                },
+                onPickImage = {
+                    showAttachSheet = false
+                    attachmentPickerActions.onPickImage()
+                },
+                onSketch = {
+                    showAttachSheet = false
+                    attachmentPickerActions.onSketch()
+                },
+                onPickVideo = {
+                    showAttachSheet = false
+                    attachmentPickerActions.onPickVideo()
+                },
+                onPickAudio = {
+                    showAttachSheet = false
+                    attachmentPickerActions.onPickAudio()
+                },
+                onPickFile = {
+                    showAttachSheet = false
+                    attachmentPickerActions.onPickFile()
+                },
+            )
         }
     }
 
@@ -685,4 +641,100 @@ private fun AgentConnectDialog(
             }
         },
     )
+}
+
+@Composable
+private fun AgentPageMenu(
+    hasMessages: Boolean,
+    previewMode: Boolean,
+    hasSession: Boolean,
+    onTogglePreview: () -> Unit,
+    onSyncOrConnect: () -> Unit,
+    onRename: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onClear: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    @Composable
+    fun MenuItem(
+        text: String,
+        icon: ImageVector,
+        index: Int,
+        count: Int,
+        enabled: Boolean = true,
+        destructive: Boolean = false,
+        onClick: () -> Unit,
+    ) {
+        DropdownMenuItem(
+            text = { Text(text) },
+            onClick = {
+                expanded = false
+                onClick()
+            },
+            shape = MenuDefaults.itemShape(index = index, count = count).shape,
+            leadingIcon = { Icon(icon, contentDescription = null) },
+            enabled = enabled,
+            colors = if (destructive) {
+                val errorColor = MaterialTheme.colorScheme.error
+                MenuDefaults.itemColors(textColor = errorColor, leadingIconColor = errorColor)
+            } else {
+                MenuDefaults.itemColors()
+            },
+        )
+    }
+
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(HugeIcons.MoreVertical, "更多选项")
+        }
+        DropdownMenuPopup(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuGroup(shapes = MenuDefaults.groupShape(index = 0, count = 2)) {
+                MenuItem(
+                    text = if (previewMode) "返回对话" else "对话概览",
+                    icon = HugeIcons.LeftToRightListBullet,
+                    index = 0,
+                    count = 4,
+                    enabled = hasMessages,
+                    onClick = onTogglePreview,
+                )
+                MenuItem(
+                    text = if (hasSession) "同步远端记录" else "连接云端账号",
+                    icon = HugeIcons.Refresh,
+                    index = 1,
+                    count = 4,
+                    onClick = onSyncOrConnect,
+                )
+                MenuItem(
+                    text = "重命名会话",
+                    icon = HugeIcons.PencilEdit01,
+                    index = 2,
+                    count = 4,
+                    onClick = onRename,
+                )
+                MenuItem(
+                    text = "Agent 设置",
+                    icon = HugeIcons.Settings03,
+                    index = 3,
+                    count = 4,
+                    onClick = onOpenSettings,
+                )
+            }
+            Spacer(Modifier.height(MenuDefaults.GroupSpacing))
+            DropdownMenuGroup(shapes = MenuDefaults.groupShape(index = 1, count = 2)) {
+                MenuItem(
+                    text = "清空当前消息",
+                    icon = HugeIcons.Delete01,
+                    index = 0,
+                    count = 1,
+                    enabled = hasMessages,
+                    destructive = true,
+                    onClick = onClear,
+                )
+            }
+        }
+    }
 }

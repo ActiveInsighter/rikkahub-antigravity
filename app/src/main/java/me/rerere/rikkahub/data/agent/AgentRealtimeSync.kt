@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -23,9 +25,20 @@ internal class AgentRealtimeSync(
     private val repository: AgentRepository,
     private val workflowRepository: WorkflowRepository,
 ) {
-    suspend fun keepSynced(selectedId: Flow<Uuid?>) {
-        workflowRepository.session.collectLatest { session ->
-            if (session != null) syncSession(session, selectedId)
+    suspend fun keepSynced(selectedId: Flow<Uuid?>) = coroutineScope {
+        val selected = selectedId.stateIn(this, SharingStarted.Eagerly, null)
+        launch {
+            try {
+                selected.collect { repository.showConversation(it) }
+            } finally {
+                repository.showConversation(null)
+            }
+        }
+        combine(selected, repository.observeActiveConversationIds(), repository.submittingIds, workflowRepository.session) {
+                visible, active, submitting, session ->
+            session.takeIf { visible != null || active.isNotEmpty() || submitting.isNotEmpty() }
+        }.distinctUntilChanged().collectLatest { session ->
+            if (session != null) syncSession(session, selected)
         }
     }
 

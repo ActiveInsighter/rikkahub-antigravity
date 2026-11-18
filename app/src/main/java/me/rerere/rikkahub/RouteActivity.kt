@@ -45,7 +45,6 @@ import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
@@ -61,7 +60,9 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import coil3.svg.SvgDecoder
 import me.rerere.ui.toast.Toaster
+import me.rerere.ui.toast.ToastType
 import me.rerere.ui.toast.rememberToasterState
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import me.rerere.rikkahub.data.agent.AgentRealtimeSync
@@ -158,12 +159,13 @@ private const val TAG = "RouteActivity"
 private const val ACTION_TRANSLATE = "me.rerere.rikkahub.action.TRANSLATE"
 private const val ACTION_MEDIA_CREATION = "me.rerere.rikkahub.action.MEDIA_CREATION"
 private const val EXTRA_CONVERSATION_ID = "conversationId"
+private const val EXTRA_AGENT_CONVERSATION_ID = "agentConversationId"
 
 /** 打开指定会话的聊天页 */
-fun conversationIntent(context: Context, conversationId: String): Intent =
+fun conversationIntent(context: Context, conversationId: String, agent: Boolean = false): Intent =
     Intent(context, RouteActivity::class.java).apply {
         flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        putExtra(EXTRA_CONVERSATION_ID, conversationId)
+        putExtra(if (agent) EXTRA_AGENT_CONVERSATION_ID else EXTRA_CONVERSATION_ID, conversationId)
     }
 
 class RouteActivity : ComponentActivity() {
@@ -259,6 +261,7 @@ class RouteActivity : ComponentActivity() {
                 text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString().orEmpty(),
             )
             else -> mediaCreationDestination(intent)
+                ?: intent.getStringExtra(EXTRA_AGENT_CONVERSATION_ID)?.let { Screen.Agent(it) }
                 ?: intent.getStringExtra(EXTRA_CONVERSATION_ID)?.let { Screen.Chat(it) }
         }
         if (destination != null && backStack.lastOrNull() != destination) {
@@ -295,6 +298,21 @@ class RouteActivity : ComponentActivity() {
                     is AppEvent.OpenUsageAccessSettings -> this@RouteActivity.openUsageAccessSettings()
                     is AppEvent.ChatGenerationUpdate -> Unit // 由 ChatNotificationManager 消费
                     is AppEvent.ChatGenerationEnded -> Unit // 由 ChatNotificationManager 消费
+                    is AppEvent.AgentJobFinished -> {
+                        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return@collect
+                        val label = event.title.ifBlank { "Agent" }
+                        if (event.success) {
+                            toastState.show(
+                                message = "Agent 已完成：$label",
+                                type = ToastType.Success,
+                            )
+                        } else {
+                            toastState.show(
+                                message = "Agent 执行失败：$label${if (event.preview.isNotBlank()) " · ${event.preview}" else ""}",
+                                type = ToastType.Error,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -312,11 +330,14 @@ class RouteActivity : ComponentActivity() {
         val agentRealtime = koinInject<AgentRealtimeSync>()
         if (backStack.lastOrNull() is Screen.Agent) {
             LaunchedEffect(agentRealtime, backStack) {
-                lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                    agentRealtime.keepSynced(snapshotFlow {
-                        (backStack.lastOrNull() as? Screen.Agent)?.id?.let { Uuid.parse(it) }
-                    })
-                }
+                agentRealtime.keepSynced(
+                    combine(
+                        lifecycle.currentStateFlow,
+                        snapshotFlow { (backStack.lastOrNull() as? Screen.Agent)?.id },
+                    ) { state, id ->
+                        id?.takeIf { state.isAtLeast(Lifecycle.State.STARTED) }?.let { Uuid.parse(it) }
+                    }
+                )
             }
         }
 

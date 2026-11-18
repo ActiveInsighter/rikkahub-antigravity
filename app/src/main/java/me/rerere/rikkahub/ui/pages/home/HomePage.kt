@@ -58,7 +58,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
-import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Clock01
 import me.rerere.hugeicons.stroke.GitFork
 import me.rerere.hugeicons.stroke.MessageAdd01
@@ -143,8 +142,8 @@ fun HomePage() {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             // 1. Expressive Top Header
             AnimatedVisibility(
@@ -180,48 +179,73 @@ fun HomePage() {
 
                     Spacer(Modifier.width(12.dp))
 
-                    Surface(
-                        onClick = ::openWorkflow,
-                        shape = CircleShape,
-                        color = if (session != null) {
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
-                        } else {
-                            CustomColors.listItemColors.containerColor
-                        },
-                        border = BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                        ),
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        Surface(
+                            onClick = ::openWorkflow,
+                            shape = CircleShape,
+                            color = if (session != null) {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+                            } else {
+                                CustomColors.listItemColors.containerColor
+                            },
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                            ),
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (session != null) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.outline
-                                        }
-                                    )
-                            )
-                            Text(
-                                text = if (session != null) "云端已连接" else "未连接",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                softWrap = false,
-                                color = if (session != null) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (session != null) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.outline
+                                            }
+                                        )
+                                )
+                                Text(
+                                    text = if (session != null) "云端已连接" else "未连接",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    color = if (session != null) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                        }
+
+                        Surface(
+                            onClick = { navController.navigate(Screen.Setting) },
+                            shape = CircleShape,
+                            color = CustomColors.listItemColors.containerColor,
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                            ),
+                            modifier = Modifier.size(36.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = HugeIcons.Settings03,
+                                    contentDescription = "设置",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -233,7 +257,7 @@ fun HomePage() {
                 enter = fadeIn() + slideInVertically { it / 6 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1.35f),
+                    .weight(1.45f),
             ) {
                 val heroShape = RoundedCornerShape(32.dp)
                 val gradient = Brush.linearGradient(
@@ -485,44 +509,6 @@ fun HomePage() {
                     }
                 }
             }
-
-            // 5. Bottom Expressive Dock
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    DockItem(
-                        label = "Chat 设置",
-                        icon = HugeIcons.Settings03,
-                        onClick = { navController.navigate(Screen.Setting) },
-                        modifier = Modifier.weight(1f),
-                    )
-                    DockItem(
-                        label = "Agent 设置",
-                        icon = HugeIcons.Sparkles,
-                        onClick = { navController.navigate(Screen.AgentSetting) },
-                        modifier = Modifier.weight(1f),
-                    )
-                    DockItem(
-                        label = "用量统计",
-                        icon = HugeIcons.ChartColumn,
-                        onClick = { navController.navigate(Screen.Stats) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
         }
     }
 }
@@ -597,43 +583,6 @@ private fun ExpressiveBentoCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun DockItem(
-    label: String,
-    icon: ImageVector,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        onClick = onClick,
-        shape = CircleShape,
-        color = Color.Transparent,
-        modifier = modifier.clip(CircleShape),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }

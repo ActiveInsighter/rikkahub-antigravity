@@ -86,6 +86,34 @@ import me.rerere.rikkahub.utils.formatNumber
 import me.rerere.workspace.WorkspaceShellStatus
 import org.koin.compose.koinInject
 
+@Composable
+internal fun AgentFilesPicker(
+    onTakePic: () -> Unit,
+    onPickImage: () -> Unit,
+    onSketch: () -> Unit,
+    onPickVideo: () -> Unit,
+    onPickAudio: () -> Unit,
+    onPickFile: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 24.dp),
+    ) {
+        AttachmentGrid(
+            actions = listOf(
+                AttachmentAction(HugeIcons.Camera01, R.string.take_picture, onTakePic),
+                AttachmentAction(HugeIcons.Image02, R.string.photo, onPickImage),
+                AttachmentAction(HugeIcons.PaintBoard, R.string.sketch, onSketch),
+                AttachmentAction(HugeIcons.Video01, R.string.video, onPickVideo),
+                AttachmentAction(HugeIcons.MusicNote03, R.string.audio, onPickAudio),
+                AttachmentAction(HugeIcons.Files02, R.string.upload_file, onPickFile),
+            )
+        )
+    }
+}
+
 // 顺序决定切换方向：往后是进入下一级，往前是返回
 private enum class FilesPickerPage {
     MAIN,

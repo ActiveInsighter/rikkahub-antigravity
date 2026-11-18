@@ -56,6 +56,7 @@ data class RemoteAgentThread(
     val archived: Boolean,
     val pinned: Boolean,
     val folderId: String? = null,
+    val hasFolderIdField: Boolean = false,
 )
 
 data class RemoteAgentFolder(
@@ -297,7 +298,8 @@ class PocketBaseAgentCloudClient(
                     parentMessage = obj.str("parentMessage"),
                     archived = obj["archived"]?.jsonPrimitive?.booleanOrNull ?: false,
                     pinned = obj["pinned"]?.jsonPrimitive?.booleanOrNull ?: false,
-                    folderId = obj.str("folder_id").ifBlank { null },
+                    folderId = obj.str("folder_id").trim().ifBlank { null },
+                    hasFolderIdField = obj.containsKey("folder_id"),
                 )
             }
             page++
@@ -604,7 +606,12 @@ class PocketBaseAgentCloudClient(
             }
         }
 
-        val isRunning = isActiveStatus(job.status) || (message != null && isActiveStatus(message.status))
+        val isHistorical = message != null && message.job.isNotBlank() && message.job != job.id
+        val isRunning = if (isHistorical) {
+            message?.status?.let(::isActiveStatus) == true
+        } else {
+            isActiveStatus(job.status) || (message != null && isActiveStatus(message.status))
+        }
         val startMs = parseIsoMillis(message?.startedAt.orEmpty())
         val endMs = parseIsoMillis(message?.finishedAt.orEmpty())
         val baseReasoningMs = startMs.takeIf { it > 0L }
@@ -688,8 +695,13 @@ class PocketBaseAgentCloudClient(
             }
         }
 
-        if (!hasTextPart && message != null && message.reply.isNotBlank()) {
-            uiParts += UIMessagePart.Text(text = message.reply)
+        val reply = message?.reply.orEmpty()
+        if (reply.isNotBlank()) {
+            val streamedText = uiParts.filterIsInstance<UIMessagePart.Text>().joinToString("\n\n") { it.text }
+            if (!hasTextPart || (!isRunning && streamedText.trim() != reply.trim())) {
+                uiParts.removeAll { it is UIMessagePart.Text }
+                uiParts += UIMessagePart.Text(text = reply)
+            }
         }
 
         // If an in-place updated text part has an earlier sequence than later tool/reasoning steps,
@@ -705,12 +717,12 @@ class PocketBaseAgentCloudClient(
             }
         }
 
-        if (message != null && message.error.isNotBlank()) {
+        if (message != null && message.status != "succeeded" && message.error.isNotBlank()) {
             uiParts += UIMessagePart.Notice(
                 title = "执行出错",
                 text = message.error,
             )
-        } else if (job.error.isNotBlank() && message?.error.isNullOrBlank()) {
+        } else if (!isHistorical && message?.status != "succeeded" && job.error.isNotBlank()) {
             uiParts += UIMessagePart.Notice(
                 title = "任务异常",
                 text = job.error,

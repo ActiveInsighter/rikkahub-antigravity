@@ -17,6 +17,8 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
+import me.rerere.rikkahub.data.event.AppEvent
+import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.workflow.WorkflowRepository
@@ -33,6 +35,11 @@ data class AgentConversationSnapshot(
     val waitingForMessages: Boolean = false,
 )
 
+data class AgentConversationStatusInfo(
+    val remoteStatus: String?,
+    val hasUnread: Boolean,
+)
+
 /**
  * Repository backed by [AgentDatabase], synchronized with the remote
  * AnyWorkflow / PocketBase database as the source of truth.
@@ -42,12 +49,15 @@ class AgentRepository(
     private val cloudClient: AgentCloudClient,
     private val workflowRepository: WorkflowRepository,
     private val appScope: AppScope,
+    private val appEventBus: AppEventBus,
 ) {
     private val conversationDao = database.conversationDao()
     private val messageNodeDao = database.messageNodeDao()
     private val assistantDao = database.assistantDao()
     private val folderDao = database.folderDao()
     private val usageRecordDao = database.usageRecordDao()
+    private val draftDao = database.draftDao()
+    private var visibleConversation: Uuid? = null
 
     // A job creation event can arrive before its HTTP response binds the remote root to the local ID.
     private val threadSyncMutex = Mutex()
@@ -85,6 +95,23 @@ class AgentRepository(
                 .filter { it.remoteStatus != null && PocketBaseAgentCloudClient.isActiveStatus(it.remoteStatus) }
                 .mapNotNull { runCatching { Uuid.parse(it.id) }.getOrNull() }
                 .toSet()
+        }
+    }
+
+    fun observeConversationStatusMap(): Flow<Map<Uuid, AgentConversationStatusInfo>> {
+        return conversationDao.getAllSortedByUpdateFlow().map { list ->
+            buildMap {
+                for (entity in list) {
+                    val uuid = runCatching { Uuid.parse(entity.id) }.getOrNull() ?: continue
+                    put(
+                        uuid,
+                        AgentConversationStatusInfo(
+                            remoteStatus = entity.remoteStatus,
+                            hasUnread = entity.hasUnread,
+                        )
+                    )
+                }
+            }
         }
     }
 
@@ -149,7 +176,16 @@ class AgentRepository(
                 val now = System.currentTimeMillis()
                 val created = existing?.createAt ?: remoteTime(thread.created, now)
                 val sameJob = existing?.remoteJobId == thread.jobId
-                val folderId = thread.folderId?.let { folderDao.getByRemoteId(it)?.id ?: it }
+                val folderId = if (thread.hasFolderIdField) {
+                    thread.folderId?.let { folderDao.getByRemoteId(it)?.id ?: it }
+                } else {
+                    existing?.folderId
+                }
+                val storedStatus = existing?.remoteStatus
+                val previousStatus = storedStatus.takeIf { sameJob }
+                val repaired = previousStatus in setOf("failed", "partial") && thread.status == "succeeded"
+                val status = if (repaired) thread.status else previousStatus ?: thread.status
+                val isVisible = (existing?.id ?: fallbackId) == visibleConversation?.toString()
                 val updated = AgentConversationEntity(
                     id = existing?.id ?: fallbackId,
                     title = thread.title.ifBlank { existing?.title ?: "Agent" },
@@ -161,9 +197,10 @@ class AgentRepository(
                     remoteJobId = thread.jobId,
                     remoteThreadRoot = thread.threadRoot,
                     // Only the message sync can mark a tracked job terminal, after saving its final parts.
-                    remoteStatus = if (sameJob) existing?.remoteStatus ?: thread.status else thread.status,
+                    remoteStatus = status,
                     lastRemoteMessageId = existing?.lastRemoteMessageId?.takeIf { sameJob },
                     lastSyncedAt = existing?.lastSyncedAt?.takeIf { sameJob } ?: 0L,
+                    hasUnread = !isVisible && (repaired || existing?.hasUnread == true),
                 )
                 if (updated != existing) conversationDao.upsert(updated)
             }
@@ -200,7 +237,7 @@ class AgentRepository(
             conversationDao.getById(id.toString())?.remoteJobId != jobId
         ) return@withLock null
         val remote = cloudClient.fetchThreadConversation(jobId, previous, refreshJob)
-        val usage = database.withTransaction {
+        val completion = database.withTransaction {
             val existing = conversationDao.getById(id.toString()) ?: return@withTransaction null
             if (existing.remoteJobId != jobId || workflowRepository.session.value != session || id in submittingIds.value) {
                 return@withTransaction null
@@ -211,6 +248,9 @@ class AgentRepository(
             } else {
                 remote.job.status
             }
+            val finished = !remote.isActive && PocketBaseAgentCloudClient.isActiveStatus(existing.remoteStatus.orEmpty())
+            val succeeded = status == "succeeded"
+            val becameReadable = succeeded && (finished || existing.remoteStatus in setOf("failed", "partial"))
             val updated = existing.copy(
                 title = remote.job.title.ifBlank { existing.title },
                 updateAt = maxOf(
@@ -220,22 +260,29 @@ class AgentRepository(
                 ),
                 remoteStatus = status,
                 lastRemoteMessageId = remote.message?.id,
+                hasUnread = id != visibleConversation && (existing.hasUnread || becameReadable),
             )
             saveNodesForConversation(existing.id, remote.messageNodes)
-            val completion = if (!remote.isActive && PocketBaseAgentCloudClient.isActiveStatus(existing.remoteStatus.orEmpty())) {
-                saveCompletedUsage(existing, remote)
+            val usage = if (finished) saveCompletedUsage(existing, remote) else null
+            val event = if (finished && (succeeded || status == "failed")) {
+                val preview = if (succeeded) {
+                    remote.messageNodes.lastOrNull()?.currentMessage?.toText().orEmpty()
+                } else {
+                    remote.message?.error.orEmpty().ifBlank { remote.job.error.ifBlank { "任务执行失败" } }
+                }
+                AppEvent.AgentJobFinished(id, updated.title, succeeded, preview.trim().replace('\n', ' ').take(60))
             } else {
                 null
             }
             if (updated != existing || existing.lastSyncedAt == 0L) {
                 conversationDao.upsert(updated.copy(lastSyncedAt = System.currentTimeMillis()))
             }
-            completion
+            event to usage
         }
-        if (usage != null) {
-            appScope.launch {
-                if (workflowRepository.session.value == session) uploadUsage(usage)
-            }
+        if (completion != null && workflowRepository.session.value == session) {
+            val (event, usage) = completion
+            event?.let(appEventBus::tryEmit)
+            if (usage != null) appScope.launch { uploadUsage(usage) }
         }
         remote
     }
@@ -299,9 +346,34 @@ class AgentRepository(
                 remoteStatus = remoteStatus ?: existing?.remoteStatus,
                 lastRemoteMessageId = existing?.lastRemoteMessageId?.takeIf { remoteJobId == null || remoteJobId == existing.remoteJobId },
                 lastSyncedAt = existing?.lastSyncedAt?.takeIf { remoteJobId == null || remoteJobId == existing.remoteJobId } ?: 0L,
+                hasUnread = existing?.hasUnread == true,
             )
             if (entity != existing) conversationDao.upsert(entity)
             saveNodesForConversation(convId, conversation.messageNodes)
+        }
+    }
+
+    internal suspend fun showConversation(id: Uuid?) {
+        visibleConversation = id
+        if (id != null) conversationDao.updateUnread(id.toString(), false)
+    }
+
+    suspend fun getDraft(conversationId: Uuid): String? {
+        return draftDao.getByConversationId(conversationId.toString())?.text
+    }
+
+    fun saveDraft(conversationId: Uuid, text: String) = appScope.launch {
+        val id = conversationId.toString()
+        if (text.isEmpty()) {
+            draftDao.deleteByConversationId(id)
+        } else {
+            draftDao.upsert(
+                AgentDraftEntity(
+                    conversationId = id,
+                    text = text,
+                    updatedAt = System.currentTimeMillis(),
+                )
+            )
         }
     }
 

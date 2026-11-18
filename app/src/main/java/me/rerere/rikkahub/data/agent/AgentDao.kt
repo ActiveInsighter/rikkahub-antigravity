@@ -43,6 +43,9 @@ interface AgentConversationDao {
     @Query("UPDATE agent_conversation SET assistant_id = :assistantId WHERE id = :id")
     suspend fun updateAssistantId(id: String, assistantId: String?)
 
+    @Query("UPDATE agent_conversation SET has_unread = :hasUnread WHERE id = :id AND has_unread != :hasUnread")
+    suspend fun updateUnread(id: String, hasUnread: Boolean)
+
     @Query("DELETE FROM agent_conversation WHERE id = :id")
     suspend fun deleteById(id: String)
 
@@ -158,3 +161,15 @@ data class AgentUsageTotals(
     val reasoningTokens: Long = 0L,
     val totalTokens: Long = 0L,
 )
+
+@Dao
+interface AgentDraftDao {
+    @Query("SELECT * FROM agent_draft WHERE conversation_id = :conversationId LIMIT 1")
+    suspend fun getByConversationId(conversationId: String): AgentDraftEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: AgentDraftEntity)
+
+    @Query("DELETE FROM agent_draft WHERE conversation_id = :conversationId")
+    suspend fun deleteByConversationId(conversationId: String)
+}
