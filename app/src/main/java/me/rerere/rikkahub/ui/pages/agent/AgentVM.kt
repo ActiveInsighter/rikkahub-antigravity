@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.ModelSnapshot
 import me.rerere.ai.ui.UIMessage
@@ -25,7 +26,6 @@ import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
-import me.rerere.rikkahub.data.model.ReasoningLevel
 import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
 import me.rerere.rikkahub.data.workflow.WorkflowRepository
@@ -624,7 +624,7 @@ class AgentVM(
                         completionTokens = msg.usage.candidatesTokenCount.toLong(),
                         cachedTokens = msg.usage.cachedContentTokenCount.toLong(),
                         reasoningTokens = msg.usage.thoughtsTokenCount.toLong(),
-                        durationMs = uiMessage.generationTimeMs,
+                        durationMs = uiMessage.generationTimeMs ?: 0L,
                     )
                 }
             }

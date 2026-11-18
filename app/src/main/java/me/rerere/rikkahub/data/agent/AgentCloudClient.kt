@@ -494,7 +494,7 @@ class PocketBaseAgentCloudClient(
                 path = "/api/collections/$FOLDERS_COLLECTION/records?perPage=200&sort=sort_order,created",
                 method = "GET",
                 token = session.token,
-            )
+            ).jsonObject
             res["items"]?.jsonArray?.mapNotNull { el ->
                 val obj = el.jsonObject
                 val id = obj.str("id").ifBlank { return@mapNotNull null }
@@ -526,7 +526,7 @@ class PocketBaseAgentCloudClient(
                     method = "PATCH",
                     body = body,
                     token = session.token,
-                )
+                ).jsonObject
             } else {
                 workflowRepository.executeJson(
                     baseUrl = session.baseUrl,
@@ -534,7 +534,7 @@ class PocketBaseAgentCloudClient(
                     method = "POST",
                     body = body,
                     token = session.token,
-                )
+                ).jsonObject
             }
             val id = obj.str("id").ifBlank { return@runCatching null }
             RemoteAgentFolder(
@@ -571,7 +571,7 @@ class PocketBaseAgentCloudClient(
                 path = "/api/collections/$USAGE_COLLECTION/records?perPage=200&sort=-created_at_ms",
                 method = "GET",
                 token = session.token,
-            )
+            ).jsonObject
             res["items"]?.jsonArray?.mapNotNull { el ->
                 val obj = el.jsonObject
                 val id = obj.str("id").ifBlank { return@mapNotNull null }
@@ -622,7 +622,7 @@ class PocketBaseAgentCloudClient(
                 method = "POST",
                 body = body,
                 token = session.token,
-            )
+            ).jsonObject
             val id = obj.str("id").ifBlank { return@runCatching null }
             record.copy(id = id)
         }.getOrNull()

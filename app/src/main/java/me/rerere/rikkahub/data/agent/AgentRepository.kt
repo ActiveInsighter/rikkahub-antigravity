@@ -328,7 +328,7 @@ class AgentRepository(
                     id = uuid,
                     assistantId = DEFAULT_ASSISTANT_ID,
                     name = entity.name,
-                    order = entity.sortOrder,
+                    sortIndex = entity.sortOrder,
                     createAt = Instant.ofEpochMilli(entity.createdAt),
                 )
             }
@@ -368,7 +368,7 @@ class AgentRepository(
             id = id,
             assistantId = DEFAULT_ASSISTANT_ID,
             name = trimmed,
-            order = nextOrder,
+            sortIndex = nextOrder,
             createAt = Instant.ofEpochMilli(now),
         )
     }
