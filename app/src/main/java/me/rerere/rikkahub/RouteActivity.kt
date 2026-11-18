@@ -145,6 +145,7 @@ import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.pages.agent.AgentPage
 import me.rerere.rikkahub.ui.pages.agent.AgentSettingPage
+import me.rerere.rikkahub.ui.pages.agent.AgentWorkflowPage
 import me.rerere.rikkahub.ui.pages.home.HomePage
 import me.rerere.rikkahub.ui.pages.workflow.WorkflowPage
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
@@ -646,6 +647,10 @@ class RouteActivity : ComponentActivity() {
                                 AgentSettingPage()
                             }
 
+                            entry<Screen.AgentWorkflow> {
+                                AgentWorkflowPage()
+                            }
+
                             entry<Screen.Workflow> {
                                 WorkflowPage()
                             }
@@ -887,6 +892,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object AgentSetting : Screen
+
+    @Serializable
+    data object AgentWorkflow : Screen
 
     @Serializable
     data object Workflow : Screen

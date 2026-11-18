@@ -14,8 +14,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -25,6 +28,8 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenuGroup
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenuPopup
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -112,6 +117,9 @@ fun AgentPage(id: Uuid) {
     val isInitialLoading by vm.isInitialLoading.collectAsStateWithLifecycle()
     val agentAssistant by vm.agentAssistant.collectAsStateWithLifecycle()
     val selectedModel by vm.selectedModel.collectAsStateWithLifecycle()
+    val selectedAgentModelName by vm.selectedAgentModelName.collectAsStateWithLifecycle()
+    val customGeminiModels by vm.customGeminiModels.collectAsStateWithLifecycle()
+    val availableAgentModels by vm.availableAgentModels.collectAsStateWithLifecycle()
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     val isSyncing by vm.isSyncing.collectAsStateWithLifecycle()
     val activeStatusText by vm.activeStatusText.collectAsStateWithLifecycle()
@@ -209,6 +217,7 @@ fun AgentPage(id: Uuid) {
     }
 
     var showRenameDialog by remember { mutableStateOf(false) }
+    var showModelPickerSheet by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
     var showClearConfirm by remember { mutableStateOf(false) }
     var editingMessage by remember { mutableStateOf<UIMessage?>(null) }
@@ -287,8 +296,8 @@ fun AgentPage(id: Uuid) {
                                     val subtitleText = when {
                                         !activeStatusText.isNullOrBlank() -> activeStatusText!!
                                         isSyncing -> "正在同步…"
-                                        session == null -> "未连接云端"
-                                        else -> "Agent"
+                                        session == null -> "未连接云端 · $selectedAgentModelName"
+                                        else -> selectedAgentModelName
                                     }
                                     Text(
                                         text = subtitleText,
@@ -348,6 +357,8 @@ fun AgentPage(id: Uuid) {
                             placeholderText = "输入指令…",
                             alwaysShowReasoningButton = true,
                             showAsrButton = false,
+                            overrideModelId = selectedAgentModelName,
+                            onModelSelectorClick = { showModelPickerSheet = true },
                             onUpdateChatModel = vm::updateAgentModel,
                             onUpdateAssistant = vm::updateAgentAssistant,
                             onMoreClick = { showAttachSheet = true },
@@ -455,6 +466,26 @@ fun AgentPage(id: Uuid) {
                 },
             )
         }
+    }
+
+    if (showModelPickerSheet) {
+        AgentModelPickerSheet(
+            selectedModel = selectedAgentModelName,
+            availableModels = availableAgentModels,
+            customModels = customGeminiModels,
+            onSelectModel = { model ->
+                vm.selectAgentModel(model)
+                showModelPickerSheet = false
+            },
+            onAddModel = { model ->
+                vm.addCustomGeminiModel(model)
+                showModelPickerSheet = false
+            },
+            onRemoveCustomModel = { model ->
+                vm.removeCustomGeminiModel(model)
+            },
+            onDismiss = { showModelPickerSheet = false },
+        )
     }
 
     if (showConnectDialog) {
@@ -734,6 +765,157 @@ private fun AgentPageMenu(
                     destructive = true,
                     onClick = onClear,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentModelPickerSheet(
+    selectedModel: String,
+    availableModels: List<String>,
+    customModels: List<String>,
+    onSelectModel: (String) -> Unit,
+    onAddModel: (String) -> Unit,
+    onRemoveCustomModel: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberBottomSheetState(initialValue = SheetValue.Expanded)
+    var customInput by rememberSaveable { mutableStateOf("") }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .imePadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "选择 Agent / Gemini 模型",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "可选择反重力 Agent（支持工具与沙盒）或任意 Gemini 模型名，发送时将连同思考程度一起传给 GitHub Action。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = customInput,
+                    onValueChange = { customInput = it },
+                    label = { Text("手动添加 Gemini 模型名") },
+                    placeholder = { Text("例如 gemini-2.5-pro") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                FilledTonalButton(
+                    onClick = {
+                        val trimmed = customInput.trim()
+                        if (trimmed.isNotEmpty()) {
+                            onAddModel(trimmed)
+                        }
+                    },
+                    enabled = customInput.isNotBlank(),
+                ) {
+                    Text("添加")
+                }
+            }
+            HorizontalDivider()
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(320.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(availableModels, key = { it }) { modelName ->
+                    val isSelected = modelName.equals(selectedModel, ignoreCase = true)
+                    val isCustom = modelName in customModels
+                    val isAntigravity = modelName.equals("antigravity", ignoreCase = true) ||
+                        modelName.startsWith("antigravity-", ignoreCase = true)
+                    Surface(
+                        onClick = { onSelectModel(modelName) },
+                        shape = MaterialTheme.shapes.large,
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerLow
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = modelName,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                                Text(
+                                    text = when {
+                                        isAntigravity -> "Antigravity Interactions API（远程沙盒/工具）"
+                                        isCustom -> "手动添加 · Gemini API"
+                                        else -> "预设 · Gemini API"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                if (isSelected) {
+                                    Surface(
+                                        shape = MaterialTheme.shapes.small,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    ) {
+                                        Text(
+                                            text = "当前",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        )
+                                    }
+                                }
+                                if (isCustom) {
+                                    IconButton(
+                                        onClick = { onRemoveCustomModel(modelName) },
+                                    ) {
+                                        Icon(
+                                            imageVector = HugeIcons.Delete01,
+                                            contentDescription = "删除自定义模型",
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

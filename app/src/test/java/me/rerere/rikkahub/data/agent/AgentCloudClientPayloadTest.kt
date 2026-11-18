@@ -69,4 +69,24 @@ class AgentCloudClientPayloadTest {
         assertNull(payload["environmentId"])
         assertNull(payload["previousInteractionId"])
     }
+
+    @Test
+    fun `forwards explicit Gemini model and thinkingLevel and omits agentModel`() {
+        val payload = PocketBaseAgentCloudClient.buildSubmitJobPayload(
+            jobId = "job127",
+            config = RemoteAgentConfig(
+                agentModel = "gemini-4-hydrogen",
+                model = "Antigravity",
+                thinkingLevel = "low",
+            ),
+            prompt = "summarize",
+            sources = emptyList(),
+            modelOverride = "gemini-2.5-pro",
+            thinkingLevelOverride = "high",
+        )
+
+        assertEquals("gemini-2.5-pro", payload["model"]?.jsonPrimitive?.content)
+        assertEquals("high", payload["thinkingLevel"]?.jsonPrimitive?.content)
+        assertNull(payload["agentModel"])
+    }
 }

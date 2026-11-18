@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
@@ -21,6 +22,7 @@ import me.rerere.rikkahub.data.agent.AgentConversationSnapshot
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
 import me.rerere.rikkahub.data.agent.AgentUiSettings
+import me.rerere.rikkahub.data.agent.DEFAULT_AGENT_MODELS
 import me.rerere.rikkahub.data.agent.RemoteAgentSourceInput
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import me.rerere.rikkahub.data.model.Assistant
@@ -116,6 +118,22 @@ class AgentVM(
     val uiSettings: StateFlow<AgentUiSettings> = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current)
 
+    val selectedAgentModelName: StateFlow<String> = settingsStore.settingsFlow
+        .map { it.selectedAgentModel.ifBlank { "Antigravity" } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current.selectedAgentModel.ifBlank { "Antigravity" })
+
+    val customGeminiModels: StateFlow<List<String>> = settingsStore.settingsFlow
+        .map { it.customGeminiModels }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current.customGeminiModels)
+
+    val availableAgentModels: StateFlow<List<String>> = settingsStore.settingsFlow
+        .map { (DEFAULT_AGENT_MODELS + it.customGeminiModels).distinct() }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            (DEFAULT_AGENT_MODELS + settingsStore.current.customGeminiModels).distinct(),
+        )
+
     private val _initialDraft = MutableStateFlow<String?>(null)
     val initialDraft: StateFlow<String?> = _initialDraft.asStateFlow()
 
@@ -149,6 +167,39 @@ class AgentVM(
         viewModelScope.launch {
             _initialDraft.value = repository.getDraft(conversationId).orEmpty()
             _agentAssistant.value = repository.ensureDefaultAssistant().toDomainAssistant()
+        }
+    }
+
+    fun selectAgentModel(modelName: String) {
+        val normalized = modelName.trim()
+        if (normalized.isEmpty()) return
+        settingsStore.update { it.copy(selectedAgentModel = normalized) }
+    }
+
+    fun addCustomGeminiModel(modelName: String) {
+        val normalized = modelName.trim()
+        if (normalized.isEmpty()) return
+        settingsStore.update { current ->
+            val updatedCustom = if (normalized in DEFAULT_AGENT_MODELS || normalized in current.customGeminiModels) {
+                current.customGeminiModels
+            } else {
+                current.customGeminiModels + normalized
+            }
+            current.copy(
+                selectedAgentModel = normalized,
+                customGeminiModels = updatedCustom,
+            )
+        }
+    }
+
+    fun removeCustomGeminiModel(modelName: String) {
+        settingsStore.update { current ->
+            val updatedCustom = current.customGeminiModels.filterNot { it == modelName }
+            val nextSelected = if (current.selectedAgentModel == modelName) "Antigravity" else current.selectedAgentModel
+            current.copy(
+                selectedAgentModel = nextSelected,
+                customGeminiModels = updatedCustom,
+            )
         }
     }
 
@@ -424,6 +475,13 @@ class AgentVM(
         }
     }
 
+    private fun ReasoningLevel.toGeminiThinkingLevel(): String = when (this) {
+        ReasoningLevel.OFF, ReasoningLevel.AUTO -> ""
+        ReasoningLevel.LOW -> "low"
+        ReasoningLevel.MEDIUM -> "medium"
+        ReasoningLevel.HIGH, ReasoningLevel.XHIGH, ReasoningLevel.MAX -> "high"
+    }
+
     private fun submitRemote(
         baseConversation: Conversation,
         prompt: String,
@@ -433,6 +491,9 @@ class AgentVM(
         title: String,
         targetNodeId: Uuid?,
     ) {
+        val modelName = selectedAgentModelName.value.ifBlank { "Antigravity" }
+        val thinkingLevel = _agentAssistant.value.reasoningLevel.toGeminiThinkingLevel()
+        val systemPrompt = _agentAssistant.value.systemPrompt.takeIf { it.isNotBlank() }
         val assistantMsgId = Uuid.random()
         val nodeId = targetNodeId ?: Uuid.random()
         val placeholderMsg = UIMessage(
@@ -440,8 +501,8 @@ class AgentVM(
             role = MessageRole.ASSISTANT,
             parts = listOf(UIMessagePart.Text("")),
             modelSnapshot = ModelSnapshot(
-                displayName = "Antigravity Agent",
-                modelId = "Antigravity",
+                displayName = modelName,
+                modelId = modelName,
             ),
         )
 
@@ -455,7 +516,17 @@ class AgentVM(
             )
             baseConversation.copy(messageNodes = baseConversation.messageNodes + newNode)
         }
-        val task = repository.submitMessage(initialConv, prompt, sources, parentMessageId, replacesMessageId, title)
+        val task = repository.submitMessage(
+            conversation = initialConv,
+            prompt = prompt,
+            sources = sources,
+            parentMessageId = parentMessageId,
+            replacesMessageId = replacesMessageId,
+            title = title,
+            model = modelName,
+            thinkingLevel = thinkingLevel,
+            systemPrompt = systemPrompt,
+        )
         submission = task
         viewModelScope.launch {
             task.await().onFailure { error ->

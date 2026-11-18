@@ -14,6 +14,33 @@ import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.utils.JsonInstant
 
+val DEFAULT_AGENT_MODELS: List<String> = listOf(
+    "Antigravity",
+    "gemini-3.5-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-3-pro-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+)
+
+@Serializable
+data class AgentSchedule(
+    val id: String,
+    val title: String,
+    val prompt: String,
+    val systemPrompt: String = "",
+    val model: String = "Antigravity",
+    val thinkingLevel: String = "",
+    val cron: String = "0 9 * * *",
+    val timezone: String = "Asia/Shanghai",
+    val enabled: Boolean = true,
+    val lastRunAt: String = "",
+    val nextRunAt: String = "",
+    val lastJobId: String = "",
+    val lastStatus: String = "",
+    val lastError: String = "",
+)
+
 /**
  * Isolated UI-only settings for the Agent page.
  * Completely separated from Chat's [me.rerere.rikkahub.data.datastore.SettingsStore].
@@ -49,6 +76,9 @@ data class AgentUiSettings(
     val skipCropImage: Boolean = false,
     val chatFontFamily: ChatFontFamily = ChatFontFamily.DEFAULT,
     val conversationSortOrder: ConversationSortOrder = ConversationSortOrder.UPDATE_TIME,
+    val selectedAgentModel: String = "Antigravity",
+    val customGeminiModels: List<String> = emptyList(),
+    val localAgentSchedules: List<AgentSchedule> = emptyList(),
 ) {
     fun toDisplaySetting(): DisplaySetting = DisplaySetting(
         showUserAvatar = showUserAvatar,

@@ -45,6 +45,7 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.ChartColumn
+import me.rerere.hugeicons.stroke.Clock01
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
@@ -152,6 +153,15 @@ fun AgentDrawerContent(
                 onTrailingClick = {
                     historySearchQuery = ""
                     showHistorySearchSheet = true
+                },
+            )
+
+            DrawerEntry(
+                icon = HugeIcons.Clock01,
+                text = "工作流",
+                onClick = {
+                    onCloseDrawer()
+                    navController.navigate(Screen.AgentWorkflow)
                 },
             )
 

@@ -150,6 +150,8 @@ fun ChatInput(
     placeholderText: String? = null,
     alwaysShowReasoningButton: Boolean = false,
     showAsrButton: Boolean = true,
+    overrideModelId: String? = null,
+    onModelSelectorClick: (() -> Unit)? = null,
 ) {
     val toaster = LocalToaster.current
     val containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -302,11 +304,21 @@ fun ChatInput(
                                 horizontalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
                                 // Model Picker
-                                ModelSelectorButton(
-                                    state = modelListState,
-                                    onlyIcon = true,
-                                    modifier = Modifier,
-                                )
+                                if (onModelSelectorClick != null) {
+                                    IconButton(onClick = onModelSelectorClick) {
+                                        AutoAIIcon(
+                                            modifier = Modifier.size(36.dp),
+                                            name = overrideModelId?.takeIf { it.isNotBlank() } ?: "gemini",
+                                            color = Color.Transparent,
+                                        )
+                                    }
+                                } else {
+                                    ModelSelectorButton(
+                                        state = modelListState,
+                                        onlyIcon = true,
+                                        modifier = Modifier,
+                                    )
+                                }
 
                                 // Reasoning
                                 if (alwaysShowReasoningButton || chatModel?.abilities?.contains(ModelAbility.REASONING) == true) {

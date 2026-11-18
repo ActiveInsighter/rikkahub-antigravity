@@ -218,6 +218,9 @@ interface AgentCloudClient {
         parentMessageId: String? = null,
         replacesMessageId: String? = null,
         title: String = "",
+        modelOverride: String? = null,
+        thinkingLevelOverride: String? = null,
+        systemPromptOverride: String? = null,
     ): RemoteSubmittedJob
 
     suspend fun cancelJob(jobId: String)
@@ -237,6 +240,16 @@ interface AgentCloudClient {
     suspend fun upsertRemoteFolder(folder: RemoteAgentFolder): RemoteAgentFolder? = null
 
     suspend fun deleteRemoteFolder(remoteId: String) {}
+
+    suspend fun listSchedules(): List<AgentSchedule> = emptyList()
+
+    suspend fun createSchedule(schedule: AgentSchedule): AgentSchedule = schedule
+
+    suspend fun updateSchedule(schedule: AgentSchedule): AgentSchedule = schedule
+
+    suspend fun deleteSchedule(id: String) {}
+
+    suspend fun triggerSchedule(id: String): RemoteSubmittedJob? = null
 
     suspend fun listRemoteUsageRecords(): List<RemoteAgentUsageRecord> = emptyList()
 
@@ -372,6 +385,9 @@ class PocketBaseAgentCloudClient(
         parentMessageId: String?,
         replacesMessageId: String?,
         title: String,
+        modelOverride: String?,
+        thinkingLevelOverride: String?,
+        systemPromptOverride: String?,
     ): RemoteSubmittedJob = withContext(Dispatchers.IO) {
         val session = workflowRepository.requireSession()
         val config = fetchConfigBestEffort(session)
@@ -384,6 +400,9 @@ class PocketBaseAgentCloudClient(
             parentMessageId = parentMessageId,
             replacesMessageId = replacesMessageId,
             title = title,
+            modelOverride = modelOverride,
+            thinkingLevelOverride = thinkingLevelOverride,
+            systemPromptOverride = systemPromptOverride,
         )
 
         val created = workflowRepository.executeJsonCancellable(
@@ -1086,6 +1105,102 @@ class PocketBaseAgentCloudClient(
         return sb.toString()
     }
 
+    override suspend fun listSchedules(): List<AgentSchedule> = withContext(Dispatchers.IO) {
+        val session = workflowRepository.requireSession()
+        val root = workflowRepository.executeJsonCancellable(
+            baseUrl = session.baseUrl,
+            path = "$GEMINI_API/schedules",
+            method = "GET",
+            token = session.token,
+        ).jsonObject
+        val items = root["items"]?.jsonArray ?: return@withContext emptyList()
+        items.mapNotNull { elem ->
+            val obj = elem.asObj() ?: return@mapNotNull null
+            obj.toAgentSchedule()
+        }
+    }
+
+    override suspend fun createSchedule(schedule: AgentSchedule): AgentSchedule = withContext(Dispatchers.IO) {
+        val session = workflowRepository.requireSession()
+        val obj = workflowRepository.executeJsonCancellable(
+            baseUrl = session.baseUrl,
+            path = "$GEMINI_API/schedules",
+            method = "POST",
+            body = schedule.toPayloadJson(),
+            token = session.token,
+        ).jsonObject
+        obj.toAgentSchedule()
+    }
+
+    override suspend fun updateSchedule(schedule: AgentSchedule): AgentSchedule = withContext(Dispatchers.IO) {
+        val session = workflowRepository.requireSession()
+        val obj = workflowRepository.executeJsonCancellable(
+            baseUrl = session.baseUrl,
+            path = "$GEMINI_API/schedules/${schedule.id}",
+            method = "PATCH",
+            body = schedule.toPayloadJson(),
+            token = session.token,
+        ).jsonObject
+        obj.toAgentSchedule()
+    }
+
+    override suspend fun deleteSchedule(id: String) = withContext(Dispatchers.IO) {
+        val session = workflowRepository.requireSession()
+        workflowRepository.executeJsonCancellable(
+            baseUrl = session.baseUrl,
+            path = "$GEMINI_API/schedules/$id",
+            method = "DELETE",
+            token = session.token,
+        )
+        Unit
+    }
+
+    override suspend fun triggerSchedule(id: String): RemoteSubmittedJob? = withContext(Dispatchers.IO) {
+        val session = workflowRepository.requireSession()
+        val obj = workflowRepository.executeJsonCancellable(
+            baseUrl = session.baseUrl,
+            path = "$GEMINI_API/schedules/$id/trigger",
+            method = "POST",
+            body = buildJsonObject {},
+            token = session.token,
+        ).jsonObject
+        wakeConverterBestEffort(session)
+        val jobId = obj.str("jobId").ifBlank { obj.str("id") }
+        if (jobId.isBlank()) null else RemoteSubmittedJob(
+            jobId = jobId,
+            threadRoot = obj.str("threadRoot").ifBlank { jobId },
+            status = obj.str("status").ifBlank { "queued" },
+        )
+    }
+
+    private fun AgentSchedule.toPayloadJson(): JsonObject = buildJsonObject {
+        put("title", title)
+        put("prompt", prompt)
+        put("systemPrompt", systemPrompt)
+        put("model", model.ifBlank { "Antigravity" })
+        put("thinkingLevel", thinkingLevel)
+        put("cron", cron)
+        put("timezone", timezone.ifBlank { "Asia/Shanghai" })
+        put("enabled", enabled)
+    }
+
+    private fun JsonObject.toAgentSchedule(): AgentSchedule = AgentSchedule(
+        id = str("id"),
+        title = str("title"),
+        prompt = str("prompt"),
+        systemPrompt = str("systemPrompt"),
+        model = str("model").ifBlank { "Antigravity" },
+        thinkingLevel = str("thinkingLevel"),
+        cron = str("cron").ifBlank { "0 9 * * *" },
+        timezone = str("timezone").ifBlank { "Asia/Shanghai" },
+        enabled = bool("enabled") ?: true,
+        lastRunAt = str("lastRunAt"),
+        nextRunAt = str("nextRunAt"),
+        lastJobId = str("lastJobId"),
+        lastStatus = str("lastStatus"),
+        lastError = str("lastError"),
+    )
+
     companion object {
         internal fun buildSubmitJobPayload(
             jobId: String,
@@ -1095,8 +1210,11 @@ class PocketBaseAgentCloudClient(
             parentMessageId: String? = null,
             replacesMessageId: String? = null,
             title: String = "",
+            modelOverride: String? = null,
+            thinkingLevelOverride: String? = null,
+            systemPromptOverride: String? = null,
         ): JsonObject {
-            val selectedModel = if (
+            val selectedModel = modelOverride?.trim()?.takeIf { it.isNotBlank() } ?: if (
                 config.model.equals("antigravity", ignoreCase = true) ||
                 config.model.startsWith("antigravity-", ignoreCase = true)
             ) {
@@ -1104,12 +1222,17 @@ class PocketBaseAgentCloudClient(
             } else {
                 "Antigravity"
             }
+            val isAntigravityModel =
+                selectedModel.equals("antigravity", ignoreCase = true) ||
+                selectedModel.startsWith("antigravity-", ignoreCase = true)
+            val selectedThinkingLevel = thinkingLevelOverride ?: config.thinkingLevel
+            val selectedSystemPrompt = systemPromptOverride ?: config.systemPrompt
             return buildJsonObject {
                 put("id", jobId)
                 put("responseVersion", 1)
                 put("title", title)
                 put("prompt", prompt)
-                put("systemPrompt", config.systemPrompt)
+                put("systemPrompt", selectedSystemPrompt)
                 put("text", "")
                 put(
                     "sources",
@@ -1127,11 +1250,11 @@ class PocketBaseAgentCloudClient(
                 )
                 put("delimiter", config.delimiter.ifBlank { "<!-- aw:split -->" })
                 put("model", selectedModel)
-                if (config.agentModel.isNotBlank()) {
+                if (isAntigravityModel && config.agentModel.isNotBlank()) {
                     put("agentModel", config.agentModel)
                 }
                 put("concurrency", config.concurrency.coerceIn(1, 16))
-                put("thinkingLevel", config.thinkingLevel)
+                put("thinkingLevel", selectedThinkingLevel)
                 put("maxOutputTokens", config.maxOutputTokens.coerceIn(256, 65536))
                 if (!parentMessageId.isNullOrBlank()) {
                     put("parentMessage", parentMessageId)
