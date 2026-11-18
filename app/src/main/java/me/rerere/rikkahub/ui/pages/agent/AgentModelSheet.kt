@@ -38,7 +38,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Tick01
-import me.rerere.rikkahub.ui.components.ai.AutoAIIcon
+import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 
 @Composable
 fun AgentModelSheet(

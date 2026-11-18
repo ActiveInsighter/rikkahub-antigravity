@@ -488,6 +488,7 @@ class AgentVM(
             ReasoningLevel.LOW -> "low"
             ReasoningLevel.MEDIUM -> "medium"
             ReasoningLevel.HIGH, ReasoningLevel.XHIGH -> "high"
+            else -> "high"
         }
         val placeholderMsg = UIMessage(
             id = assistantMsgId,

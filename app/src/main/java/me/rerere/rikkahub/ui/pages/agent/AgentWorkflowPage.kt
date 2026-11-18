@@ -53,13 +53,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.Calendar03
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Edit03
 import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.rikkahub.data.agent.AgentScheduledTask
-import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.components.nav.BackButton
 import org.koin.androidx.compose.koinViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -82,7 +81,6 @@ private val INTERVAL_PRESETS = listOf(
 
 @Composable
 fun AgentWorkflowPage() {
-    val navController = LocalNavController.current
     val vm: AgentWorkflowVM = koinViewModel()
 
     val tasks by vm.tasks.collectAsStateWithLifecycle()
@@ -106,14 +104,7 @@ fun AgentWorkflowPage() {
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                navigationIcon = {
-                    IconButton(onClick = { navController.navigateUp() }) {
-                        Icon(
-                            imageVector = HugeIcons.ArrowLeft01,
-                            contentDescription = "返回",
-                        )
-                    }
-                },
+                navigationIcon = { BackButton() },
                 title = {
                     Column {
                         Text("Agent 工作流", style = MaterialTheme.typography.titleMedium)
