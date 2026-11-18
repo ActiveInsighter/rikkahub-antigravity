@@ -18,7 +18,7 @@
 
 ## 补丁行为
 
-- 模型 ID 以 `antigravity-preview-` 开头时，发送 `agent` 和 `environment: "remote"`，不发送 `model`；即使旧的自定义请求体含 `model`，最终请求也会移除它。
+- 模型 ID 以 `antigravity-preview-` 开头时，使用 Interactions API 的 `agent` 参数。新对话使用远程沙盒，并可通过自定义 `environment` 配置 GitHub 出站认证。
 - 不自动发送普通模型的 `generation_config`、图片 `response_format` 或 RikkaHub 工具声明，保留 Agent 默认的服务端工具。
 - 普通 Gemini 请求保持原有路径。继续使用现有 Interactions 流式/非流式解析器，回归测试包含服务端代码执行事件和最终文本。
 - 高级 Agent 参数仍可通过自定义请求体添加。例如 `agent_config` 的 JSON 值：
@@ -29,7 +29,7 @@
 
 `max_total_tokens` 是整个 Agent 运行的总 token 预算，与普通输出长度不同；按需设置。本补丁不把普通「最大输出」设置直接映射到总预算。
 
-这是**无状态基础适配**：沿用 `store: false` 和客户端历史回放，每次请求创建新远程环境。尚未实现 `previous_interaction_id` / `environment_id` 持久化、远程文件下载、后台任务、客户端 MCP/函数工具续接。不要依赖上一轮沙盒文件继续存在。签名验证和自动化测试不能替代使用真实 API Key 的安装验收。
+普通聊天直连 Antigravity 时使用 `store: true`，并把 Google 返回的 interaction 和沙盒 ID 保存在助手消息中。续聊用上一条助手消息的两个 ID，只发送本轮新增输入。历史消息缺少这两个 ID 时会用本地历史构建请求。文件转换智能体走云端任务链路，由执行器按 PocketBase 上文消息读取沙盒状态。沙盒文件的保留周期由 Google 管理。
 
 参考：[Google Antigravity 文档](https://ai.google.dev/gemini-api/docs/antigravity-agent)、[托管 Agent 快速开始](https://ai.google.dev/gemini-api/docs/managed-agents-quickstart)、[创建 Interaction 的 API 参数](https://ai.google.dev/api/interactions-api)。
 
