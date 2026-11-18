@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
@@ -21,6 +22,7 @@ import me.rerere.rikkahub.data.agent.AgentConversationSnapshot
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
 import me.rerere.rikkahub.data.agent.AgentUiSettings
+import me.rerere.rikkahub.data.agent.DEFAULT_AGENT_MODELS
 import me.rerere.rikkahub.data.agent.RemoteAgentSourceInput
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import me.rerere.rikkahub.data.model.Assistant
@@ -116,6 +118,14 @@ class AgentVM(
     val uiSettings: StateFlow<AgentUiSettings> = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current)
 
+    val selectedAgentModelName: StateFlow<String> = settingsStore.settingsFlow
+        .map { it.selectedAgentModel.ifBlank { "Antigravity" } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current.selectedAgentModel.ifBlank { "Antigravity" })
+
+    val savedAgentModels: StateFlow<List<String>> = settingsStore.settingsFlow
+        .map { it.savedAgentModels.ifEmpty { DEFAULT_AGENT_MODELS } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current.savedAgentModels.ifEmpty { DEFAULT_AGENT_MODELS })
+
     private val _initialDraft = MutableStateFlow<String?>(null)
     val initialDraft: StateFlow<String?> = _initialDraft.asStateFlow()
 
@@ -157,6 +167,42 @@ class AgentVM(
         val updated = _agentAssistant.value.copy(chatModelId = model.id)
         _agentAssistant.value = updated
         persistAssistant(updated)
+        selectAgentModel(model.modelId)
+    }
+
+    fun selectAgentModel(modelName: String) {
+        val cleaned = modelName.trim().removePrefix("models/")
+        if (cleaned.isEmpty()) return
+        settingsStore.update { current ->
+            val list = (current.savedAgentModels.ifEmpty { DEFAULT_AGENT_MODELS })
+            val updatedList = if (list.any { it.equals(cleaned, ignoreCase = true) }) list else list + cleaned
+            current.copy(selectedAgentModel = cleaned, savedAgentModels = updatedList)
+        }
+    }
+
+    fun addCustomAgentModel(modelName: String): Boolean {
+        val cleaned = modelName.trim().removePrefix("models/")
+        if (cleaned.isEmpty()) return false
+        settingsStore.update { current ->
+            val list = current.savedAgentModels.ifEmpty { DEFAULT_AGENT_MODELS }
+            val updatedList = if (list.any { it.equals(cleaned, ignoreCase = true) }) list else list + cleaned
+            current.copy(selectedAgentModel = cleaned, savedAgentModels = updatedList)
+        }
+        return true
+    }
+
+    fun removeCustomAgentModel(modelName: String) {
+        if (modelName.equals("Antigravity", ignoreCase = true)) return
+        settingsStore.update { current ->
+            val list = current.savedAgentModels.filterNot { it.equals(modelName, ignoreCase = true) }
+                .ifEmpty { listOf("Antigravity") }
+            val nextSelected = if (current.selectedAgentModel.equals(modelName, ignoreCase = true)) {
+                list.first()
+            } else {
+                current.selectedAgentModel
+            }
+            current.copy(selectedAgentModel = nextSelected, savedAgentModels = list)
+        }
     }
 
     fun updateAgentAssistant(assistant: Assistant) {
@@ -435,13 +481,21 @@ class AgentVM(
     ) {
         val assistantMsgId = Uuid.random()
         val nodeId = targetNodeId ?: Uuid.random()
+        val activeModelName = settingsStore.current.selectedAgentModel.ifBlank { "Antigravity" }
+        val thinkingLevel = when (_agentAssistant.value.reasoningLevel) {
+            ReasoningLevel.OFF -> "minimal"
+            ReasoningLevel.AUTO -> ""
+            ReasoningLevel.LOW -> "low"
+            ReasoningLevel.MEDIUM -> "medium"
+            ReasoningLevel.HIGH, ReasoningLevel.XHIGH -> "high"
+        }
         val placeholderMsg = UIMessage(
             id = assistantMsgId,
             role = MessageRole.ASSISTANT,
             parts = listOf(UIMessagePart.Text("")),
             modelSnapshot = ModelSnapshot(
-                displayName = "Antigravity Agent",
-                modelId = "Antigravity",
+                displayName = activeModelName,
+                modelId = activeModelName,
             ),
         )
 
@@ -455,7 +509,16 @@ class AgentVM(
             )
             baseConversation.copy(messageNodes = baseConversation.messageNodes + newNode)
         }
-        val task = repository.submitMessage(initialConv, prompt, sources, parentMessageId, replacesMessageId, title)
+        val task = repository.submitMessage(
+            conversation = initialConv,
+            prompt = prompt,
+            sources = sources,
+            parentMessageId = parentMessageId,
+            replacesMessageId = replacesMessageId,
+            title = title,
+            modelOverride = activeModelName,
+            thinkingLevelOverride = thinkingLevel,
+        )
         submission = task
         viewModelScope.launch {
             task.await().onFailure { error ->

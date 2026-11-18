@@ -150,6 +150,8 @@ fun ChatInput(
     placeholderText: String? = null,
     alwaysShowReasoningButton: Boolean = false,
     showAsrButton: Boolean = true,
+    onModelClick: (() -> Unit)? = null,
+    customModelName: String? = null,
 ) {
     val toaster = LocalToaster.current
     val containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -302,11 +304,31 @@ fun ChatInput(
                                 horizontalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
                                 // Model Picker
-                                ModelSelectorButton(
-                                    state = modelListState,
-                                    onlyIcon = true,
-                                    modifier = Modifier,
-                                )
+                                if (onModelClick != null) {
+                                    androidx.compose.material3.TextButton(
+                                        onClick = onModelClick,
+                                    ) {
+                                        AutoAIIcon(
+                                            name = customModelName ?: "gemini",
+                                            modifier = Modifier
+                                                .padding(end = 4.dp)
+                                                .size(20.dp),
+                                            color = Color.Transparent,
+                                        )
+                                        Text(
+                                            text = customModelName?.takeIf { it.isNotBlank() } ?: "选择模型",
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                } else {
+                                    ModelSelectorButton(
+                                        state = modelListState,
+                                        onlyIcon = true,
+                                        modifier = Modifier,
+                                    )
+                                }
 
                                 // Reasoning
                                 if (alwaysShowReasoningButton || chatModel?.abilities?.contains(ModelAbility.REASONING) == true) {
@@ -385,10 +407,12 @@ fun ChatInput(
         }
     }
 
-    ModelListSheet(
-        state = modelListState,
-        onSelect = onUpdateChatModel,
-    )
+    if (onModelClick == null) {
+        ModelListSheet(
+            state = modelListState,
+            onSelect = onUpdateChatModel,
+        )
+    }
 }
 
 @Composable

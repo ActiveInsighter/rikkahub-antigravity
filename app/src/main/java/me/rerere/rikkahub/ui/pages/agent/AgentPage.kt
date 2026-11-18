@@ -112,6 +112,8 @@ fun AgentPage(id: Uuid) {
     val isInitialLoading by vm.isInitialLoading.collectAsStateWithLifecycle()
     val agentAssistant by vm.agentAssistant.collectAsStateWithLifecycle()
     val selectedModel by vm.selectedModel.collectAsStateWithLifecycle()
+    val selectedAgentModelName by vm.selectedAgentModelName.collectAsStateWithLifecycle()
+    val savedAgentModels by vm.savedAgentModels.collectAsStateWithLifecycle()
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     val isSyncing by vm.isSyncing.collectAsStateWithLifecycle()
     val activeStatusText by vm.activeStatusText.collectAsStateWithLifecycle()
@@ -211,6 +213,7 @@ fun AgentPage(id: Uuid) {
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
     var showClearConfirm by remember { mutableStateOf(false) }
+    var showModelSheet by remember { mutableStateOf(false) }
     var editingMessage by remember { mutableStateOf<UIMessage?>(null) }
     var editingText by remember { mutableStateOf("") }
 
@@ -348,6 +351,8 @@ fun AgentPage(id: Uuid) {
                             placeholderText = "输入指令…",
                             alwaysShowReasoningButton = true,
                             showAsrButton = false,
+                            onModelClick = { showModelSheet = true },
+                            customModelName = selectedAgentModelName,
                             onUpdateChatModel = vm::updateAgentModel,
                             onUpdateAssistant = vm::updateAgentAssistant,
                             onMoreClick = { showAttachSheet = true },
@@ -420,6 +425,17 @@ fun AgentPage(id: Uuid) {
                 }
             }
         }
+    }
+
+    if (showModelSheet) {
+        AgentModelSheet(
+            selectedModel = selectedAgentModelName,
+            savedModels = savedAgentModels,
+            onSelectModel = vm::selectAgentModel,
+            onAddModel = vm::addCustomAgentModel,
+            onRemoveModel = vm::removeCustomAgentModel,
+            onDismiss = { showModelSheet = false },
+        )
     }
 
     if (showAttachSheet) {

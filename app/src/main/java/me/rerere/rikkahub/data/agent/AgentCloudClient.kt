@@ -218,7 +218,18 @@ interface AgentCloudClient {
         parentMessageId: String? = null,
         replacesMessageId: String? = null,
         title: String = "",
+        modelOverride: String? = null,
+        thinkingLevelOverride: String? = null,
+        systemPromptOverride: String? = null,
     ): RemoteSubmittedJob
+
+    suspend fun listRemoteSchedules(): Result<List<AgentScheduledTask>> = Result.failure(UnsupportedOperationException())
+
+    suspend fun upsertRemoteSchedule(task: AgentScheduledTask): Result<AgentScheduledTask> = Result.failure(UnsupportedOperationException())
+
+    suspend fun deleteRemoteSchedule(id: String): Result<Unit> = Result.failure(UnsupportedOperationException())
+
+    suspend fun triggerRemoteSchedule(id: String): Result<RemoteSubmittedJob> = Result.failure(UnsupportedOperationException())
 
     suspend fun cancelJob(jobId: String)
 
@@ -372,6 +383,9 @@ class PocketBaseAgentCloudClient(
         parentMessageId: String?,
         replacesMessageId: String?,
         title: String,
+        modelOverride: String?,
+        thinkingLevelOverride: String?,
+        systemPromptOverride: String?,
     ): RemoteSubmittedJob = withContext(Dispatchers.IO) {
         val session = workflowRepository.requireSession()
         val config = fetchConfigBestEffort(session)
@@ -384,6 +398,9 @@ class PocketBaseAgentCloudClient(
             parentMessageId = parentMessageId,
             replacesMessageId = replacesMessageId,
             title = title,
+            modelOverride = modelOverride,
+            thinkingLevelOverride = thinkingLevelOverride,
+            systemPromptOverride = systemPromptOverride,
         )
 
         val created = workflowRepository.executeJsonCancellable(
@@ -404,6 +421,91 @@ class PocketBaseAgentCloudClient(
             threadRoot = threadRoot,
             status = status,
         )
+    }
+
+    override suspend fun listRemoteSchedules(): Result<List<AgentScheduledTask>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val session = workflowRepository.requireSession()
+            val response = workflowRepository.executeJsonCancellable(
+                baseUrl = session.baseUrl,
+                path = "/api/collections/aw_agent_schedules/records?perPage=100&sort=-updated",
+                method = "GET",
+                token = session.token,
+            ).jsonObject
+            val items = response["items"]?.jsonArray ?: return@runCatching emptyList()
+            items.mapNotNull { elem ->
+                val obj = elem as? JsonObject ?: return@mapNotNull null
+                obj.toAgentScheduledTask()
+            }
+        }
+    }
+
+    override suspend fun upsertRemoteSchedule(task: AgentScheduledTask): Result<AgentScheduledTask> = withContext(Dispatchers.IO) {
+        runCatching {
+            val session = workflowRepository.requireSession()
+            val body = buildJsonObject {
+                put("name", task.name)
+                put("prompt", task.prompt)
+                put("systemPrompt", task.systemPrompt)
+                put("model", task.model)
+                put("thinkingLevel", task.thinkingLevel)
+                put("intervalMinutes", task.intervalMinutes.coerceIn(5, 43200))
+                put("enabled", task.enabled)
+            }
+            val isRemoteId = task.id.matches(Regex("^[a-z0-9]{15}$"))
+            val result = if (isRemoteId) {
+                workflowRepository.executeJsonCancellable(
+                    baseUrl = session.baseUrl,
+                    path = "/api/collections/aw_agent_schedules/records/${task.id}",
+                    method = "PATCH",
+                    body = body,
+                    token = session.token,
+                ).jsonObject
+            } else {
+                workflowRepository.executeJsonCancellable(
+                    baseUrl = session.baseUrl,
+                    path = "/api/collections/aw_agent_schedules/records",
+                    method = "POST",
+                    body = body,
+                    token = session.token,
+                ).jsonObject
+            }
+            result.toAgentScheduledTask() ?: task
+        }
+    }
+
+    override suspend fun deleteRemoteSchedule(id: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val session = workflowRepository.requireSession()
+            if (id.matches(Regex("^[a-z0-9]{15}$"))) {
+                workflowRepository.executeJsonCancellable(
+                    baseUrl = session.baseUrl,
+                    path = "/api/collections/aw_agent_schedules/records/$id",
+                    method = "DELETE",
+                    token = session.token,
+                )
+            }
+            Unit
+        }
+    }
+
+    override suspend fun triggerRemoteSchedule(id: String): Result<RemoteSubmittedJob> = withContext(Dispatchers.IO) {
+        runCatching {
+            val session = workflowRepository.requireSession()
+            val created = workflowRepository.executeJsonCancellable(
+                baseUrl = session.baseUrl,
+                path = "/api/anyworkflow/agent-schedules/$id/run",
+                method = "POST",
+                body = buildJsonObject {},
+                token = session.token,
+            ).jsonObject
+            wakeConverterBestEffort(session)
+            RemoteSubmittedJob(
+                jobId = created.str("id"),
+                threadRoot = created.str("threadRoot").ifBlank { created.str("id") },
+                status = created.str("status").ifBlank { "queued" },
+            )
+        }
     }
 
     override suspend fun cancelJob(jobId: String) = withContext(Dispatchers.IO) {
@@ -1095,8 +1197,11 @@ class PocketBaseAgentCloudClient(
             parentMessageId: String? = null,
             replacesMessageId: String? = null,
             title: String = "",
+            modelOverride: String? = null,
+            thinkingLevelOverride: String? = null,
+            systemPromptOverride: String? = null,
         ): JsonObject {
-            val selectedModel = if (
+            val selectedModel = modelOverride?.trim()?.takeIf { it.isNotEmpty() } ?: if (
                 config.model.equals("antigravity", ignoreCase = true) ||
                 config.model.startsWith("antigravity-", ignoreCase = true)
             ) {
@@ -1104,12 +1209,17 @@ class PocketBaseAgentCloudClient(
             } else {
                 "Antigravity"
             }
+            val isAntigravityModel =
+                selectedModel.equals("antigravity", ignoreCase = true) ||
+                    selectedModel.startsWith("antigravity-", ignoreCase = true)
+            val thinkingLevel = thinkingLevelOverride ?: config.thinkingLevel
+            val systemPrompt = systemPromptOverride ?: config.systemPrompt
             return buildJsonObject {
                 put("id", jobId)
                 put("responseVersion", 1)
                 put("title", title)
                 put("prompt", prompt)
-                put("systemPrompt", config.systemPrompt)
+                put("systemPrompt", systemPrompt)
                 put("text", "")
                 put(
                     "sources",
@@ -1127,11 +1237,11 @@ class PocketBaseAgentCloudClient(
                 )
                 put("delimiter", config.delimiter.ifBlank { "<!-- aw:split -->" })
                 put("model", selectedModel)
-                if (config.agentModel.isNotBlank()) {
+                if (isAntigravityModel && config.agentModel.isNotBlank()) {
                     put("agentModel", config.agentModel)
                 }
                 put("concurrency", config.concurrency.coerceIn(1, 16))
-                put("thinkingLevel", config.thinkingLevel)
+                put("thinkingLevel", thinkingLevel)
                 put("maxOutputTokens", config.maxOutputTokens.coerceIn(256, 65536))
                 if (!parentMessageId.isNullOrBlank()) {
                     put("parentMessage", parentMessageId)
@@ -1181,3 +1291,25 @@ class PocketBaseAgentCloudClient(
 
 private fun JsonObject.str(key: String): String =
     this[key]?.let { (it as? JsonPrimitive)?.contentOrNull } ?: ""
+
+private fun JsonObject.toAgentScheduledTask(): AgentScheduledTask? {
+    val id = str("id")
+    val name = str("name")
+    val prompt = str("prompt")
+    if (id.isBlank() || prompt.isBlank()) return null
+    return AgentScheduledTask(
+        id = id,
+        name = name.ifBlank { prompt.take(24) },
+        prompt = prompt,
+        systemPrompt = str("systemPrompt"),
+        model = str("model").ifBlank { "Antigravity" },
+        thinkingLevel = str("thinkingLevel"),
+        intervalMinutes = (this["intervalMinutes"] as? JsonPrimitive)?.intOrNull ?: 60,
+        enabled = (this["enabled"] as? JsonPrimitive)?.booleanOrNull ?: true,
+        lastRunAt = str("lastRunAt").takeIf { it.isNotBlank() }?.let { PocketBaseAgentCloudClient.parseIsoMillis(it) }?.takeIf { it > 0L },
+        nextRunAt = str("nextRunAt").takeIf { it.isNotBlank() }?.let { PocketBaseAgentCloudClient.parseIsoMillis(it) }?.takeIf { it > 0L },
+        lastJobId = str("lastJobId").takeIf { it.isNotBlank() },
+        lastStatus = str("lastStatus").takeIf { it.isNotBlank() },
+        lastError = str("lastError").takeIf { it.isNotBlank() },
+    )
+}

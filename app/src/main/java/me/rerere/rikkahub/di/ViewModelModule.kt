@@ -135,4 +135,12 @@ val viewModelModule = module {
             settingsStore = get(),
         )
     }
+    viewModel {
+        me.rerere.rikkahub.ui.pages.agent.AgentWorkflowVM(
+            context = get(),
+            settingsStore = get(),
+            cloudClient = get(),
+            workflowRepository = get(),
+        )
+    }
 }

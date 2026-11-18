@@ -303,6 +303,8 @@ class AgentRepository(
         parentMessageId: String?,
         replacesMessageId: String?,
         title: String,
+        modelOverride: String? = null,
+        thinkingLevelOverride: String? = null,
     ): Deferred<Result<Unit>> {
         val session = workflowRepository.session.value
         _submittingIds.update { it + conversation.id }
@@ -312,7 +314,15 @@ class AgentRepository(
                 runCatching {
                     threadSyncMutex.withLock {
                         check(session != null && workflowRepository.session.value == session) { "请先连接 AnyWorkflow" }
-                        val submitted = cloudClient.submitMessage(prompt, sources, parentMessageId, replacesMessageId, title)
+                        val submitted = cloudClient.submitMessage(
+                            prompt = prompt,
+                            sources = sources,
+                            parentMessageId = parentMessageId,
+                            replacesMessageId = replacesMessageId,
+                            title = title,
+                            modelOverride = modelOverride,
+                            thinkingLevelOverride = thinkingLevelOverride,
+                        )
                         if (workflowRepository.session.value == session) {
                             saveConversation(conversation, submitted.jobId, submitted.threadRoot, submitted.status)
                         }

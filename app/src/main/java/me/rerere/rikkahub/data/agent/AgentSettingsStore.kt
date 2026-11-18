@@ -14,12 +14,40 @@ import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.utils.JsonInstant
 
+val DEFAULT_AGENT_MODELS = listOf(
+    "Antigravity",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-3.5-flash-lite",
+)
+
+@Serializable
+data class AgentScheduledTask(
+    val id: String,
+    val name: String,
+    val prompt: String,
+    val systemPrompt: String = "",
+    val model: String = "Antigravity",
+    val thinkingLevel: String = "",
+    val intervalMinutes: Int = 60,
+    val enabled: Boolean = true,
+    val lastRunAt: Long? = null,
+    val nextRunAt: Long? = null,
+    val lastJobId: String? = null,
+    val lastStatus: String? = null,
+    val lastError: String? = null,
+)
+
 /**
  * Isolated UI-only settings for the Agent page.
  * Completely separated from Chat's [me.rerere.rikkahub.data.datastore.SettingsStore].
  */
 @Serializable
 data class AgentUiSettings(
+    val selectedAgentModel: String = "Antigravity",
+    val savedAgentModels: List<String> = DEFAULT_AGENT_MODELS,
+    val agentSchedules: List<AgentScheduledTask> = emptyList(),
     val showUserAvatar: Boolean = true,
     val showAssistantBubble: Boolean = false,
     val splitAssistantBubbleByParagraph: Boolean = false,
