@@ -81,8 +81,6 @@ class AgentVM(
     private var activeJobId: String? = null
     private var activeThreadRoot: String? = null
     private var lastRemoteMessageId: String? = null
-    private var lastRemoteEnvironmentId: String? = null
-    private var lastRemoteInteractionId: String? = null
 
     init {
         viewModelScope.launch {
@@ -410,8 +408,6 @@ class AgentVM(
                     sources = sources,
                     parentMessageId = parentMessageId,
                     replacesMessageId = replacesMessageId,
-                    environmentId = lastRemoteEnvironmentId,
-                    previousInteractionId = if (parentMessageId != null) lastRemoteInteractionId else null,
                     title = title,
                 )
                 activeJobId = submitted.jobId
@@ -494,12 +490,6 @@ class AgentVM(
             val msg = update.message
             if (msg != null) {
                 lastRemoteMessageId = msg.id
-                if (msg.environmentId.isNotBlank()) {
-                    lastRemoteEnvironmentId = msg.environmentId
-                }
-                if (msg.providerStateId.isNotBlank()) {
-                    lastRemoteInteractionId = msg.providerStateId
-                }
             }
             val statusLabel = when (update.job.status) {
                 "queued" -> "排队中 · 等待执行器领取"

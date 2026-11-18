@@ -235,7 +235,13 @@ class InteractionsApiTest {
                 assistantMsg,
                 UIMessage.user("Run tests"),
             ),
-            params = TextGenerationParams(model = Model(modelId = "antigravity-preview-09-2026")),
+            params = TextGenerationParams(
+                model = Model(modelId = "antigravity-preview-09-2026"),
+                customBody = listOf(
+                    CustomBody("environment", buildJsonObject { put("type", "remote") }),
+                    CustomBody("store", JsonPrimitive(false)),
+                ),
+            ),
             stream = true,
         )
 

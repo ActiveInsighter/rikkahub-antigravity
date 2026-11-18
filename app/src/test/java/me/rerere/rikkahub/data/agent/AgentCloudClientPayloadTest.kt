@@ -56,19 +56,17 @@ class AgentCloudClientPayloadTest {
     }
 
     @Test
-    fun `forwards environmentId and previousInteractionId when provided`() {
+    fun `uses only the PocketBase parent to continue a conversation`() {
         val payload = PocketBaseAgentCloudClient.buildSubmitJobPayload(
             jobId = "job126",
             config = RemoteAgentConfig(model = "Antigravity"),
             prompt = "follow up",
             sources = emptyList(),
             parentMessageId = "msg_prev",
-            environmentId = "env_abc123",
-            previousInteractionId = "v1_xyz",
         )
 
         assertEquals("msg_prev", payload["parentMessage"]?.jsonPrimitive?.content)
-        assertEquals("env_abc123", payload["environmentId"]?.jsonPrimitive?.content)
-        assertEquals("v1_xyz", payload["previousInteractionId"]?.jsonPrimitive?.content)
+        assertNull(payload["environmentId"])
+        assertNull(payload["previousInteractionId"])
     }
 }

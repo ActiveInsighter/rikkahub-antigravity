@@ -204,28 +204,18 @@ internal class InteractionsAPI(
         params: TextGenerationParams,
         stream: Boolean,
     ): JsonObject = buildJsonObject {
-        val isAntigravity = params.model.modelId.equals("antigravity", ignoreCase = true) ||
-            params.model.modelId.startsWith("antigravity-preview-")
-        val reusedEnvironmentId = if (isAntigravity) {
-            messages.lastOrNull {
-                it.role == MessageRole.ASSISTANT && !it.antigravityEnvironmentId.isNullOrBlank()
-            }?.antigravityEnvironmentId
-        } else {
-            null
+        val isAntigravity = params.model.modelId.startsWith("antigravity-preview-") ||
+            params.model.modelId.equals("antigravity", ignoreCase = true)
+        val previousAssistant = messages.getOrNull(messages.lastIndex - 1)?.takeIf {
+            isAntigravity && messages.last().role == MessageRole.USER && it.role == MessageRole.ASSISTANT
         }
-        val previousInteractionId = if (isAntigravity && messages.size >= 2) {
-            val lastUser = messages.lastOrNull()
-            val prevAssistant = messages.getOrNull(messages.size - 2)
-            if (lastUser?.role == MessageRole.USER && prevAssistant?.role == MessageRole.ASSISTANT) {
-                prevAssistant.interactionId?.takeIf { it.isNotBlank() }
-            } else {
-                null
-            }
-        } else {
-            null
+        val reusedEnvironmentId = previousAssistant?.antigravityEnvironmentId?.takeIf { it.isNotBlank() }
+        val previousInteractionId = previousAssistant?.interactionId?.takeIf {
+            reusedEnvironmentId != null && it.isNotBlank()
         }
         if (isAntigravity) {
-            put("agent", params.model.modelId)
+            put("agent", params.model.modelId.takeUnless { it.equals("antigravity", ignoreCase = true) }
+                ?: "antigravity-preview-09-2026")
             put("environment", reusedEnvironmentId ?: "remote")
             if (previousInteractionId != null) {
                 put("previous_interaction_id", previousInteractionId)
@@ -298,9 +288,12 @@ internal class InteractionsAPI(
         }
 
         // safety_settings 只在 Vertex 上可用，Gemini API 的 Interactions 会直接拒绝该参数
-    }.mergeCustomBody(params.customBody).let { body ->
-        // Even a stale custom model field must not conflict with an Antigravity agent.
-        if (params.model.modelId.startsWith("antigravity-preview-")) JsonObject(body - "model") else body
+    }.let { builtIn ->
+        val body = builtIn.mergeCustomBody(params.customBody)
+        if (builtIn["agent"] == null) return@let body
+        val continuation = builtIn.filterKeys { it == "previous_interaction_id" || it == "environment" }
+        val merged = if ("previous_interaction_id" in continuation) body + continuation else body
+        JsonObject((merged - "model") + ("store" to JsonPrimitive(true)))
     }
 
     // Interactions API 只接受 thinking_level，没有 thinkingBudget
