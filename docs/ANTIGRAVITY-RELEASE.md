@@ -7,6 +7,8 @@
 - 先新建聊天，发送「你好」。温度、top-p、普通输出 token 上限不适用于 Agent，本补丁不发送这些参数。
 - 普通聊天直连 Antigravity 时可在同一对话续用 Google 沙盒。文件转换智能体由云端执行器按上文消息续接沙盒。
 - 支持通过私人提供商二维码配置 GitHub HTTPS Git/REST 出站认证；公开 APK 不含任何个人 GitHub Token。新版隐藏请求日志中的远程环境/MCP 认证信息。
+- Agent 页面使用 PocketBase Realtime 同步所有活跃会话。切换会话时，其他任务继续更新 Room，重连后会补齐遗漏分段。
+- Agent 新增本地输入草稿、侧边栏运行和未读状态，以及完成与失败通知。成功回复会显示最终保存的全文，历史消息也会按自身状态显示。
 - Actions 运行请求回归测试、构建 APK 并验证签名；未使用用户 API Key 调用 Google 实测，仍需安装后验证账号权限和真实响应。
 - Debug 版关闭 Firebase Analytics 和 Crashlytics 数据收集，使用本地占位配置，无需 Firebase 密钥。
 
