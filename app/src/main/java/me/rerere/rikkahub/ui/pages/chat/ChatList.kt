@@ -18,14 +18,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -57,6 +60,7 @@ import kotlin.uuid.Uuid
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessage
+import me.rerere.rikkahub.data.agent.formatAgentElapsedSeconds
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.getAssistantById
 import me.rerere.rikkahub.data.model.Conversation
@@ -104,6 +108,9 @@ fun ChatList(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
+    runningStartedAtMillis: Long? = null,
+    onLoadingClick: (() -> Unit)? = null,
+    onOpenAgentInsight: ((UIMessage) -> Unit)? = null,
 ) {
     val previewProgress = rememberPreviewSwipeProgress(previewMode)
     val scope = rememberCoroutineScope()
@@ -163,6 +170,9 @@ fun ChatList(
                 onToolAnswer = onToolAnswer,
                 onToggleFavorite = onToggleFavorite,
                 onConversationSystemPromptChange = onConversationSystemPromptChange,
+                runningStartedAtMillis = runningStartedAtMillis,
+                onLoadingClick = onLoadingClick,
+                onOpenAgentInsight = onOpenAgentInsight,
                 selectionState = selectionState,
             )
         }
@@ -235,6 +245,9 @@ private fun ChatListNormal(
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
     onToggleFavorite: ((MessageNode) -> Unit)? = null,
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
+    runningStartedAtMillis: Long? = null,
+    onLoadingClick: (() -> Unit)? = null,
+    onOpenAgentInsight: ((UIMessage) -> Unit)? = null,
     selectionState: ChatSelectionState,
 ) {
     val scope = rememberCoroutineScope()
@@ -395,6 +408,7 @@ private fun ChatListNormal(
                             onClearTranslation = onClearTranslation,
                             onToolApproval = onToolApproval,
                             onToolAnswer = onToolAnswer,
+                            onOpenAgentInsight = onOpenAgentInsight,
                             lastMessage = index == lastMessageIndex,
                         )
                     }
@@ -410,25 +424,59 @@ private fun ChatListNormal(
                 }
             }
 
-            // 压缩时也用这一行，processingStatus 显示的是压缩中
+            // 压缩时也用这一行，processingStatus 显示的是压缩中；Agent 模式下显示每秒更新的运行计时，点击打开总结弹窗
             if (loading) {
                 item(LoadingIndicatorKey) {
-                    Row(
-                        modifier = Modifier.padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        ContainedLoadingIndicator(
-                            modifier = Modifier.size(28.dp)
-                        )
-                        AnimatedVisibility(
-                            visible = processingStatus != null,
+                    if (runningStartedAtMillis != null) {
+                        var elapsedSeconds by remember(runningStartedAtMillis) {
+                            mutableLongStateOf(((System.currentTimeMillis() - runningStartedAtMillis) / 1000L).coerceAtLeast(0L))
+                        }
+                        LaunchedEffect(runningStartedAtMillis) {
+                            while (true) {
+                                elapsedSeconds = ((System.currentTimeMillis() - runningStartedAtMillis) / 1000L).coerceAtLeast(0L)
+                                delay(1000L)
+                            }
+                        }
+                        Surface(
+                            onClick = { onLoadingClick?.invoke() },
+                            enabled = onLoadingClick != null,
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f),
+                            modifier = Modifier.padding(8.dp),
                         ) {
-                            Text(
-                                text = processingStatus ?: "",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            Row(
+                                modifier = Modifier.padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                ContainedLoadingIndicator(
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Text(
+                                    text = formatAgentElapsedSeconds(elapsedSeconds),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            ContainedLoadingIndicator(
+                                modifier = Modifier.size(28.dp)
                             )
+                            AnimatedVisibility(
+                                visible = processingStatus != null,
+                            ) {
+                                Text(
+                                    text = processingStatus ?: "",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }

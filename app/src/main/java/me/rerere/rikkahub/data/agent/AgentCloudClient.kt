@@ -143,6 +143,8 @@ data class RemoteGeminiMessage(
     val updated: String,
     val streamRevision: Int?,
     val usage: RemoteGeminiUsage,
+    val summaryJson: String? = null,
+    val timelineJson: String? = null,
 )
 
 data class RemoteGeminiUsage(
@@ -765,6 +767,8 @@ class PocketBaseAgentCloudClient(
             usage = usage,
             generationTimeMs = durationMs,
             stepCount = stepCount,
+            agentSummaryJson = message?.summaryJson,
+            agentTimelineJson = message?.timelineJson,
         )
     }
 
@@ -1035,6 +1039,8 @@ class PocketBaseAgentCloudClient(
             updated = obj.str("updated"),
             streamRevision = obj["streamRevision"]?.jsonPrimitive?.intOrNull,
             usage = usage,
+            summaryJson = (obj["summary"] as? JsonObject)?.toString(),
+            timelineJson = (obj["timeline"] as? JsonObject)?.toString(),
         )
     }
 

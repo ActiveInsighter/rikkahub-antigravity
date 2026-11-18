@@ -29,6 +29,8 @@ import me.rerere.rikkahub.utils.JsonInstant
 import java.time.Instant
 import kotlin.uuid.Uuid
 
+private const val NEW_AGENT_DRAFT_KEY = "__new_agent_draft__"
+
 data class AgentConversationSnapshot(
     val conversation: Conversation,
     val remoteStatus: String? = null,
@@ -368,21 +370,50 @@ class AgentRepository(
     }
 
     suspend fun getDraft(conversationId: Uuid): String? {
-        return draftDao.getByConversationId(conversationId.toString())?.text
+        val id = conversationId.toString()
+        val direct = draftDao.getByConversationId(id)?.text
+        if (!direct.isNullOrEmpty()) return direct
+        if (conversationDao.getById(id) == null) {
+            return draftDao.getByConversationId(NEW_AGENT_DRAFT_KEY)?.text
+        }
+        return null
     }
 
     fun saveDraft(conversationId: Uuid, text: String) = appScope.launch {
-        val id = conversationId.toString()
-        if (text.isEmpty()) {
-            draftDao.deleteByConversationId(id)
-        } else {
-            draftDao.upsert(
-                AgentDraftEntity(
-                    conversationId = id,
-                    text = text,
-                    updatedAt = System.currentTimeMillis(),
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            val id = conversationId.toString()
+            val isNew = conversationDao.getById(id) == null
+            if (text.isEmpty()) {
+                draftDao.deleteByConversationId(id)
+                if (isNew) {
+                    draftDao.deleteByConversationId(NEW_AGENT_DRAFT_KEY)
+                }
+            } else {
+                val now = System.currentTimeMillis()
+                draftDao.upsert(
+                    AgentDraftEntity(
+                        conversationId = id,
+                        text = text,
+                        updatedAt = now,
+                    )
                 )
-            )
+                if (isNew) {
+                    draftDao.upsert(
+                        AgentDraftEntity(
+                            conversationId = NEW_AGENT_DRAFT_KEY,
+                            text = text,
+                            updatedAt = now,
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearDraft(conversationId: Uuid) = appScope.launch {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            draftDao.deleteByConversationId(conversationId.toString())
+            draftDao.deleteByConversationId(NEW_AGENT_DRAFT_KEY)
         }
     }
 

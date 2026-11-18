@@ -54,6 +54,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
@@ -72,11 +73,16 @@ import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.ai.ui.isEmptyUIMessage
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.MusicNote03
+import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.agent.formatAgentOffsetMs
+import me.rerere.rikkahub.data.agent.parseAgentSummary
+import me.rerere.rikkahub.data.agent.parseAgentTimeline
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.MessageNode
@@ -123,6 +129,7 @@ fun ChatMessage(
     onClearTranslation: (UIMessage) -> Unit = {},
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onOpenAgentInsight: ((UIMessage) -> Unit)? = null,
 ) {
     val message = node.messages[node.selectIndex]
     if (message.isContextCheckpoint) {
@@ -243,6 +250,13 @@ fun ChatMessage(
             parts = message.parts,
             assistant = assistant,
         )
+
+        if (message.role == MessageRole.ASSISTANT && onOpenAgentInsight != null && showActions) {
+            AgentMessageInsightButton(
+                message = message,
+                onClick = { onOpenAgentInsight(message) },
+            )
+        }
 
         ProvideTextStyle(textStyle) {
             ChatMessageNerdLine(message = message)
@@ -687,3 +701,66 @@ private fun ChatMessageCitations(annotations: List<UIMessageAnnotation>) {
         }
     }
 }
+
+@Composable
+private fun AgentMessageInsightButton(
+    message: UIMessage,
+    onClick: () -> Unit,
+) {
+    val summary = remember(message.agentSummaryJson) { message.parseAgentSummary() }
+    val timeline = remember(message.agentTimelineJson) { message.parseAgentTimeline() }
+    val preview = remember(summary, timeline, message.stepCount, message.generationTimeMs) {
+        buildList {
+            val steps = summary?.stepCount?.takeIf { it > 0 } ?: message.stepCount
+            if (steps != null && steps > 0) add("${steps}步")
+            val durationMs = timeline?.totalDurationMs ?: message.generationTimeMs
+            if (durationMs != null && durationMs > 0L) add(formatAgentOffsetMs(durationMs))
+            summary?.overview?.takeIf { it.isNotBlank() }?.let { add(it) }
+        }.joinToString(" · ")
+    }
+
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp, bottom = 2.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                imageVector = HugeIcons.Sparkles,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp),
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "运行总结与时间线",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (preview.isNotBlank()) {
+                    Text(
+                        text = preview,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Icon(
+                imageVector = HugeIcons.ArrowRight01,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}
+

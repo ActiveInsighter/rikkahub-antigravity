@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
@@ -95,6 +97,30 @@ class AgentVM(
                 "failed" -> "执行失败"
                 "canceled" -> "已取消"
                 else -> null
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private var trackedRunStartMillis: Long? = null
+    val runningStartedAtMillis: StateFlow<Long?> = combine(isGenerating, _conversation) { generating, conv ->
+        if (!generating) {
+            trackedRunStartMillis = null
+            null
+        } else {
+            val existing = trackedRunStartMillis
+            if (existing != null) {
+                existing
+            } else {
+                val msgTime = conv.messageNodes.lastOrNull()?.currentMessage?.createdAt?.let {
+                    runCatching {
+                        it.toInstant(TimeZone.currentSystemDefault()).toEpochMilliseconds()
+                    }.getOrNull()
+                }
+                val start = msgTime?.takeIf { it > 0L }
+                    ?: conv.updateAt.toEpochMilli().takeIf { it > 0L }
+                    ?: System.currentTimeMillis()
+                trackedRunStartMillis = start
+                start
             }
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -287,7 +313,7 @@ class AgentVM(
             title = if (current.title.isBlank()) nextTitle else "",
             targetNodeId = null,
         )
-        saveDraft("")
+        repository.clearDraft(conversationId)
         return true
     }
 

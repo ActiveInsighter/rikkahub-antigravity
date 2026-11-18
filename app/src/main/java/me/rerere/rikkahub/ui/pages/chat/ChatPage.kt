@@ -55,15 +55,23 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.ui.components.RikkaConfirmDialog
 import me.rerere.ui.toast.ToastType
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
+import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
@@ -195,6 +203,20 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                 inputState.setMessageText(decodedText)
             }
         }
+    }
+
+    @OptIn(FlowPreview::class)
+    LaunchedEffect(id) {
+        snapshotFlow { inputState.textContent.text.toString() }
+            .drop(1)
+            .debounce(120.milliseconds)
+            .collectLatest { draftText ->
+                vm.saveDraft(draftText)
+            }
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+        vm.saveDraft(inputState.textContent.text.toString())
     }
 
     val chatListState = rememberLazyListState()

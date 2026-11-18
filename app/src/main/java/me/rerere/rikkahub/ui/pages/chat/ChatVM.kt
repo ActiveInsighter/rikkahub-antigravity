@@ -97,6 +97,10 @@ class ChatVM(
         .getConversationJobs()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
+    private val draftPrefs by lazy {
+        context.getSharedPreferences("chat_input_drafts", Context.MODE_PRIVATE)
+    }
+
     init {
         // 添加对话引用
         chatService.addConversationReference(_conversationId)
@@ -106,11 +110,47 @@ class ChatVM(
             chatService.initializeConversation(_conversationId)
         }
 
+        // 恢复本地草稿（仅存本地，不上传云端）
+        if (inputState.textContent.text.isEmpty()) {
+            val idKey = _conversationId.toString()
+            val saved = draftPrefs.getString(idKey, null)
+                ?: if (conversation.value.newConversation && conversation.value.messageNodes.isEmpty()) {
+                    draftPrefs.getString("__new_chat_draft__", null)
+                } else null
+            if (!saved.isNullOrEmpty()) {
+                inputState.setMessageText(saved)
+            }
+        }
+
         // 记住对话ID, 方便下次启动恢复
         context.writeStringPreference("lastConversationId", _conversationId.toString())
     }
 
+    fun saveDraft(text: String) {
+        if (inputState.isEditing()) return
+        val idKey = _conversationId.toString()
+        val isNew = conversation.value.newConversation && conversation.value.messageNodes.isEmpty()
+        draftPrefs.edit().apply {
+            if (text.isEmpty()) {
+                remove(idKey)
+                if (isNew) remove("__new_chat_draft__")
+            } else {
+                putString(idKey, text)
+                if (isNew) putString("__new_chat_draft__", text)
+            }
+            apply()
+        }
+    }
+
+    fun clearDraft() {
+        draftPrefs.edit()
+            .remove(_conversationId.toString())
+            .remove("__new_chat_draft__")
+            .apply()
+    }
+
     override fun onCleared() {
+        saveDraft(inputState.textContent.text.toString())
         voiceSession.stop()
         super.onCleared()
         // 移除对话引用
@@ -246,6 +286,7 @@ class ChatVM(
     fun handleMessageSend(content: List<UIMessagePart>,answer: Boolean = true) {
         if (content.isEmptyInputMessage()) return
         analytics.logEvent("ai_send_message", null)
+        clearDraft()
 
         chatService.sendMessage(_conversationId, content, answer)
     }

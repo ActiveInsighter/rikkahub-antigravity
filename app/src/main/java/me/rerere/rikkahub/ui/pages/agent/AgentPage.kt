@@ -62,6 +62,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
@@ -122,6 +124,7 @@ fun AgentPage(id: Uuid) {
     val connectError by vm.connectError.collectAsStateWithLifecycle()
     val uiSettings by vm.uiSettings.collectAsStateWithLifecycle()
     val initialDraft by vm.initialDraft.collectAsStateWithLifecycle()
+    val runningStartedAtMillis by vm.runningStartedAtMillis.collectAsStateWithLifecycle()
     val baseSettings = LocalSettings.current
     val composedSettings = remember(uiSettings, baseSettings) {
         uiSettings.toCompositionSettings(baseSettings)
@@ -169,10 +172,16 @@ fun AgentPage(id: Uuid) {
         if (!draftLoaded) return@LaunchedEffect
         snapshotFlow { inputState.textContent.text.toString() }
             .drop(1)
-            .debounce(250)
+            .debounce(120.milliseconds)
             .collectLatest { text ->
                 vm.saveDraft(text)
             }
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+        if (draftLoaded) {
+            vm.saveDraft(inputState.textContent.text.toString())
+        }
     }
 
     DisposableEffect(id) {
@@ -213,6 +222,7 @@ fun AgentPage(id: Uuid) {
     var showClearConfirm by remember { mutableStateOf(false) }
     var editingMessage by remember { mutableStateOf<UIMessage?>(null) }
     var editingText by remember { mutableStateOf("") }
+    var insightSheetTarget by remember { mutableStateOf<Pair<UIMessage?, AgentInsightTab>?>(null) }
 
     fun navigateToAgentConversation(targetId: Uuid) {
         navController.navigate(Screen.Agent(targetId.toString())) {
@@ -414,6 +424,16 @@ fun AgentPage(id: Uuid) {
                                         listState.requestScrollToItem(index)
                                     }
                                 },
+                                runningStartedAtMillis = runningStartedAtMillis,
+                                onLoadingClick = {
+                                    val latestAssistant = conversation.currentMessages.lastOrNull {
+                                        it.role == me.rerere.ai.core.MessageRole.ASSISTANT
+                                    }
+                                    insightSheetTarget = latestAssistant to AgentInsightTab.TIMELINE
+                                },
+                                onOpenAgentInsight = { msg ->
+                                    insightSheetTarget = msg to AgentInsightTab.SUMMARY
+                                },
                             )
                         }
                     }
@@ -455,6 +475,25 @@ fun AgentPage(id: Uuid) {
                 },
             )
         }
+    }
+
+    insightSheetTarget?.let { (targetMessage, initialTab) ->
+        val isTargetRunning = isGenerating && (
+            targetMessage == null ||
+                targetMessage.id == conversation.currentMessages.lastOrNull {
+                    it.role == me.rerere.ai.core.MessageRole.ASSISTANT
+                }?.id
+            )
+        val liveElapsed = if (isTargetRunning && runningStartedAtMillis != null) {
+            ((System.currentTimeMillis() - runningStartedAtMillis!!) / 1000L).coerceAtLeast(0L)
+        } else null
+        AgentInsightSheet(
+            message = targetMessage,
+            isRunning = isTargetRunning,
+            liveElapsedSeconds = liveElapsed,
+            initialTab = initialTab,
+            onDismiss = { insightSheetTarget = null },
+        )
     }
 
     if (showConnectDialog) {
