@@ -92,7 +92,13 @@ fun AgentPage(id: Uuid) {
 
     val conversation by vm.conversation.collectAsStateWithLifecycle()
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
+    val isSyncing by vm.isSyncing.collectAsStateWithLifecycle()
+    val activeStatusText by vm.activeStatusText.collectAsStateWithLifecycle()
     val errorMessage by vm.errorMessage.collectAsStateWithLifecycle()
+    val session by vm.session.collectAsStateWithLifecycle()
+    val showConnectDialog by vm.showConnectDialog.collectAsStateWithLifecycle()
+    val isConnecting by vm.isConnecting.collectAsStateWithLifecycle()
+    val connectError by vm.connectError.collectAsStateWithLifecycle()
     val uiSettings by vm.uiSettings.collectAsStateWithLifecycle()
     val baseSettings = LocalSettings.current
     val composedSettings = remember(uiSettings, baseSettings) {
