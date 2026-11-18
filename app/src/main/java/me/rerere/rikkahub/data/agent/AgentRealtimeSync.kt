@@ -55,29 +55,44 @@ internal class AgentRealtimeSync(
                 for (jobId in obsolete) workers.remove(jobId)?.task?.cancel()
                 for ((jobId, id) in targets) {
                     if (jobId in workers) continue
-                    val changes = Channel<Unit>(Channel.CONFLATED)
-                    val task = launch {
+                    val worker = Worker()
+                    worker.task = launch {
                         var previous: RemoteThreadConversation? = null
-                        changes.trySend(Unit)
-                        for (change in changes) {
+                        worker.invalidate(refreshJob = true)
+                        for (change in worker.changes) {
                             // A transaction can publish several notifications for the same update.
                             delay(150)
-                            previous = requests.withPermit {
-                                retrySync { repository.syncRemoteJob(session, id, jobId, previous) } ?: previous
+                            worker.changes.tryReceive()
+                            val refreshJob = worker.refreshJob
+                            worker.refreshJob = false
+                            val updated = requests.withPermit {
+                                retrySync { repository.syncRemoteJob(session, id, jobId, previous, refreshJob) }
+                            }
+                            if (updated != null) {
+                                previous = updated
+                            } else {
+                                worker.refreshJob = worker.refreshJob || refreshJob
                             }
                         }
                     }
-                    workers[jobId] = Worker(task, changes)
+                    workers[jobId] = worker
                 }
             }
         }
 
         val metadataChanges = Channel<Unit>(Channel.CONFLATED)
         val dirtyRoots = mutableSetOf<String>()
-        var reconcileAll = true
-        launch {
+        var reconcileAll = false
+        val initialRefresh = launch {
+            // Keep the initial list usable if a proxy is slow to establish the event stream.
+            delay(1_000)
+            reconcileAll = true
             metadataChanges.trySend(Unit)
+        }
+        launch {
             for (change in metadataChanges) {
+                delay(100)
+                metadataChanges.tryReceive()
                 if (reconcileAll) {
                     reconcileAll = false
                     dirtyRoots.clear()
@@ -96,21 +111,31 @@ internal class AgentRealtimeSync(
         realtime.observe(session).collect { event ->
             when (event) {
                 AgentRealtimeEvent.Subscribed -> {
+                    initialRefresh.cancel()
                     reconcileAll = true
                     metadataChanges.trySend(Unit)
-                    workers.values.forEach { it.changes.trySend(Unit) }
+                    workers.values.forEach { it.invalidate(refreshJob = true) }
                 }
                 is AgentRealtimeEvent.JobChanged -> {
                     dirtyRoots += event.threadRoot
                     metadataChanges.trySend(Unit)
-                    workers[event.jobId]?.changes?.trySend(Unit)
+                    workers[event.jobId]?.invalidate(refreshJob = true)
                 }
-                is AgentRealtimeEvent.MessageChanged -> workers[event.jobId]?.changes?.trySend(Unit)
+                is AgentRealtimeEvent.MessageChanged -> workers[event.jobId]?.invalidate(refreshJob = false)
             }
         }
     }
 
-    private data class Worker(val task: Job, val changes: Channel<Unit>)
+    private class Worker {
+        val changes = Channel<Unit>(Channel.CONFLATED)
+        var refreshJob = false
+        lateinit var task: Job
+
+        fun invalidate(refreshJob: Boolean) {
+            this.refreshJob = this.refreshJob || refreshJob
+            changes.trySend(Unit)
+        }
+    }
 
     private suspend fun <T> retrySync(sync: suspend () -> T): T? {
         repeat(3) { attempt ->

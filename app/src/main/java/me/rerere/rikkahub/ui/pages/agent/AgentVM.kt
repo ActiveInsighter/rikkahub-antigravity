@@ -75,14 +75,16 @@ class AgentVM(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private val _isSyncing = MutableStateFlow(false)
-    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+    val isSyncing: StateFlow<Boolean> = combine(_isSyncing, snapshot, workflowRepository.session) { manual, cached, session ->
+        manual || (session != null && cached?.waitingForMessages == true)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val activeStatusText: StateFlow<String?> = combine(snapshot, repository.submittingIds) { cached, submitting ->
         if (conversationId in submitting) {
             "正在触发云端 Action..."
         } else {
             when (cached?.remoteStatus) {
-                "queued" -> "排队中 · 等待执行器领取"
+                "queued", "dispatching", "pending" -> "排队中 · 等待执行器领取"
                 "running" -> "执行中 · 正在同步远端步骤"
                 "failed" -> "执行失败"
                 "canceled" -> "已取消"
@@ -111,7 +113,7 @@ class AgentVM(
     private var submission: Deferred<Result<Unit>>? = null
     private val isBusy: Boolean
         get() = snapshot.value?.isActive == true || conversationId in repository.submittingIds.value ||
-            _isInitialLoading.value
+            _isInitialLoading.value || (session.value != null && snapshot.value?.waitingForMessages == true)
 
     init {
         viewModelScope.launch {

@@ -9,6 +9,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -23,13 +24,19 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.IOException
 import java.security.SecureRandom
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resumeWithException
 
 private const val PREFS_NAME = "anyworkflow_remote_prefs"
 private const val KEY_SESSION = "session_v1"
@@ -727,6 +734,51 @@ class WorkflowRepository(
         rawBody: okhttp3.RequestBody? = null,
         authPrefix: String = "",
     ): JsonElement {
+        val request = buildJsonRequest(baseUrl, path, method, query, body, token, extraHeaders, rawBody, authPrefix)
+        val response = try {
+            okHttpClient.newCall(request).execute()
+        } catch (_: IOException) {
+            throw WorkflowApiException("无法连接 AnyWorkflow，请检查网络或服务器地址", 0)
+        }
+        return readJsonResponse(response, baseUrl, token)
+    }
+
+    internal suspend fun executeJsonCancellable(
+        baseUrl: String,
+        path: String,
+        method: String,
+        query: Map<String, String> = emptyMap(),
+        body: JsonObject? = null,
+        token: String?,
+        extraHeaders: Map<String, String> = emptyMap(),
+        authPrefix: String = "",
+    ): JsonElement = suspendCancellableCoroutine { continuation ->
+        val request = buildJsonRequest(baseUrl, path, method, query, body, token, extraHeaders, null, authPrefix)
+        val call = okHttpClient.newCall(request)
+        call.timeout().timeout(30, TimeUnit.SECONDS)
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                continuation.resumeWithException(WorkflowApiException("无法连接 AnyWorkflow，请检查网络或服务器地址", 0))
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                continuation.resumeWith(runCatching { readJsonResponse(response, baseUrl, token) })
+            }
+        })
+    }
+
+    private fun buildJsonRequest(
+        baseUrl: String,
+        path: String,
+        method: String,
+        query: Map<String, String>,
+        body: JsonObject?,
+        token: String?,
+        extraHeaders: Map<String, String>,
+        rawBody: RequestBody?,
+        authPrefix: String,
+    ): Request {
         val httpUrlBuilder = (baseUrl + path).toHttpUrlOrNull()?.newBuilder()
             ?: throw WorkflowApiException("请求地址无效", 400)
         for ((k, v) in query) {
@@ -752,12 +804,10 @@ class WorkflowRepository(
             else -> requestBuilder.method(method, requestBody)
         }
 
-        val response = try {
-            okHttpClient.newCall(requestBuilder.build()).execute()
-        } catch (e: IOException) {
-            throw WorkflowApiException("无法连接 AnyWorkflow，请检查网络或服务器地址", 0)
-        }
+        return requestBuilder.build()
+    }
 
+    private fun readJsonResponse(response: Response, baseUrl: String, token: String?): JsonElement {
         response.use { res ->
             if (res.code == 204) return JsonObject(emptyMap())
             val text = res.body?.string().orEmpty()
@@ -768,7 +818,8 @@ class WorkflowRepository(
             }
 
             if (!res.isSuccessful) {
-                if (res.code == 401 && token != null && baseUrl == _session.value?.baseUrl) {
+                val active = _session.value
+                if (res.code == 401 && active != null && token == active.token && baseUrl == active.baseUrl) {
                     logout()
                 }
                 val fallback = "请求失败（${res.code}）"

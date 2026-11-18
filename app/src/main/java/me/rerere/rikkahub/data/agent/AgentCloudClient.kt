@@ -208,6 +208,7 @@ interface AgentCloudClient {
     suspend fun fetchThreadConversation(
         latestJobId: String,
         previous: RemoteThreadConversation? = null,
+        refreshJob: Boolean = true,
     ): RemoteThreadConversation
 
     suspend fun submitMessage(
@@ -267,7 +268,7 @@ class PocketBaseAgentCloudClient(
         val latestByRoot = LinkedHashMap<String, RemoteAgentThread>()
         var page = 1
         do {
-            val response = workflowRepository.executeJson(
+            val response = workflowRepository.executeJsonCancellable(
                 baseUrl = session.baseUrl,
                 path = "/api/collections/$JOBS_COLLECTION/records",
                 method = "GET",
@@ -308,9 +309,15 @@ class PocketBaseAgentCloudClient(
     override suspend fun fetchThreadConversation(
         latestJobId: String,
         previous: RemoteThreadConversation?,
+        refreshJob: Boolean,
     ): RemoteThreadConversation = withContext(Dispatchers.IO) {
         val session = workflowRepository.requireSession()
-        val (job, messageIds) = fetchJobView(session, latestJobId)
+        val previousMessage = previous?.message
+        val (job, messageIds) = if (!refreshJob && previous != null && previousMessage != null) {
+            previous.job to listOf(previousMessage.id)
+        } else {
+            fetchJobView(session, latestJobId)
+        }
         val message = messageIds.firstOrNull()?.let { fetchMessage(session, latestJobId, it) }
         val cached = previous?.takeIf { it.job.id == job.id && it.message?.id == message?.id }
         var cursor = cached?.partsCursor ?: 0
@@ -369,7 +376,7 @@ class PocketBaseAgentCloudClient(
             title = title,
         )
 
-        val created = workflowRepository.executeJson(
+        val created = workflowRepository.executeJsonCancellable(
             baseUrl = session.baseUrl,
             path = "$GEMINI_API/jobs",
             method = "POST",
@@ -391,7 +398,7 @@ class PocketBaseAgentCloudClient(
 
     override suspend fun cancelJob(jobId: String) = withContext(Dispatchers.IO) {
         val session = workflowRepository.requireSession()
-        workflowRepository.executeJson(
+        workflowRepository.executeJsonCancellable(
             baseUrl = session.baseUrl,
             path = "$GEMINI_API/jobs/$jobId/cancel",
             method = "POST",
@@ -416,7 +423,7 @@ class PocketBaseAgentCloudClient(
                 if (archived != null) put("archived", archived)
                 if (folderId != null) put("folderId", folderId)
             }
-            workflowRepository.executeJson(
+            workflowRepository.executeJsonCancellable(
                 baseUrl = session.baseUrl,
                 path = "$GEMINI_API/jobs/$jobId/metadata",
                 method = "PATCH",
@@ -429,7 +436,7 @@ class PocketBaseAgentCloudClient(
     override suspend fun deleteThread(jobId: String) {
         withContext(Dispatchers.IO) {
             val session = workflowRepository.requireSession()
-            workflowRepository.executeJson(
+            workflowRepository.executeJsonCancellable(
                 baseUrl = session.baseUrl,
                 path = "$GEMINI_API/threads/$jobId",
                 method = "DELETE",
@@ -441,7 +448,7 @@ class PocketBaseAgentCloudClient(
     override suspend fun listRemoteFolders(): List<RemoteAgentFolder> = withContext(Dispatchers.IO) {
         val session = workflowRepository.session.value ?: return@withContext emptyList()
         runCatching {
-            val res = workflowRepository.executeJson(
+            val res = workflowRepository.executeJsonCancellable(
                 baseUrl = session.baseUrl,
                 path = "/api/collections/$FOLDERS_COLLECTION/records?perPage=200&sort=sort_order,created",
                 method = "GET",
@@ -472,7 +479,7 @@ class PocketBaseAgentCloudClient(
                 put("sort_order", folder.sortOrder)
             }
             val obj = if (folder.id.isNotBlank()) {
-                workflowRepository.executeJson(
+                workflowRepository.executeJsonCancellable(
                     baseUrl = session.baseUrl,
                     path = "/api/collections/$FOLDERS_COLLECTION/records/${folder.id}",
                     method = "PATCH",
@@ -480,7 +487,7 @@ class PocketBaseAgentCloudClient(
                     token = session.token,
                 ).jsonObject
             } else {
-                workflowRepository.executeJson(
+                workflowRepository.executeJsonCancellable(
                     baseUrl = session.baseUrl,
                     path = "/api/collections/$FOLDERS_COLLECTION/records",
                     method = "POST",
@@ -505,7 +512,7 @@ class PocketBaseAgentCloudClient(
             val session = workflowRepository.session.value ?: return@withContext
             if (remoteId.isBlank()) return@withContext
             runCatching {
-                workflowRepository.executeJson(
+                workflowRepository.executeJsonCancellable(
                     baseUrl = session.baseUrl,
                     path = "/api/collections/$FOLDERS_COLLECTION/records/$remoteId",
                     method = "DELETE",
@@ -518,7 +525,7 @@ class PocketBaseAgentCloudClient(
     override suspend fun listRemoteUsageRecords(): List<RemoteAgentUsageRecord> = withContext(Dispatchers.IO) {
         val session = workflowRepository.session.value ?: return@withContext emptyList()
         runCatching {
-            val res = workflowRepository.executeJson(
+            val res = workflowRepository.executeJsonCancellable(
                 baseUrl = session.baseUrl,
                 path = "/api/collections/$USAGE_COLLECTION/records?perPage=200&sort=-created_at_ms",
                 method = "GET",
@@ -568,7 +575,7 @@ class PocketBaseAgentCloudClient(
                 put("source", record.source)
                 put("created_at_ms", record.createdAt)
             }
-            val obj = workflowRepository.executeJson(
+            val obj = workflowRepository.executeJsonCancellable(
                 baseUrl = session.baseUrl,
                 path = "/api/collections/$USAGE_COLLECTION/records",
                 method = "POST",
@@ -830,9 +837,9 @@ class PocketBaseAgentCloudClient(
         return nodes
     }
 
-    private fun fetchConfigBestEffort(session: WorkflowSession): RemoteAgentConfig {
+    private suspend fun fetchConfigBestEffort(session: WorkflowSession): RemoteAgentConfig {
         return runCatching {
-            val root = workflowRepository.executeJson(
+            val root = workflowRepository.executeJsonCancellable(
                 baseUrl = session.baseUrl,
                 path = "$GEMINI_API/config",
                 method = "GET",
@@ -851,8 +858,8 @@ class PocketBaseAgentCloudClient(
         }.getOrDefault(RemoteAgentConfig())
     }
 
-    private fun fetchJobView(session: WorkflowSession, jobId: String): Pair<RemoteGeminiJob, List<String>> {
-        val root = workflowRepository.executeJson(
+    private suspend fun fetchJobView(session: WorkflowSession, jobId: String): Pair<RemoteGeminiJob, List<String>> {
+        val root = workflowRepository.executeJsonCancellable(
             baseUrl = session.baseUrl,
             path = "$GEMINI_API/jobs/$jobId",
             method = "GET",
@@ -866,8 +873,8 @@ class PocketBaseAgentCloudClient(
         return job to messageIds
     }
 
-    private fun fetchMessage(session: WorkflowSession, jobId: String, messageId: String): RemoteGeminiMessage {
-        val obj = workflowRepository.executeJson(
+    private suspend fun fetchMessage(session: WorkflowSession, jobId: String, messageId: String): RemoteGeminiMessage {
+        val obj = workflowRepository.executeJsonCancellable(
             baseUrl = session.baseUrl,
             path = "$GEMINI_API/jobs/$jobId/messages/$messageId",
             method = "GET",
@@ -876,7 +883,7 @@ class PocketBaseAgentCloudClient(
         return parseMessage(obj)
     }
 
-    private fun drainParts(
+    private suspend fun drainParts(
         session: WorkflowSession,
         jobId: String,
         messageId: String,
@@ -887,7 +894,7 @@ class PocketBaseAgentCloudClient(
         var guard = 0
         while (guard < 50) {
             guard++
-            val page = workflowRepository.executeJson(
+            val page = workflowRepository.executeJsonCancellable(
                 baseUrl = session.baseUrl,
                 path = "$GEMINI_API/jobs/$jobId/messages/$messageId/parts",
                 method = "GET",
@@ -906,14 +913,14 @@ class PocketBaseAgentCloudClient(
         return collected.sortedBy { it.sequence } to cursor
     }
 
-    private fun fetchAncestors(session: WorkflowSession, job: RemoteGeminiJob): List<RemoteGeminiMessage> {
+    private suspend fun fetchAncestors(session: WorkflowSession, job: RemoteGeminiJob): List<RemoteGeminiMessage> {
         val ancestors = mutableListOf<RemoteGeminiMessage>()
         val visited = HashSet<String>()
         var parentId = job.parentMessage
         val limit = (job.history.size / 2).coerceAtMost(20)
         while (parentId.isNotBlank() && ancestors.size < limit && visited.add(parentId)) {
             val msgObj = runCatching {
-                workflowRepository.executeJson(
+                workflowRepository.executeJsonCancellable(
                     baseUrl = session.baseUrl,
                     path = "/api/collections/$MESSAGES_COLLECTION/records/$parentId",
                     method = "GET",
@@ -923,7 +930,7 @@ class PocketBaseAgentCloudClient(
             val msg = parseMessage(msgObj)
             ancestors += msg
             val parentJobObj = runCatching {
-                workflowRepository.executeJson(
+                workflowRepository.executeJsonCancellable(
                     baseUrl = session.baseUrl,
                     path = "/api/collections/$JOBS_COLLECTION/records/${msg.job}",
                     method = "GET",
@@ -936,9 +943,9 @@ class PocketBaseAgentCloudClient(
         return ancestors
     }
 
-    private fun wakeConverterBestEffort(session: WorkflowSession) {
+    private suspend fun wakeConverterBestEffort(session: WorkflowSession) {
         runCatching {
-            workflowRepository.executeJson(
+            workflowRepository.executeJsonCancellable(
                 baseUrl = DEFAULT_REMOTE_API_URL,
                 path = "/api/file-conversion/wake",
                 method = "POST",
@@ -1114,7 +1121,10 @@ class PocketBaseAgentCloudClient(
             }
         }
 
-        fun isActiveStatus(status: String): Boolean = status == "queued" || status == "running"
+        fun isActiveStatus(status: String): Boolean = when (status) {
+            "queued", "dispatching", "pending", "running" -> true
+            else -> false
+        }
 
         fun stableUuid(seed: String): Uuid {
             val jUuid = java.util.UUID.nameUUIDFromBytes(seed.toByteArray(Charsets.UTF_8))

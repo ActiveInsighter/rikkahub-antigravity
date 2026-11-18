@@ -8,13 +8,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import me.rerere.rikkahub.AppScope
-import kotlinx.coroutines.flow.map
 import me.rerere.ai.ui.UIMessage
+import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import me.rerere.rikkahub.data.model.Conversation
@@ -27,10 +27,10 @@ import kotlin.uuid.Uuid
 
 data class AgentConversationSnapshot(
     val conversation: Conversation,
-    val remoteJobId: String? = null,
     val remoteStatus: String? = null,
     val lastRemoteMessageId: String? = null,
     val isActive: Boolean = false,
+    val waitingForMessages: Boolean = false,
 )
 
 /**
@@ -123,10 +123,11 @@ class AgentRepository(
                 createAt = Instant.ofEpochMilli(entity.createAt),
                 updateAt = Instant.ofEpochMilli(entity.updateAt),
             ),
-            remoteJobId = entity.remoteJobId,
             remoteStatus = entity.remoteStatus,
             lastRemoteMessageId = entity.lastRemoteMessageId,
             isActive = entity.remoteStatus?.let { PocketBaseAgentCloudClient.isActiveStatus(it) } == true,
+            waitingForMessages = entity.remoteJobId != null && entity.lastRemoteMessageId == null &&
+                (entity.lastSyncedAt == 0L || nodes.isEmpty()),
         )
     }
 
@@ -136,7 +137,7 @@ class AgentRepository(
         syncThreads(session)
     }.onFailure { if (it is CancellationException) throw it }
 
-    internal suspend fun syncThreads(session: WorkflowSession, root: String? = null) = threadSyncMutex.withLock {
+    internal suspend fun syncThreads(session: WorkflowSession, root: String? = null): Unit = threadSyncMutex.withLock {
         if (workflowRepository.session.value != session) return@withLock
         val remoteThreads = cloudClient.listRemoteThreads(root)
         database.withTransaction {
@@ -162,7 +163,7 @@ class AgentRepository(
                     // Only the message sync can mark a tracked job terminal, after saving its final parts.
                     remoteStatus = if (sameJob) existing?.remoteStatus ?: thread.status else thread.status,
                     lastRemoteMessageId = existing?.lastRemoteMessageId?.takeIf { sameJob },
-                    lastSyncedAt = existing?.lastSyncedAt ?: 0L,
+                    lastSyncedAt = existing?.lastSyncedAt?.takeIf { sameJob } ?: 0L,
                 )
                 if (updated != existing) conversationDao.upsert(updated)
             }
@@ -193,9 +194,12 @@ class AgentRepository(
         id: Uuid,
         jobId: String,
         previous: RemoteThreadConversation?,
+        refreshJob: Boolean = true,
     ): RemoteThreadConversation? = conversationLock(id).withLock {
-        if (workflowRepository.session.value != session || id in submittingIds.value) return@withLock null
-        val remote = cloudClient.fetchThreadConversation(jobId, previous)
+        if (workflowRepository.session.value != session || id in submittingIds.value ||
+            conversationDao.getById(id.toString())?.remoteJobId != jobId
+        ) return@withLock null
+        val remote = cloudClient.fetchThreadConversation(jobId, previous, refreshJob)
         val usage = database.withTransaction {
             val existing = conversationDao.getById(id.toString()) ?: return@withTransaction null
             if (existing.remoteJobId != jobId || workflowRepository.session.value != session || id in submittingIds.value) {
@@ -223,7 +227,9 @@ class AgentRepository(
             } else {
                 null
             }
-            if (updated != existing) conversationDao.upsert(updated.copy(lastSyncedAt = System.currentTimeMillis()))
+            if (updated != existing || existing.lastSyncedAt == 0L) {
+                conversationDao.upsert(updated.copy(lastSyncedAt = System.currentTimeMillis()))
+            }
             completion
         }
         if (usage != null) {
@@ -292,7 +298,7 @@ class AgentRepository(
                 remoteThreadRoot = remoteThreadRoot ?: existing?.remoteThreadRoot,
                 remoteStatus = remoteStatus ?: existing?.remoteStatus,
                 lastRemoteMessageId = existing?.lastRemoteMessageId?.takeIf { remoteJobId == null || remoteJobId == existing.remoteJobId },
-                lastSyncedAt = existing?.lastSyncedAt ?: 0L,
+                lastSyncedAt = existing?.lastSyncedAt?.takeIf { remoteJobId == null || remoteJobId == existing.remoteJobId } ?: 0L,
             )
             if (entity != existing) conversationDao.upsert(entity)
             saveNodesForConversation(convId, conversation.messageNodes)
