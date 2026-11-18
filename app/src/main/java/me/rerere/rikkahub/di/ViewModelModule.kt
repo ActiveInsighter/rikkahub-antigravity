@@ -131,6 +131,7 @@ val viewModelModule = module {
     }
     viewModel {
         me.rerere.rikkahub.ui.pages.agent.AgentDrawerVM(
+            context = get(),
             repository = get(),
             settingsStore = get(),
         )

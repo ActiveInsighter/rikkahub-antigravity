@@ -147,6 +147,9 @@ fun ChatInput(
     onStartVoiceMode: (() -> Unit)? = null,
     voiceState: VoiceSessionState = VoiceSessionState(),
     onStopVoiceMode: () -> Unit = {},
+    placeholderText: String? = null,
+    alwaysShowReasoningButton: Boolean = false,
+    showAsrButton: Boolean = true,
 ) {
     val toaster = LocalToaster.current
     val containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -276,6 +279,7 @@ fun ChatInput(
                         state = state,
                         assistant = assistant,
                         completionProviders = completionProviders,
+                        placeholderText = placeholderText,
                         onSendMessage = { sendMessage() },
                     )
 
@@ -305,7 +309,7 @@ fun ChatInput(
                                 )
 
                                 // Reasoning
-                                if (chatModel?.abilities?.contains(ModelAbility.REASONING) == true) {
+                                if (alwaysShowReasoningButton || chatModel?.abilities?.contains(ModelAbility.REASONING) == true) {
                                     ReasoningButton(
                                         reasoningLevel = assistant.reasoningLevel,
                                         onUpdateReasoningLevel = {
@@ -333,7 +337,7 @@ fun ChatInput(
                             )
                         }
 
-                        if (!voiceState.isActive && (asrState.isAvailable || asrState.isRecording)) {
+                        if (showAsrButton && !voiceState.isActive && (asrState.isAvailable || asrState.isRecording)) {
                             AsrButton(
                                 state = asrState,
                                 onClick = {
@@ -481,6 +485,7 @@ private fun TextInputRow(
     state: ChatInputState,
     assistant: Assistant,
     completionProviders: List<ChatCompletionProvider>,
+    placeholderText: String? = null,
     onSendMessage: () -> Unit,
 ) {
     val settings = LocalSettings.current
@@ -622,7 +627,7 @@ private fun TextInputRow(
                 },
             shape = MaterialTheme.shapes.largeIncreased,
             placeholder = {
-                Text(stringResource(R.string.chat_input_placeholder))
+                Text(placeholderText ?: stringResource(R.string.chat_input_placeholder))
             },
             lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 5),
             keyboardOptions = KeyboardOptions(
@@ -664,7 +669,7 @@ private fun TextInputRow(
         if (isFullScreen) {
             FullScreenEditor(
                 textState = state.textContent,
-                placeholder = stringResource(R.string.chat_input_placeholder),
+                placeholder = placeholderText ?: stringResource(R.string.chat_input_placeholder),
             ) {
                 isFullScreen = false
             }

@@ -33,6 +33,15 @@ interface AgentConversationDao {
     @Query("UPDATE agent_conversation SET is_pinned = :isPinned WHERE id = :id")
     suspend fun updatePinned(id: String, isPinned: Boolean)
 
+    @Query("UPDATE agent_conversation SET folder_id = :folderId, update_at = :updateAt WHERE id = :id")
+    suspend fun updateFolderId(id: String, folderId: String?, updateAt: Long)
+
+    @Query("UPDATE agent_conversation SET folder_id = NULL WHERE folder_id = :folderId")
+    suspend fun clearFolderId(folderId: String)
+
+    @Query("UPDATE agent_conversation SET assistant_id = :assistantId WHERE id = :id")
+    suspend fun updateAssistantId(id: String, assistantId: String?)
+
     @Query("DELETE FROM agent_conversation WHERE id = :id")
     suspend fun deleteById(id: String)
 
@@ -59,3 +68,97 @@ interface AgentMessageNodeDao {
         }
     }
 }
+
+@Dao
+interface AgentAssistantDao {
+    @Query("SELECT * FROM agent_assistant ORDER BY is_default DESC, created_at ASC")
+    fun getAllFlow(): Flow<List<AgentAssistantEntity>>
+
+    @Query("SELECT * FROM agent_assistant ORDER BY is_default DESC, created_at ASC")
+    suspend fun getAll(): List<AgentAssistantEntity>
+
+    @Query("SELECT * FROM agent_assistant WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): AgentAssistantEntity?
+
+    @Query("SELECT * FROM agent_assistant WHERE is_default = 1 LIMIT 1")
+    suspend fun getDefault(): AgentAssistantEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: AgentAssistantEntity)
+
+    @Query("UPDATE agent_assistant SET is_default = 0")
+    suspend fun clearDefault()
+
+    @Query("DELETE FROM agent_assistant WHERE id = :id")
+    suspend fun deleteById(id: String)
+}
+
+@Dao
+interface AgentFolderDao {
+    @Query("SELECT * FROM agent_folder WHERE sync_status != 'DELETED' ORDER BY sort_order ASC, created_at ASC")
+    fun getAllFlow(): Flow<List<AgentFolderEntity>>
+
+    @Query("SELECT * FROM agent_folder WHERE sync_status != 'DELETED' ORDER BY sort_order ASC, created_at ASC")
+    suspend fun getAll(): List<AgentFolderEntity>
+
+    @Query("SELECT * FROM agent_folder WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): AgentFolderEntity?
+
+    @Query("SELECT * FROM agent_folder WHERE remote_id = :remoteId LIMIT 1")
+    suspend fun getByRemoteId(remoteId: String): AgentFolderEntity?
+
+    @Query("SELECT * FROM agent_folder WHERE sync_status != 'SYNCED'")
+    suspend fun getPendingSync(): List<AgentFolderEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(entity: AgentFolderEntity)
+
+    @Query("DELETE FROM agent_folder WHERE id = :id")
+    suspend fun deleteById(id: String)
+}
+
+@Dao
+interface AgentUsageRecordDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(record: AgentUsageRecordEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(records: List<AgentUsageRecordEntity>)
+
+    @Query("SELECT * FROM agent_usage_record WHERE sync_status = 'PENDING' ORDER BY created_at ASC")
+    suspend fun getPendingSync(): List<AgentUsageRecordEntity>
+
+    @Query("SELECT * FROM agent_usage_record WHERE remote_id = :remoteId LIMIT 1")
+    suspend fun getByRemoteId(remoteId: String): AgentUsageRecordEntity?
+
+    @Query(
+        "SELECT COALESCE(SUM(prompt_tokens), 0) AS promptTokens, " +
+            "COALESCE(SUM(completion_tokens), 0) AS completionTokens, " +
+            "COALESCE(SUM(cached_tokens), 0) AS cachedTokens, " +
+            "COALESCE(SUM(reasoning_tokens), 0) AS reasoningTokens, " +
+            "COALESCE(SUM(total_tokens), 0) AS totalTokens " +
+            "FROM agent_usage_record WHERE created_at >= :since"
+    )
+    suspend fun getTotals(since: Long = 0L): AgentUsageTotals
+
+    @Query(
+        "SELECT COALESCE(SUM(prompt_tokens), 0) AS promptTokens, " +
+            "COALESCE(SUM(completion_tokens), 0) AS completionTokens, " +
+            "COALESCE(SUM(cached_tokens), 0) AS cachedTokens, " +
+            "COALESCE(SUM(reasoning_tokens), 0) AS reasoningTokens, " +
+            "COALESCE(SUM(total_tokens), 0) AS totalTokens " +
+            "FROM agent_usage_record WHERE created_at >= :since"
+    )
+    fun observeTotals(since: Long = 0L): Flow<AgentUsageTotals>
+
+    @Query("SELECT * FROM agent_usage_record WHERE created_at >= :since ORDER BY created_at DESC LIMIT :limit")
+    fun observeRecent(since: Long = 0L, limit: Int = 100): Flow<List<AgentUsageRecordEntity>>
+}
+
+data class AgentUsageTotals(
+    val promptTokens: Long = 0L,
+    val completionTokens: Long = 0L,
+    val cachedTokens: Long = 0L,
+    val reasoningTokens: Long = 0L,
+    val totalTokens: Long = 0L,
+)

@@ -1,5 +1,11 @@
 package me.rerere.rikkahub.ui.pages.workflow
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -228,7 +234,17 @@ fun WorkflowPage(
                 .consumeWindowInsets(innerPadding)
             val bottomPad = 0.dp
 
-            when (activeTab) {
+            AnimatedContent(
+                targetState = activeTab,
+                transitionSpec = {
+                    val forward = targetState.ordinal > initialState.ordinal
+                    val enter = fadeIn() + slideInHorizontally { width -> if (forward) width / 8 else -width / 8 }
+                    val exit = fadeOut() + slideOutHorizontally { width -> if (forward) -width / 8 else width / 8 }
+                    enter togetherWith exit
+                },
+                label = "workflow_tab_transition",
+            ) { tab ->
+            when (tab) {
                 WorkflowNavTab.RUNS -> WorkflowRunsTab(
                     modifier = contentModifier,
                     bottomPadding = bottomPad,
@@ -354,6 +370,7 @@ fun WorkflowPage(
                     onClearError = converterVm::clearError,
                     onClearNotice = converterVm::clearNotice,
                 )
+            }
             }
         }
     }

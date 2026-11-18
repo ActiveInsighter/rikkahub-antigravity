@@ -335,4 +335,16 @@ val dataSourceModule = module {
     single {
         get<me.rerere.rikkahub.data.agent.AgentDatabase>().messageNodeDao()
     }
+
+    single {
+        get<me.rerere.rikkahub.data.agent.AgentDatabase>().assistantDao()
+    }
+
+    single {
+        get<me.rerere.rikkahub.data.agent.AgentDatabase>().folderDao()
+    }
+
+    single {
+        get<me.rerere.rikkahub.data.agent.AgentDatabase>().usageRecordDao()
+    }
 }

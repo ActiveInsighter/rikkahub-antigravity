@@ -27,6 +27,9 @@ data class AgentConversationSnapshot(
 class AgentRepository(
     private val conversationDao: AgentConversationDao,
     private val messageNodeDao: AgentMessageNodeDao,
+    private val assistantDao: AgentAssistantDao,
+    private val folderDao: AgentFolderDao,
+    private val usageRecordDao: AgentUsageRecordDao,
     private val cloudClient: AgentCloudClient,
 ) {
     fun observeConversations(sortOrder: ConversationSortOrder): Flow<List<Conversation>> {
@@ -36,9 +39,13 @@ class AgentRepository(
         }
         return source.map { list ->
             list.map { entity ->
+                val folderUuid = entity.folderId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+                val assistantUuid = entity.assistantId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+                    ?: DEFAULT_ASSISTANT_ID
                 Conversation(
                     id = Uuid.parse(entity.id),
-                    assistantId = DEFAULT_ASSISTANT_ID,
+                    assistantId = assistantUuid,
+                    folderId = folderUuid,
                     title = entity.title,
                     messageNodes = emptyList(),
                     isPinned = entity.isPinned,
@@ -46,6 +53,15 @@ class AgentRepository(
                     updateAt = Instant.ofEpochMilli(entity.updateAt),
                 )
             }
+        }
+    }
+
+    fun observeActiveConversationIds(): Flow<Set<Uuid>> {
+        return conversationDao.getAllSortedByUpdateFlow().map { list ->
+            list.asSequence()
+                .filter { it.remoteStatus != null && PocketBaseAgentCloudClient.isActiveStatus(it.remoteStatus) }
+                .mapNotNull { runCatching { Uuid.parse(it.id) }.getOrNull() }
+                .toSet()
         }
     }
 
@@ -107,10 +123,12 @@ class AgentRepository(
             conversationDao.upsert(
                 AgentConversationEntity(
                     id = localId,
-                    title = thread.title.ifBlank { existing?.title ?: "Antigravity Agent" },
+                    title = thread.title.ifBlank { existing?.title ?: "Agent" },
                     createAt = createdMs,
                     updateAt = updatedMs,
                     isPinned = thread.pinned,
+                    folderId = thread.folderId?.takeIf { it.isNotBlank() } ?: existing?.folderId,
+                    assistantId = existing?.assistantId,
                     remoteJobId = thread.jobId,
                     remoteThreadRoot = thread.threadRoot,
                     remoteStatus = thread.status,
@@ -119,6 +137,7 @@ class AgentRepository(
                 )
             )
         }
+        syncFoldersWithRemote()
 
         // Remote database is authoritative: remove synced local threads no longer present remotely.
         val localAll = conversationDao.getAll()
@@ -195,6 +214,8 @@ class AgentRepository(
             createAt = conversation.createAt.toEpochMilli(),
             updateAt = conversation.updateAt.toEpochMilli(),
             isPinned = conversation.isPinned,
+            folderId = conversation.folderId?.toString() ?: existing?.folderId,
+            assistantId = conversation.assistantId.toString(),
             remoteJobId = remoteJobId ?: existing?.remoteJobId,
             remoteThreadRoot = remoteThreadRoot ?: existing?.remoteThreadRoot,
             remoteStatus = remoteStatus ?: existing?.remoteStatus,
@@ -240,6 +261,18 @@ class AgentRepository(
         conversationDao.updatePinned(id = id.toString(), isPinned = pinned)
     }
 
+    suspend fun moveConversationToFolder(conversationId: Uuid, folderId: Uuid?) {
+        val convIdStr = conversationId.toString()
+        val folderIdStr = folderId?.toString()
+        val now = System.currentTimeMillis()
+        conversationDao.updateFolderId(convIdStr, folderIdStr, now)
+        val existing = conversationDao.getById(convIdStr)
+        val remoteJobId = existing?.remoteJobId
+        if (!remoteJobId.isNullOrBlank() && cloudClient.hasSession()) {
+            runCatching { cloudClient.updateThreadMetadata(remoteJobId, folderId = folderIdStr ?: "") }
+        }
+    }
+
     suspend fun deleteConversation(id: Uuid) {
         val existing = conversationDao.getById(id.toString())
         val remoteJobId = existing?.remoteJobId
@@ -251,5 +284,287 @@ class AgentRepository(
 
     suspend fun deleteAllConversations() {
         conversationDao.deleteAll()
+    }
+
+    // ---- Local-only Agent Assistants ----
+
+    fun observeAssistants(): Flow<List<AgentAssistantEntity>> = assistantDao.getAllFlow()
+
+    suspend fun ensureDefaultAssistant(): AgentAssistantEntity {
+        val existing = assistantDao.getDefault() ?: assistantDao.getAll().firstOrNull()
+        if (existing != null) return existing
+        val now = System.currentTimeMillis()
+        val defaultAssistant = AgentAssistantEntity(
+            id = DEFAULT_ASSISTANT_ID.toString(),
+            name = "Agent",
+            systemPrompt = "",
+            reasoningLevel = "OFF",
+            isDefault = true,
+            createdAt = now,
+            updatedAt = now,
+        )
+        assistantDao.upsert(defaultAssistant)
+        return defaultAssistant
+    }
+
+    suspend fun upsertAssistant(assistant: AgentAssistantEntity) {
+        if (assistant.isDefault) {
+            assistantDao.clearDefault()
+        }
+        assistantDao.upsert(assistant.copy(updatedAt = System.currentTimeMillis()))
+    }
+
+    suspend fun deleteAssistant(id: String) {
+        assistantDao.deleteById(id)
+    }
+
+    // ---- Local + Cloud Agent Folders ----
+
+    fun observeFolders(): Flow<List<me.rerere.rikkahub.data.model.Folder>> {
+        return folderDao.getAllFlow().map { list ->
+            list.mapNotNull { entity ->
+                val uuid = runCatching { Uuid.parse(entity.id) }.getOrNull() ?: return@mapNotNull null
+                me.rerere.rikkahub.data.model.Folder(
+                    id = uuid,
+                    assistantId = DEFAULT_ASSISTANT_ID,
+                    name = entity.name,
+                    order = entity.sortOrder,
+                    createAt = Instant.ofEpochMilli(entity.createdAt),
+                )
+            }
+        }
+    }
+
+    suspend fun createFolder(name: String): me.rerere.rikkahub.data.model.Folder {
+        val trimmed = name.trim()
+        val id = Uuid.random()
+        val now = System.currentTimeMillis()
+        val existing = folderDao.getAll()
+        val nextOrder = (existing.maxOfOrNull { it.sortOrder } ?: -1) + 1
+        var entity = AgentFolderEntity(
+            id = id.toString(),
+            name = trimmed,
+            sortOrder = nextOrder,
+            syncStatus = SyncStatus.PENDING,
+            createdAt = now,
+            updatedAt = now,
+        )
+        folderDao.upsert(entity)
+        if (cloudClient.hasSession()) {
+            val remote = cloudClient.upsertRemoteFolder(
+                RemoteAgentFolder(
+                    id = "",
+                    clientId = entity.id,
+                    name = entity.name,
+                    sortOrder = entity.sortOrder,
+                )
+            )
+            if (remote != null) {
+                entity = entity.copy(remoteId = remote.id, syncStatus = SyncStatus.SYNCED)
+                folderDao.upsert(entity)
+            }
+        }
+        return me.rerere.rikkahub.data.model.Folder(
+            id = id,
+            assistantId = DEFAULT_ASSISTANT_ID,
+            name = trimmed,
+            order = nextOrder,
+            createAt = Instant.ofEpochMilli(now),
+        )
+    }
+
+    suspend fun renameFolder(id: Uuid, name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        val existing = folderDao.getById(id.toString()) ?: return
+        var updated = existing.copy(
+            name = trimmed,
+            syncStatus = SyncStatus.PENDING,
+            updatedAt = System.currentTimeMillis(),
+        )
+        folderDao.upsert(updated)
+        if (cloudClient.hasSession()) {
+            val remote = cloudClient.upsertRemoteFolder(
+                RemoteAgentFolder(
+                    id = updated.remoteId.orEmpty(),
+                    clientId = updated.id,
+                    name = updated.name,
+                    sortOrder = updated.sortOrder,
+                )
+            )
+            if (remote != null) {
+                updated = updated.copy(remoteId = remote.id, syncStatus = SyncStatus.SYNCED)
+                folderDao.upsert(updated)
+            }
+        }
+    }
+
+    suspend fun deleteFolder(id: Uuid) {
+        val idStr = id.toString()
+        val existing = folderDao.getById(idStr)
+        conversationDao.clearFolderId(idStr)
+        if (existing?.remoteId != null && cloudClient.hasSession()) {
+            cloudClient.deleteRemoteFolder(existing.remoteId)
+        }
+        folderDao.deleteById(idStr)
+    }
+
+    suspend fun syncFoldersWithRemote(): Result<Unit> = runCatching {
+        if (!cloudClient.hasSession()) return@runCatching
+        val pending = folderDao.getPendingSync()
+        for (item in pending) {
+            if (item.syncStatus == SyncStatus.DELETED) {
+                item.remoteId?.let { cloudClient.deleteRemoteFolder(it) }
+                folderDao.deleteById(item.id)
+            } else {
+                val remote = cloudClient.upsertRemoteFolder(
+                    RemoteAgentFolder(
+                        id = item.remoteId.orEmpty(),
+                        clientId = item.id,
+                        name = item.name,
+                        sortOrder = item.sortOrder,
+                    )
+                )
+                if (remote != null) {
+                    folderDao.upsert(item.copy(remoteId = remote.id, syncStatus = SyncStatus.SYNCED))
+                }
+            }
+        }
+        val remoteFolders = cloudClient.listRemoteFolders()
+        val now = System.currentTimeMillis()
+        for (remote in remoteFolders) {
+            val local = folderDao.getByRemoteId(remote.id) ?: folderDao.getById(remote.clientId)
+            val localId = local?.id ?: remote.clientId
+            folderDao.upsert(
+                AgentFolderEntity(
+                    id = localId,
+                    name = remote.name,
+                    sortOrder = remote.sortOrder,
+                    remoteId = remote.id,
+                    syncStatus = SyncStatus.SYNCED,
+                    createdAt = local?.createdAt ?: now,
+                    updatedAt = now,
+                )
+            )
+        }
+    }
+
+    // ---- Local + Cloud Agent Usage Records ----
+
+    fun observeUsageTotals(since: Long = 0L): Flow<AgentUsageTotals> = usageRecordDao.observeTotals(since)
+
+    fun observeRecentUsage(since: Long = 0L, limit: Int = 100): Flow<List<AgentUsageRecordEntity>> =
+        usageRecordDao.observeRecent(since, limit)
+
+    suspend fun recordUsage(
+        conversationId: String?,
+        assistantId: String?,
+        modelId: String?,
+        modelName: String?,
+        providerId: String?,
+        promptTokens: Long,
+        completionTokens: Long,
+        cachedTokens: Long = 0L,
+        reasoningTokens: Long = 0L,
+        durationMs: Long = 0L,
+    ) {
+        val now = System.currentTimeMillis()
+        val total = promptTokens + completionTokens
+        var entity = AgentUsageRecordEntity(
+            id = Uuid.random().toString(),
+            conversationId = conversationId,
+            assistantId = assistantId,
+            modelId = modelId,
+            modelName = modelName,
+            providerId = providerId,
+            promptTokens = promptTokens,
+            completionTokens = completionTokens,
+            cachedTokens = cachedTokens,
+            reasoningTokens = reasoningTokens,
+            totalTokens = total,
+            durationMs = durationMs,
+            source = "agent",
+            syncStatus = SyncStatus.PENDING,
+            createdAt = now,
+        )
+        usageRecordDao.upsert(entity)
+        if (cloudClient.hasSession()) {
+            val remote = cloudClient.uploadUsageRecord(
+                RemoteAgentUsageRecord(
+                    clientId = entity.id,
+                    conversationId = entity.conversationId,
+                    assistantId = entity.assistantId,
+                    modelId = entity.modelId,
+                    modelName = entity.modelName,
+                    providerId = entity.providerId,
+                    promptTokens = entity.promptTokens,
+                    completionTokens = entity.completionTokens,
+                    cachedTokens = entity.cachedTokens,
+                    reasoningTokens = entity.reasoningTokens,
+                    totalTokens = entity.totalTokens,
+                    durationMs = entity.durationMs,
+                    source = entity.source,
+                    createdAt = entity.createdAt,
+                )
+            )
+            if (remote != null) {
+                entity = entity.copy(remoteId = remote.id, syncStatus = SyncStatus.SYNCED)
+                usageRecordDao.upsert(entity)
+            }
+        }
+    }
+
+    suspend fun syncUsageWithRemote(): Result<Unit> = runCatching {
+        if (!cloudClient.hasSession()) return@runCatching
+        val pending = usageRecordDao.getPendingSync()
+        for (item in pending) {
+            val remote = cloudClient.uploadUsageRecord(
+                RemoteAgentUsageRecord(
+                    clientId = item.id,
+                    conversationId = item.conversationId,
+                    assistantId = item.assistantId,
+                    modelId = item.modelId,
+                    modelName = item.modelName,
+                    providerId = item.providerId,
+                    promptTokens = item.promptTokens,
+                    completionTokens = item.completionTokens,
+                    cachedTokens = item.cachedTokens,
+                    reasoningTokens = item.reasoningTokens,
+                    totalTokens = item.totalTokens,
+                    durationMs = item.durationMs,
+                    source = item.source,
+                    createdAt = item.createdAt,
+                )
+            )
+            if (remote != null) {
+                usageRecordDao.upsert(item.copy(remoteId = remote.id, syncStatus = SyncStatus.SYNCED))
+            }
+        }
+        val remoteRecords = cloudClient.listRemoteUsageRecords()
+        for (remote in remoteRecords) {
+            val existing = usageRecordDao.getByRemoteId(remote.id)
+            if (existing == null) {
+                usageRecordDao.upsert(
+                    AgentUsageRecordEntity(
+                        id = remote.clientId.ifBlank { remote.id },
+                        conversationId = remote.conversationId,
+                        assistantId = remote.assistantId,
+                        modelId = remote.modelId,
+                        modelName = remote.modelName,
+                        providerId = remote.providerId,
+                        promptTokens = remote.promptTokens,
+                        completionTokens = remote.completionTokens,
+                        cachedTokens = remote.cachedTokens,
+                        reasoningTokens = remote.reasoningTokens,
+                        totalTokens = remote.totalTokens,
+                        durationMs = remote.durationMs,
+                        source = remote.source,
+                        remoteId = remote.id,
+                        syncStatus = SyncStatus.SYNCED,
+                        createdAt = remote.createdAt.takeIf { it > 0L } ?: System.currentTimeMillis(),
+                    )
+                )
+            }
+        }
     }
 }

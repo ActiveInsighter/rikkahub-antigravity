@@ -861,7 +861,7 @@ private fun MemoryDreamingEntry(onClick: () -> Unit) {
 }
 
 @Composable
-private fun DrawerAction(
+internal fun DrawerAction(
     modifier: Modifier = Modifier,
     icon: @Composable () -> Unit,
     label: @Composable () -> Unit,
@@ -891,7 +891,7 @@ private fun DrawerAction(
 }
 
 @Composable
-private fun FolderBar(
+internal fun FolderBar(
     folders: List<Folder>,
     selectedFolderId: Uuid?,
     onSelect: (Uuid?) -> Unit,
@@ -959,7 +959,7 @@ private fun FolderBar(
 }
 
 @Composable
-private fun ConversationSortButton(
+internal fun ConversationSortButton(
     sortOrder: ConversationSortOrder,
     onSortOrderChange: (ConversationSortOrder) -> Unit,
 ) {

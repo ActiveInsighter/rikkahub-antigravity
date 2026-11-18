@@ -48,6 +48,9 @@ private const val JOBS_COLLECTION = "aw_gemini_jobs"
 private const val MESSAGES_COLLECTION = "aw_gemini_messages"
 private const val RECORD_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 
+private const val FOLDERS_COLLECTION = "aw_agent_folders"
+private const val USAGE_COLLECTION = "aw_agent_usage_records"
+
 data class RemoteAgentThread(
     val jobId: String,
     val threadRoot: String,
@@ -58,6 +61,34 @@ data class RemoteAgentThread(
     val parentMessage: String,
     val archived: Boolean,
     val pinned: Boolean,
+    val folderId: String? = null,
+)
+
+data class RemoteAgentFolder(
+    val id: String,
+    val clientId: String,
+    val name: String,
+    val sortOrder: Int = 0,
+    val created: String = "",
+    val updated: String = "",
+)
+
+data class RemoteAgentUsageRecord(
+    val id: String = "",
+    val clientId: String,
+    val conversationId: String? = null,
+    val assistantId: String? = null,
+    val modelId: String? = null,
+    val modelName: String? = null,
+    val providerId: String? = null,
+    val promptTokens: Long = 0L,
+    val completionTokens: Long = 0L,
+    val cachedTokens: Long = 0L,
+    val reasoningTokens: Long = 0L,
+    val totalTokens: Long = 0L,
+    val durationMs: Long = 0L,
+    val source: String = "agent",
+    val createdAt: Long = 0L,
 )
 
 data class RemoteAgentConfig(
@@ -204,9 +235,20 @@ interface AgentCloudClient {
         title: String? = null,
         pinned: Boolean? = null,
         archived: Boolean? = null,
+        folderId: String? = null,
     )
 
     suspend fun deleteThread(jobId: String)
+
+    suspend fun listRemoteFolders(): List<RemoteAgentFolder> = emptyList()
+
+    suspend fun upsertRemoteFolder(folder: RemoteAgentFolder): RemoteAgentFolder? = null
+
+    suspend fun deleteRemoteFolder(remoteId: String) {}
+
+    suspend fun listRemoteUsageRecords(): List<RemoteAgentUsageRecord> = emptyList()
+
+    suspend fun uploadUsageRecord(record: RemoteAgentUsageRecord): RemoteAgentUsageRecord? = null
 
     fun buildAssistantUIMessage(
         messageId: Uuid,
@@ -412,6 +454,7 @@ class PocketBaseAgentCloudClient(
         title: String?,
         pinned: Boolean?,
         archived: Boolean?,
+        folderId: String?,
     ) {
         withContext(Dispatchers.IO) {
             val session = workflowRepository.requireSession()
@@ -419,6 +462,7 @@ class PocketBaseAgentCloudClient(
                 if (title != null) put("title", title)
                 if (pinned != null) put("pinned", pinned)
                 if (archived != null) put("archived", archived)
+                if (folderId != null) put("folderId", folderId)
             }
             workflowRepository.executeJson(
                 baseUrl = session.baseUrl,
@@ -440,6 +484,148 @@ class PocketBaseAgentCloudClient(
                 token = session.token,
             )
         }
+    }
+
+    override suspend fun listRemoteFolders(): List<RemoteAgentFolder> = withContext(Dispatchers.IO) {
+        val session = workflowRepository.session.value ?: return@withContext emptyList()
+        runCatching {
+            val res = workflowRepository.executeJson(
+                baseUrl = session.baseUrl,
+                path = "/api/collections/$FOLDERS_COLLECTION/records?perPage=200&sort=sort_order,created",
+                method = "GET",
+                token = session.token,
+            )
+            res["items"]?.jsonArray?.mapNotNull { el ->
+                val obj = el.jsonObject
+                val id = obj.str("id").ifBlank { return@mapNotNull null }
+                RemoteAgentFolder(
+                    id = id,
+                    clientId = obj.str("client_id").ifBlank { id },
+                    name = obj.str("name"),
+                    sortOrder = obj["sort_order"]?.jsonPrimitive?.intOrNull ?: 0,
+                    created = obj.str("created"),
+                    updated = obj.str("updated"),
+                )
+            } ?: emptyList()
+        }.getOrDefault(emptyList())
+    }
+
+    override suspend fun upsertRemoteFolder(folder: RemoteAgentFolder): RemoteAgentFolder? = withContext(Dispatchers.IO) {
+        val session = workflowRepository.session.value ?: return@withContext null
+        runCatching {
+            val body = buildJsonObject {
+                put("owner", session.userId)
+                put("client_id", folder.clientId)
+                put("name", folder.name)
+                put("sort_order", folder.sortOrder)
+            }
+            val obj = if (folder.id.isNotBlank()) {
+                workflowRepository.executeJson(
+                    baseUrl = session.baseUrl,
+                    path = "/api/collections/$FOLDERS_COLLECTION/records/${folder.id}",
+                    method = "PATCH",
+                    body = body,
+                    token = session.token,
+                )
+            } else {
+                workflowRepository.executeJson(
+                    baseUrl = session.baseUrl,
+                    path = "/api/collections/$FOLDERS_COLLECTION/records",
+                    method = "POST",
+                    body = body,
+                    token = session.token,
+                )
+            }
+            val id = obj.str("id").ifBlank { return@runCatching null }
+            RemoteAgentFolder(
+                id = id,
+                clientId = obj.str("client_id").ifBlank { folder.clientId },
+                name = obj.str("name").ifBlank { folder.name },
+                sortOrder = obj["sort_order"]?.jsonPrimitive?.intOrNull ?: folder.sortOrder,
+                created = obj.str("created"),
+                updated = obj.str("updated"),
+            )
+        }.getOrNull()
+    }
+
+    override suspend fun deleteRemoteFolder(remoteId: String) {
+        withContext(Dispatchers.IO) {
+            val session = workflowRepository.session.value ?: return@withContext
+            if (remoteId.isBlank()) return@withContext
+            runCatching {
+                workflowRepository.executeJson(
+                    baseUrl = session.baseUrl,
+                    path = "/api/collections/$FOLDERS_COLLECTION/records/$remoteId",
+                    method = "DELETE",
+                    token = session.token,
+                )
+            }
+        }
+    }
+
+    override suspend fun listRemoteUsageRecords(): List<RemoteAgentUsageRecord> = withContext(Dispatchers.IO) {
+        val session = workflowRepository.session.value ?: return@withContext emptyList()
+        runCatching {
+            val res = workflowRepository.executeJson(
+                baseUrl = session.baseUrl,
+                path = "/api/collections/$USAGE_COLLECTION/records?perPage=200&sort=-created_at_ms",
+                method = "GET",
+                token = session.token,
+            )
+            res["items"]?.jsonArray?.mapNotNull { el ->
+                val obj = el.jsonObject
+                val id = obj.str("id").ifBlank { return@mapNotNull null }
+                RemoteAgentUsageRecord(
+                    id = id,
+                    clientId = obj.str("client_id").ifBlank { id },
+                    conversationId = obj.str("conversation_id").ifBlank { null },
+                    assistantId = obj.str("assistant_id").ifBlank { null },
+                    modelId = obj.str("model_id").ifBlank { null },
+                    modelName = obj.str("model_name").ifBlank { null },
+                    providerId = obj.str("provider_id").ifBlank { null },
+                    promptTokens = obj["prompt_tokens"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L,
+                    completionTokens = obj["completion_tokens"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L,
+                    cachedTokens = obj["cached_tokens"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L,
+                    reasoningTokens = obj["reasoning_tokens"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L,
+                    totalTokens = obj["total_tokens"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L,
+                    durationMs = obj["duration_ms"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L,
+                    source = obj.str("source").ifBlank { "agent" },
+                    createdAt = obj["created_at_ms"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L,
+                )
+            } ?: emptyList()
+        }.getOrDefault(emptyList())
+    }
+
+    override suspend fun uploadUsageRecord(record: RemoteAgentUsageRecord): RemoteAgentUsageRecord? = withContext(Dispatchers.IO) {
+        val session = workflowRepository.session.value ?: return@withContext null
+        runCatching {
+            val body = buildJsonObject {
+                put("owner", session.userId)
+                put("client_id", record.clientId)
+                record.conversationId?.let { put("conversation_id", it) }
+                record.assistantId?.let { put("assistant_id", it) }
+                record.modelId?.let { put("model_id", it) }
+                record.modelName?.let { put("model_name", it) }
+                record.providerId?.let { put("provider_id", it) }
+                put("prompt_tokens", record.promptTokens)
+                put("completion_tokens", record.completionTokens)
+                put("cached_tokens", record.cachedTokens)
+                put("reasoning_tokens", record.reasoningTokens)
+                put("total_tokens", record.totalTokens)
+                put("duration_ms", record.durationMs)
+                put("source", record.source)
+                put("created_at_ms", record.createdAt)
+            }
+            val obj = workflowRepository.executeJson(
+                baseUrl = session.baseUrl,
+                path = "/api/collections/$USAGE_COLLECTION/records",
+                method = "POST",
+                body = body,
+                token = session.token,
+            )
+            val id = obj.str("id").ifBlank { return@runCatching null }
+            record.copy(id = id)
+        }.getOrNull()
     }
 
     override fun buildAssistantUIMessage(

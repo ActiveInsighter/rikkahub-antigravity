@@ -10,9 +10,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.ModelSnapshot
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.agent.AgentAssistantEntity
 import me.rerere.rikkahub.data.agent.AgentCloudClient
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
@@ -20,8 +22,10 @@ import me.rerere.rikkahub.data.agent.AgentUiSettings
 import me.rerere.rikkahub.data.agent.PocketBaseAgentCloudClient
 import me.rerere.rikkahub.data.agent.RemoteAgentSourceInput
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
+import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.model.ReasoningLevel
 import me.rerere.rikkahub.data.model.toMessageNode
 import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
 import me.rerere.rikkahub.data.workflow.WorkflowRepository
@@ -50,6 +54,20 @@ class AgentVM(
         )
     )
     val conversation: StateFlow<Conversation> = _conversation.asStateFlow()
+
+    private val _isInitialLoading = MutableStateFlow(true)
+    val isInitialLoading: StateFlow<Boolean> = _isInitialLoading.asStateFlow()
+
+    private val _agentAssistant = MutableStateFlow(
+        Assistant(
+            id = DEFAULT_ASSISTANT_ID,
+            name = "Agent",
+        )
+    )
+    val agentAssistant: StateFlow<Assistant> = _agentAssistant.asStateFlow()
+
+    private val _selectedModel = MutableStateFlow<Model?>(null)
+    val selectedModel: StateFlow<Model?> = _selectedModel.asStateFlow()
 
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
@@ -84,17 +102,70 @@ class AgentVM(
 
     init {
         viewModelScope.launch {
-            val snapshot = repository.getConversationSnapshot(conversationId)
-            if (snapshot != null) {
-                _conversation.value = snapshot.conversation
-                activeJobId = snapshot.remoteJobId
-                activeThreadRoot = snapshot.remoteThreadRoot
-                lastRemoteMessageId = snapshot.lastRemoteMessageId
-            }
-            if (cloudClient.hasSession()) {
-                syncFromRemoteInternal()
+            try {
+                val localAssistant = repository.ensureDefaultAssistant()
+                _agentAssistant.value = localAssistant.toDomainAssistant()
+
+                val snapshot = repository.getConversationSnapshot(conversationId)
+                if (snapshot != null) {
+                    _conversation.value = snapshot.conversation
+                    activeJobId = snapshot.remoteJobId
+                    activeThreadRoot = snapshot.remoteThreadRoot
+                    lastRemoteMessageId = snapshot.lastRemoteMessageId
+                }
+                if (cloudClient.hasSession()) {
+                    syncFromRemoteInternal()
+                }
+            } finally {
+                _isInitialLoading.value = false
             }
         }
+    }
+
+    fun updateAgentModel(model: Model) {
+        _selectedModel.value = model
+        val updated = _agentAssistant.value.copy(chatModelId = model.id)
+        _agentAssistant.value = updated
+        persistAssistant(updated)
+    }
+
+    fun updateAgentAssistant(assistant: Assistant) {
+        _agentAssistant.value = assistant
+        persistAssistant(assistant)
+    }
+
+    private fun persistAssistant(assistant: Assistant) {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            repository.upsertAssistant(
+                AgentAssistantEntity(
+                    id = assistant.id.toString(),
+                    name = assistant.name.ifBlank { "Agent" },
+                    systemPrompt = assistant.systemPrompt,
+                    modelId = assistant.chatModelId?.toString(),
+                    reasoningLevel = assistant.reasoningLevel.name,
+                    temperature = assistant.temperature,
+                    isDefault = true,
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            )
+        }
+    }
+
+    private fun AgentAssistantEntity.toDomainAssistant(): Assistant {
+        val parsedId = runCatching { Uuid.parse(id) }.getOrDefault(DEFAULT_ASSISTANT_ID)
+        val parsedModelId = modelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
+        val parsedReasoning = runCatching { ReasoningLevel.valueOf(reasoningLevel) }
+            .getOrDefault(ReasoningLevel.OFF)
+        return Assistant(
+            id = parsedId,
+            name = name,
+            systemPrompt = systemPrompt,
+            chatModelId = parsedModelId,
+            reasoningLevel = parsedReasoning,
+            temperature = temperature,
+        )
     }
 
     fun dismissError() {
@@ -541,6 +612,21 @@ class AgentVM(
                     remoteStatus = update.job.status,
                     lastRemoteMessageId = msg?.id,
                 )
+
+                if (update.isTerminal && msg != null && (msg.usage.totalTokenCount > 0 || msg.usage.promptTokenCount > 0)) {
+                    repository.recordUsage(
+                        conversationId = updatedConv.id.toString(),
+                        assistantId = _agentAssistant.value.id.toString(),
+                        modelId = update.job.model.ifBlank { "Antigravity" },
+                        modelName = update.job.model.ifBlank { "Antigravity" },
+                        providerId = "anyworkflow",
+                        promptTokens = msg.usage.promptTokenCount.toLong(),
+                        completionTokens = msg.usage.candidatesTokenCount.toLong(),
+                        cachedTokens = msg.usage.cachedContentTokenCount.toLong(),
+                        reasoningTokens = msg.usage.thoughtsTokenCount.toLong(),
+                        durationMs = uiMessage.generationTimeMs,
+                    )
+                }
             }
         }
     }
