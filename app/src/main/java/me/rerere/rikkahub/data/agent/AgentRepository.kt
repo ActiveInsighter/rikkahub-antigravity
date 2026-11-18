@@ -3,6 +3,7 @@ package me.rerere.rikkahub.data.agent
 import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
@@ -57,6 +59,7 @@ class AgentRepository(
     private val folderDao = database.folderDao()
     private val usageRecordDao = database.usageRecordDao()
     private val draftDao = database.draftDao()
+    @Volatile
     private var visibleConversation: Uuid? = null
 
     // A job creation event can arrive before its HTTP response binds the remote root to the local ID.
@@ -237,52 +240,57 @@ class AgentRepository(
             conversationDao.getById(id.toString())?.remoteJobId != jobId
         ) return@withLock null
         val remote = cloudClient.fetchThreadConversation(jobId, previous, refreshJob)
-        val completion = database.withTransaction {
-            val existing = conversationDao.getById(id.toString()) ?: return@withTransaction null
-            if (existing.remoteJobId != jobId || workflowRepository.session.value != session || id in submittingIds.value) {
-                return@withTransaction null
-            }
-
-            val status = if (remote.isActive && !PocketBaseAgentCloudClient.isActiveStatus(remote.job.status)) {
-                remote.message?.status ?: remote.job.status
-            } else {
-                remote.job.status
-            }
-            val finished = !remote.isActive && PocketBaseAgentCloudClient.isActiveStatus(existing.remoteStatus.orEmpty())
-            val succeeded = status == "succeeded"
-            val becameReadable = succeeded && (finished || existing.remoteStatus in setOf("failed", "partial"))
-            val updated = existing.copy(
-                title = remote.job.title.ifBlank { existing.title },
-                updateAt = maxOf(
-                    existing.updateAt,
-                    remoteTime(remote.job.updated, existing.updateAt),
-                    remoteTime(remote.message?.updated.orEmpty(), existing.updateAt),
-                ),
-                remoteStatus = status,
-                lastRemoteMessageId = remote.message?.id,
-                hasUnread = id != visibleConversation && (existing.hasUnread || becameReadable),
-            )
-            saveNodesForConversation(existing.id, remote.messageNodes)
-            val usage = if (finished) saveCompletedUsage(existing, remote) else null
-            val event = if (finished && (succeeded || status == "failed")) {
-                val preview = if (succeeded) {
-                    remote.messageNodes.lastOrNull()?.currentMessage?.toText().orEmpty()
-                } else {
-                    remote.message?.error.orEmpty().ifBlank { remote.job.error.ifBlank { "任务执行失败" } }
+        // Room observers can stop this worker as soon as the terminal status is committed.
+        withContext(NonCancellable) {
+            val completion = database.withTransaction {
+                val existing = conversationDao.getById(id.toString()) ?: return@withTransaction null
+                if (existing.remoteJobId != jobId || workflowRepository.session.value != session || id in submittingIds.value) {
+                    return@withTransaction null
                 }
-                AppEvent.AgentJobFinished(id, updated.title, succeeded, preview.trim().replace('\n', ' ').take(60))
-            } else {
-                null
+
+                val status = if (remote.isActive && !PocketBaseAgentCloudClient.isActiveStatus(remote.job.status)) {
+                    remote.message?.status ?: remote.job.status
+                } else {
+                    remote.job.status
+                }
+                val finished = !remote.isActive && PocketBaseAgentCloudClient.isActiveStatus(existing.remoteStatus.orEmpty())
+                val succeeded = status == "succeeded"
+                val becameReadable = succeeded && (finished || existing.remoteStatus in setOf("failed", "partial"))
+                val updated = existing.copy(
+                    title = remote.job.title.ifBlank { existing.title },
+                    updateAt = maxOf(
+                        existing.updateAt,
+                        remoteTime(remote.job.updated, existing.updateAt),
+                        remoteTime(remote.message?.updated.orEmpty(), existing.updateAt),
+                    ),
+                    remoteStatus = status,
+                    lastRemoteMessageId = remote.message?.id,
+                    hasUnread = id != visibleConversation && (existing.hasUnread || becameReadable),
+                )
+                saveNodesForConversation(existing.id, remote.messageNodes)
+                val usage = if (finished) saveCompletedUsage(existing, remote) else null
+                val event = if (finished && (succeeded || status == "failed")) {
+                    val preview = if (succeeded) {
+                        remote.messageNodes.lastOrNull()?.currentMessage?.toText().orEmpty()
+                    } else {
+                        remote.message?.error.orEmpty().ifBlank { remote.job.error.ifBlank { "任务执行失败" } }
+                    }
+                    AppEvent.AgentJobFinished(id, updated.title, succeeded, preview.trim().replace('\n', ' ').take(60))
+                } else {
+                    null
+                }
+                if (updated != existing || existing.lastSyncedAt == 0L) {
+                    conversationDao.upsert(updated.copy(lastSyncedAt = System.currentTimeMillis()))
+                }
+                event to usage
             }
-            if (updated != existing || existing.lastSyncedAt == 0L) {
-                conversationDao.upsert(updated.copy(lastSyncedAt = System.currentTimeMillis()))
+            if (completion != null && workflowRepository.session.value == session) {
+                val (event, usage) = completion
+                event?.let(appEventBus::tryEmit)
+                if (usage != null) appScope.launch {
+                    if (workflowRepository.session.value == session) uploadUsage(usage)
+                }
             }
-            event to usage
-        }
-        if (completion != null && workflowRepository.session.value == session) {
-            val (event, usage) = completion
-            event?.let(appEventBus::tryEmit)
-            if (usage != null) appScope.launch { uploadUsage(usage) }
         }
         remote
     }
