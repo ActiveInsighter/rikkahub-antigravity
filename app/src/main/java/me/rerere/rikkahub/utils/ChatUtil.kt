@@ -18,14 +18,20 @@ fun navigateToChatPage(
     nodeId: Uuid? = null,
 ) {
     Log.i(TAG, "navigateToChatPage: navigate to $chatId")
-    navigator.clearAndNavigate(
-        Screen.Chat(
-            id = chatId.toString(),
-            text = initText,
-            files = initFiles.map { it.toString() },
-            nodeId = nodeId?.toString(),
-        )
+    val destination = Screen.Chat(
+        id = chatId.toString(),
+        text = initText,
+        files = initFiles.map { it.toString() },
+        nodeId = nodeId?.toString(),
     )
+    if (navigator.contains(Screen.Home)) {
+        navigator.navigate(destination) {
+            popUpTo(Screen.Home)
+        }
+    } else {
+        navigator.clearAndNavigate(Screen.Home)
+        navigator.navigate(destination)
+    }
 }
 
 fun Context.copyMessageToClipboard(message: UIMessage) {

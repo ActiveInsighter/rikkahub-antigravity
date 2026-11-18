@@ -66,6 +66,8 @@ data class RemoteAgentConfig(
     val systemPrompt: String = "",
     val delimiter: String = "<!-- aw:split -->",
     val concurrency: Int = 16,
+    val thinkingLevel: String = "",
+    val maxOutputTokens: Int = 8192,
 )
 
 data class RemoteGeminiJob(
@@ -345,8 +347,8 @@ class PocketBaseAgentCloudClient(
             put("delimiter", config.delimiter.ifBlank { "<!-- aw:split -->" })
             put("model", selectedModel)
             put("concurrency", config.concurrency.coerceIn(1, 16))
-            put("thinkingLevel", "")
-            put("maxOutputTokens", 0)
+            put("thinkingLevel", config.thinkingLevel)
+            put("maxOutputTokens", config.maxOutputTokens.coerceIn(256, 65536))
             if (!parentMessageId.isNullOrBlank()) {
                 put("parentMessage", parentMessageId)
             }
@@ -488,6 +490,14 @@ class PocketBaseAgentCloudClient(
             }
         }
 
+        val isRunning = isActiveStatus(job.status) || (message != null && isActiveStatus(message.status))
+        val startMs = parseIsoMillis(message?.startedAt.orEmpty())
+        val endMs = parseIsoMillis(message?.finishedAt.orEmpty())
+        val baseReasoningMs = startMs.takeIf { it > 0L }
+            ?: parseIsoMillis(job.created).takeIf { it > 0L }
+            ?: 1L
+        val messageFinishedInstant = endMs.takeIf { it > 0L }?.let { kotlin.time.Instant.fromEpochMilliseconds(it) }
+
         var hasTextPart = false
         for (part in parts) {
             if (part.type == "status") continue
@@ -499,7 +509,8 @@ class PocketBaseAgentCloudClient(
                         uiParts += UIMessagePart.Reasoning(
                             reasoning = part.content,
                             reasoningType = ReasoningType.SUMMARY_TEXT,
-                            finishedAt = if (part.status == "running") null else Clock.System.now(),
+                            createdAt = kotlin.time.Instant.fromEpochMilliseconds(baseReasoningMs + part.sequence.coerceAtLeast(0)),
+                            finishedAt = if (part.status == "running") null else (messageFinishedInstant ?: Clock.System.now()),
                         )
                     }
                 }
@@ -558,6 +569,19 @@ class PocketBaseAgentCloudClient(
             uiParts += UIMessagePart.Text(text = message.reply)
         }
 
+        // If an in-place updated text part has an earlier sequence than later tool/reasoning steps,
+        // move the final reply text after those steps so steps never appear after the final reply.
+        val lastTextIndex = uiParts.indexOfLast { it is UIMessagePart.Text && it.text.isNotBlank() }
+        if (lastTextIndex != -1 && lastTextIndex < uiParts.lastIndex) {
+            val hasTrailingSteps = uiParts.subList(lastTextIndex + 1, uiParts.size)
+                .any { it is UIMessagePart.Reasoning || it is UIMessagePart.ServerTool }
+            if (hasTrailingSteps && (!isRunning || (message != null && message.reply.isNotBlank()))) {
+                val finalText = uiParts.removeAt(lastTextIndex)
+                val insertIndex = uiParts.indexOfLast { it is UIMessagePart.Reasoning || it is UIMessagePart.ServerTool } + 1
+                uiParts.add(insertIndex, finalText)
+            }
+        }
+
         if (message != null && message.error.isNotBlank()) {
             uiParts += UIMessagePart.Notice(
                 title = "执行出错",
@@ -570,13 +594,10 @@ class PocketBaseAgentCloudClient(
             )
         }
 
-        val isRunning = isActiveStatus(job.status) || (message != null && isActiveStatus(message.status))
         if (uiParts.isEmpty() && isRunning) {
             uiParts += UIMessagePart.Text(text = "")
         }
 
-        val startMs = parseIsoMillis(message?.startedAt.orEmpty())
-        val endMs = parseIsoMillis(message?.finishedAt.orEmpty())
         val durationMs = if (startMs > 0L && endMs >= startMs) endMs - startMs else null
         val finishedAt = if (!isRunning) {
             Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
@@ -705,6 +726,8 @@ class PocketBaseAgentCloudClient(
                 systemPrompt = cfg.str("systemPrompt"),
                 delimiter = cfg.str("delimiter").ifBlank { "<!-- aw:split -->" },
                 concurrency = cfg["concurrency"]?.jsonPrimitive?.intOrNull ?: 16,
+                thinkingLevel = cfg.str("thinkingLevel"),
+                maxOutputTokens = cfg["maxOutputTokens"]?.jsonPrimitive?.intOrNull?.takeIf { it in 256..65536 } ?: 8192,
             )
         }.getOrDefault(RemoteAgentConfig())
     }
@@ -761,7 +784,7 @@ class PocketBaseAgentCloudClient(
             cursor = nextCursor
             if (!hasMore || items.isEmpty()) break
         }
-        return collected to cursor
+        return collected.sortedBy { it.sequence } to cursor
     }
 
     private fun fetchAncestors(session: WorkflowSession, job: RemoteGeminiJob): List<RemoteGeminiMessage> {

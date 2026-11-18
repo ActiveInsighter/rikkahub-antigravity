@@ -303,9 +303,11 @@ class RouteActivity : ComponentActivity() {
             }
         }
 
+        val navigator = remember(backStack) { Navigator(backStack) }
+
         SharedTransitionLayout {
             CompositionLocalProvider(
-                LocalNavController provides Navigator(backStack),
+                LocalNavController provides navigator,
                 LocalSharedTransitionScope provides this,
                 LocalSettings provides settings,
                 LocalToaster provides toastState,

@@ -75,6 +75,8 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
     val loading = !tool.isFinished
     val failed = tool.status == me.rerere.ai.ui.ServerToolStatus.FAILED
     val hasDetails = tool.input != null || tool.output != null
+    var showResult by remember { mutableStateOf(false) }
+
     ChainOfThoughtStep(
         icon = {
             when {
@@ -103,42 +105,45 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
                 overflow = TextOverflow.Ellipsis,
             )
         },
-        content = if (hasDetails) {
-            {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    tool.input?.let { inputEl ->
-                        val text = remember(inputEl) { formatServerToolJson(inputEl) }
-                        if (text.isNotBlank()) {
-                            Text(
-                                text = "输入:\n$text",
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 12,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    tool.output?.let { outputEl ->
-                        val text = remember(outputEl) { formatServerToolJson(outputEl) }
-                        if (text.isNotBlank()) {
-                            Text(
-                                text = "输出:\n$text",
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 16,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
-            }
+        onClick = if (hasDetails) {
+            { showResult = true }
         } else {
             null
         },
+        content = null,
     )
+
+    if (showResult) {
+        val context = remember(tool, loading) {
+            val inputText = tool.input?.let { formatServerToolJson(it) } ?: "{}"
+            val outputParts = tool.output?.let { outputEl ->
+                val formatted = formatServerToolJson(outputEl)
+                if (formatted.isNotBlank()) listOf(UIMessagePart.Text(formatted)) else emptyList()
+            } ?: emptyList()
+            ToolUIContext(
+                tool = UIMessagePart.Tool(
+                    toolCallId = tool.toolCallId,
+                    toolName = tool.toolName,
+                    input = inputText,
+                    output = outputParts,
+                ),
+                arguments = tool.input ?: JsonObject(emptyMap()),
+                content = tool.output,
+                loading = loading,
+                assistant = null,
+            )
+        }
+        ModalBottomSheet(
+            sheetState = rememberBottomSheetState(
+                initialValue = SheetValue.Hidden,
+                enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+            ),
+            onDismissRequest = { showResult = false },
+            content = {
+                DefaultToolPreview(context = context)
+            },
+        )
+    }
 }
 
 private fun formatServerToolJson(element: kotlinx.serialization.json.JsonElement): String {
