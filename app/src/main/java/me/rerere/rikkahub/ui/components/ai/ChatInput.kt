@@ -150,6 +150,7 @@ fun ChatInput(
     onStopVoiceMode: () -> Unit = {},
     placeholderText: String? = null,
     alwaysShowReasoningButton: Boolean = false,
+    showReasoningButton: Boolean = true,
     showAsrButton: Boolean = true,
     overrideModelId: String? = null,
     onModelSelectorClick: (() -> Unit)? = null,
@@ -322,7 +323,7 @@ fun ChatInput(
                                 }
 
                                 // Reasoning
-                                if (alwaysShowReasoningButton || chatModel?.abilities?.contains(ModelAbility.REASONING) == true) {
+                                if (showReasoningButton && (alwaysShowReasoningButton || chatModel?.abilities?.contains(ModelAbility.REASONING) == true)) {
                                     ReasoningButton(
                                         reasoningLevel = assistant.reasoningLevel,
                                         onUpdateReasoningLevel = {

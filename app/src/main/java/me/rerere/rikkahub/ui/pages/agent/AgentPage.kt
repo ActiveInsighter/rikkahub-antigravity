@@ -77,7 +77,6 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -178,7 +177,6 @@ fun AgentPage(id: Uuid) {
     LaunchedEffect(id, draftLoaded) {
         if (!draftLoaded) return@LaunchedEffect
         snapshotFlow { inputState.textContent.text.toString() }
-            .drop(1)
             .debounce(250)
             .collectLatest { text ->
                 vm.saveDraft(text)
@@ -236,7 +234,7 @@ fun AgentPage(id: Uuid) {
     var showClearConfirm by remember { mutableStateOf(false) }
     var editingMessage by remember { mutableStateOf<UIMessage?>(null) }
     var editingText by remember { mutableStateOf("") }
-    var insightsMessage by remember { mutableStateOf<UIMessage?>(null) }
+    var insightsMessageId by remember(id) { mutableStateOf<Uuid?>(null) }
     var showLiveInsights by remember { mutableStateOf(false) }
 
     fun navigateToAgentConversation(targetId: Uuid) {
@@ -373,6 +371,7 @@ fun AgentPage(id: Uuid) {
                             hazeState = hazeState,
                             placeholderText = "输入指令…",
                             alwaysShowReasoningButton = true,
+                            showReasoningButton = !selectedAgentModelName.isManagedAgentModel(),
                             showAsrButton = false,
                             overrideModelId = selectedAgentModelName,
                             onModelSelectorClick = { showModelPickerSheet = true },
@@ -443,7 +442,7 @@ fun AgentPage(id: Uuid) {
                                     }
                                 },
                                 onProcessingStatusClick = { showLiveInsights = true },
-                                onOpenAgentInsights = { msg -> insightsMessage = msg },
+                                onOpenAgentInsights = { msg -> insightsMessageId = msg.id },
                             )
                         }
                     }
@@ -452,17 +451,19 @@ fun AgentPage(id: Uuid) {
         }
     }
 
-    if (showLiveInsights || insightsMessage != null) {
-        val targetMessage = insightsMessage ?: conversation.currentMessages.lastOrNull {
+    if (showLiveInsights || insightsMessageId != null) {
+        val latestAssistant = conversation.currentMessages.lastOrNull {
             it.role == me.rerere.ai.core.MessageRole.ASSISTANT
         }
+        val targetMessage = if (showLiveInsights) latestAssistant else conversation.currentMessages
+            .firstOrNull { it.id == insightsMessageId }
         AgentInsightsSheet(
             message = targetMessage,
-            isRunning = isGenerating && (insightsMessage == null || insightsMessage?.id == targetMessage?.id),
+            isRunning = isGenerating && (showLiveInsights || targetMessage?.id == latestAssistant?.id),
             liveElapsedText = activeStatusText,
             onDismiss = {
                 showLiveInsights = false
-                insightsMessage = null
+                insightsMessageId = null
             },
         )
     }

@@ -437,18 +437,11 @@ private fun ChatListNormal(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                ContainedLoadingIndicator(
-                                    modifier = Modifier.size(24.dp)
+                                Text(
+                                    text = processingStatus ?: "0秒",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                AnimatedVisibility(
-                                    visible = processingStatus != null,
-                                ) {
-                                    Text(
-                                        text = processingStatus ?: "",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
                                 Icon(
                                     imageVector = HugeIcons.ArrowRight01,
                                     contentDescription = "查看执行详情",

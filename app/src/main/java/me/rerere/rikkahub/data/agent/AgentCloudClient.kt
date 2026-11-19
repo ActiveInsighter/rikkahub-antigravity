@@ -924,23 +924,7 @@ class PocketBaseAgentCloudClient(
             method = "GET",
             token = session.token,
         ).jsonObject
-        val base = parseMessage(obj)
-        if (base.agentSummaryJson != null || base.agentTimingsJson != null) {
-            return base
-        }
-        val extra = runCatching {
-            workflowRepository.executeJsonCancellable(
-                baseUrl = session.baseUrl,
-                path = "/api/collections/$MESSAGES_COLLECTION/records/$messageId",
-                method = "GET",
-                query = mapOf("fields" to "agentSummary,agentTimings"),
-                token = session.token,
-            ).jsonObject
-        }.getOrNull() ?: return base
-        return base.copy(
-            agentSummaryJson = jsonFieldString(extra, "agentSummary") ?: base.agentSummaryJson,
-            agentTimingsJson = jsonFieldString(extra, "agentTimings") ?: base.agentTimingsJson,
-        )
+        return parseMessage(obj)
     }
 
     private suspend fun drainParts(

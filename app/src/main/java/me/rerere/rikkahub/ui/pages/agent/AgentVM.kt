@@ -154,6 +154,7 @@ class AgentVM(
     val initialDraft: StateFlow<String?> = _initialDraft.asStateFlow()
 
     fun saveDraft(text: String) {
+        if (_initialDraft.value == text) return
         _initialDraft.value = text
         repository.saveDraft(conversationId, text)
     }
@@ -509,7 +510,7 @@ class AgentVM(
         targetNodeId: Uuid?,
     ) {
         val modelName = selectedAgentModelName.value.ifBlank { "Antigravity" }
-        val thinkingLevel = _agentAssistant.value.reasoningLevel.toGeminiThinkingLevel()
+        val thinkingLevel = if (modelName.isManagedAgentModel()) "" else _agentAssistant.value.reasoningLevel.toGeminiThinkingLevel()
         val systemPrompt = _agentAssistant.value.systemPrompt.takeIf { it.isNotBlank() }
         val assistantMsgId = Uuid.random()
         val nodeId = targetNodeId ?: Uuid.random()
@@ -587,3 +588,6 @@ class AgentVM(
         }
     }
 }
+
+internal fun String.isManagedAgentModel(): Boolean =
+    equals("Antigravity", ignoreCase = true) || startsWith("antigravity-", ignoreCase = true)

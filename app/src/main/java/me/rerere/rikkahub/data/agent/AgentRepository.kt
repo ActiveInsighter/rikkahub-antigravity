@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.agent
 
 import androidx.room.withTransaction
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.NonCancellable
@@ -63,6 +64,7 @@ class AgentRepository(
     private var visibleConversation: Uuid? = null
 
     // A job creation event can arrive before its HTTP response binds the remote root to the local ID.
+    private val draftMutex = Mutex()
     private val threadSyncMutex = Mutex()
     private val conversationLocks = List(16) { Mutex() }
     private val _submittingIds = MutableStateFlow<Set<Uuid>>(emptySet())
@@ -379,22 +381,24 @@ class AgentRepository(
         if (id != null) conversationDao.updateUnread(id.toString(), false)
     }
 
-    suspend fun getDraft(conversationId: Uuid): String? {
-        return draftDao.getByConversationId(conversationId.toString())?.text
+    suspend fun getDraft(conversationId: Uuid): String? = draftMutex.withLock {
+        draftDao.getByConversationId(conversationId.toString())?.text
     }
 
-    fun saveDraft(conversationId: Uuid, text: String) = appScope.launch {
-        val id = conversationId.toString()
-        if (text.isEmpty()) {
-            draftDao.deleteByConversationId(id)
-        } else {
-            draftDao.upsert(
-                AgentDraftEntity(
-                    conversationId = id,
-                    text = text,
-                    updatedAt = System.currentTimeMillis(),
+    fun saveDraft(conversationId: Uuid, text: String) = appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+        draftMutex.withLock {
+            val id = conversationId.toString()
+            if (text.isEmpty()) {
+                draftDao.deleteByConversationId(id)
+            } else {
+                draftDao.upsert(
+                    AgentDraftEntity(
+                        conversationId = id,
+                        text = text,
+                        updatedAt = System.currentTimeMillis(),
+                    )
                 )
-            )
+            }
         }
     }
 
