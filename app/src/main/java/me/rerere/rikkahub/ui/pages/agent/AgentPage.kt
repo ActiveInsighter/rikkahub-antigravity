@@ -132,7 +132,7 @@ fun AgentPage(id: Uuid) {
     val conversation by vm.conversation.collectAsStateWithLifecycle()
     val isInitialLoading by vm.isInitialLoading.collectAsStateWithLifecycle()
     val agentAssistant by vm.agentAssistant.collectAsStateWithLifecycle()
-    val selectedModel by vm.selectedModel.collectAsStateWithLifecycle()
+    val resolvedChatModel by vm.resolvedChatModel.collectAsStateWithLifecycle()
     val localModels by vm.localModels.collectAsStateWithLifecycle()
     val selectedModelEntity by vm.selectedModelEntity.collectAsStateWithLifecycle()
     val selectedModelCategory by vm.selectedModelCategory.collectAsStateWithLifecycle()

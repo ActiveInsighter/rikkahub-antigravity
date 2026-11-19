@@ -23,6 +23,7 @@ import kotlinx.datetime.toInstant
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.ui.ModelSnapshot
 import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.UIMessage
@@ -174,6 +175,28 @@ class AgentVM(
     ) { entity, name ->
         entity?.modelCategory ?: AgentModelCategory.inferFromModelId(name)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, AgentModelCategory.AGENT)
+
+    val resolvedChatModel: StateFlow<Model> = combine(
+        selectedModelEntity,
+        selectedAgentModelName,
+        _selectedModel,
+    ) { entity, name, manual ->
+        val modelId = entity?.modelId ?: manual?.modelId ?: name
+        val displayName = entity?.displayName?.ifBlank { modelId } ?: manual?.displayName ?: name
+        Model(
+            modelId = modelId,
+            displayName = displayName,
+            abilities = if (AgentModelCategory.inferFromModelId(modelId) == AgentModelCategory.AGENT) {
+                emptyList()
+            } else {
+                listOf(ModelAbility.REASONING)
+            },
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        Model(modelId = "Antigravity", displayName = "Antigravity"),
+    )
 
     private val _decisionSchemaJson = MutableStateFlow("")
     val decisionSchemaJson: StateFlow<String> = _decisionSchemaJson.asStateFlow()

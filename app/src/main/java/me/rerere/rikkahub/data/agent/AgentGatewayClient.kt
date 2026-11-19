@@ -15,6 +15,7 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.providers.google.GoogleProvider
@@ -62,6 +63,7 @@ class AgentGatewayClient(
         val model = Model(
             modelId = cleanModelId,
             displayName = modelEntity.displayName.ifBlank { cleanModelId },
+            abilities = listOf(ModelAbility.REASONING),
         )
         val providerSetting = ProviderSetting.Google(
             name = "Gemini Gateway",
