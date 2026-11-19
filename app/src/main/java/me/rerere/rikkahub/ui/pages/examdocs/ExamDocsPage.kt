@@ -130,7 +130,7 @@ fun ExamDocsPage(
                                         clipboard.setClipEntry(
                                             ClipEntry(ClipData.newPlainText("ExamDocMarkdown", md))
                                         )
-                                        toaster.show("已复制 Markdown 原文", type = ToastType.SUCCESS)
+                                        toaster.show("已复制 Markdown 原文", type = ToastType.Success)
                                     }
                                 },
                             ) {
