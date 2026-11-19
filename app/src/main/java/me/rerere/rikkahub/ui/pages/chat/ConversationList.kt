@@ -316,27 +316,12 @@ private fun ConversationItem(
             }
             when {
                 statusBadge == ConversationStatusBadge.RUNNING -> {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
-                        shape = CircleShape,
-                        modifier = Modifier.semantics { contentDescription = "Running" },
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            androidx.compose.material3.LoadingIndicator(
-                                modifier = Modifier.size(13.dp),
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            Text(
-                                text = "运行中",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                        }
-                    }
+                    androidx.compose.material3.LoadingIndicator(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .semantics { contentDescription = "Running" },
+                        color = MaterialTheme.colorScheme.primary,
+                    )
                 }
                 statusBadge == ConversationStatusBadge.COMPLETED_UNREAD -> {
                     Box(

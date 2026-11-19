@@ -16,6 +16,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
@@ -196,7 +199,7 @@ class AgentRepository(
                     id = existing?.id ?: fallbackId,
                     title = thread.title.ifBlank { existing?.title ?: "Agent" },
                     createAt = created,
-                    updateAt = maxOf(existing?.updateAt ?: 0L, remoteTime(thread.updated, created)),
+                    updateAt = remoteTime(thread.created, existing?.updateAt ?: created),
                     isPinned = thread.pinned,
                     folderId = folderId,
                     assistantId = existing?.assistantId,
@@ -263,11 +266,8 @@ class AgentRepository(
                     (succeeded && existing.remoteStatus in setOf("failed", "partial"))
                 val updated = existing.copy(
                     title = remote.job.title.ifBlank { existing.title },
-                    updateAt = maxOf(
-                        existing.updateAt,
-                        remoteTime(remote.job.updated, existing.updateAt),
-                        remoteTime(remote.message?.updated.orEmpty(), existing.updateAt),
-                    ),
+                    updateAt = latestUserMessageTimeMillis(remote.messageNodes)
+                        ?: remoteTime(remote.job.created, existing.updateAt),
                     remoteStatus = status,
                     lastRemoteMessageId = remote.message?.id,
                     hasUnread = id != visibleConversation && (existing.hasUnread || becameUnread),
@@ -362,7 +362,8 @@ class AgentRepository(
                 id = convId,
                 title = conversation.title,
                 createAt = conversation.createAt.toEpochMilli(),
-                updateAt = conversation.updateAt.toEpochMilli(),
+                updateAt = latestUserMessageTimeMillis(conversation.messageNodes)
+                    ?: conversation.updateAt.toEpochMilli(),
                 isPinned = existing?.isPinned ?: conversation.isPinned,
                 folderId = existing?.folderId ?: conversation.folderId?.toString(),
                 assistantId = conversation.assistantId.toString(),
@@ -409,6 +410,18 @@ class AgentRepository(
     private fun remoteTime(value: String, fallback: Long): Long =
         PocketBaseAgentCloudClient.parseIsoMillis(value).takeIf { it > 0 } ?: fallback
 
+    private fun latestUserMessageTimeMillis(nodes: List<MessageNode>): Long? {
+        val userMsg = nodes.asReversed()
+            .asSequence()
+            .map { it.currentMessage }
+            .firstOrNull { it.role == MessageRole.USER }
+            ?: return null
+        return userMsg.createdAt
+            .toInstant(TimeZone.currentSystemDefault())
+            .toEpochMilliseconds()
+            .takeIf { it > 0L }
+    }
+
     private suspend fun saveNodesForConversation(convId: String, nodes: List<MessageNode>) {
         val existing = messageNodeDao.getByConversationId(convId).associateByTo(HashMap()) { it.id }
         val changed = nodes.mapIndexedNotNull { index, node ->
@@ -434,7 +447,7 @@ class AgentRepository(
         conversationDao.updateTitle(
             id = id.toString(),
             title = title,
-            updateAt = Instant.now().toEpochMilli(),
+            updateAt = existing?.updateAt ?: Instant.now().toEpochMilli(),
         )
     }
 
@@ -450,9 +463,8 @@ class AgentRepository(
     suspend fun moveConversationToFolder(conversationId: Uuid, folderId: Uuid?) {
         val convIdStr = conversationId.toString()
         val folderIdStr = folderId?.toString()
-        val now = System.currentTimeMillis()
-        conversationDao.updateFolderId(convIdStr, folderIdStr, now)
         val existing = conversationDao.getById(convIdStr)
+        conversationDao.updateFolderId(convIdStr, folderIdStr, existing?.updateAt ?: System.currentTimeMillis())
         val remoteJobId = existing?.remoteJobId
         if (!remoteJobId.isNullOrBlank() && cloudClient.hasSession()) {
             runCatching { cloudClient.updateThreadMetadata(remoteJobId, folderId = folderIdStr ?: "") }

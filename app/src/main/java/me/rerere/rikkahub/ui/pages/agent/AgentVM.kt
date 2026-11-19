@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -89,6 +90,7 @@ class AgentVM(
     private val snapshot = MutableStateFlow<AgentConversationSnapshot?>(null)
     private val _isLocalGenerating = MutableStateFlow(false)
     private var localGenerationJob: Job? = null
+    private val _pendingTurnStartMs = MutableStateFlow<Long?>(null)
 
     val isGenerating: StateFlow<Boolean> = combine(
         snapshot,
@@ -104,21 +106,46 @@ class AgentVM(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val activeStatusText: StateFlow<String?> = combine(isGenerating, snapshot) { generating, cached ->
+    val activeStatusText: StateFlow<String?> = combine(
+        isGenerating,
+        snapshot,
+        _conversation,
+        repository.submittingIds,
+        _isLocalGenerating,
+        _pendingTurnStartMs,
+    ) { values ->
+        val generating = values[0] as Boolean
+        val cached = values[1] as AgentConversationSnapshot?
+        val currentConv = values[2] as Conversation
+        @Suppress("UNCHECKED_CAST")
+        val submitting = values[3] as Set<Uuid>
+        val localGen = values[4] as Boolean
+        val pendingStartMs = values[5] as Long?
+
         if (!generating) {
             null
+        } else if (conversationId in submitting || localGen) {
+            val liveAssistant = currentConv.messageNodes.lastOrNull()?.currentMessage
+                ?.takeIf { it.role == MessageRole.ASSISTANT && it.finishedAt == null }
+            val liveCreatedMs = liveAssistant?.createdAt
+                ?.toInstant(TimeZone.currentSystemDefault())
+                ?.toEpochMilliseconds()
+                ?.takeIf { it > 0L && it <= System.currentTimeMillis() }
+            pendingStartMs ?: liveCreatedMs ?: System.currentTimeMillis()
         } else {
             val latestAssistant = cached?.conversation?.messageNodes?.lastOrNull()?.currentMessage
-                ?.takeIf { it.role == MessageRole.ASSISTANT }
+                ?.takeIf { it.role == MessageRole.ASSISTANT && it.finishedAt == null }
             val createdMs = latestAssistant?.createdAt
                 ?.toInstant(TimeZone.currentSystemDefault())
                 ?.toEpochMilliseconds()
                 ?.takeIf { it > 0L && it <= System.currentTimeMillis() }
-            createdMs ?: cached?.conversation?.updateAt?.toEpochMilli()
-                ?.takeIf { it > 0L && it <= System.currentTimeMillis() }
+            pendingStartMs
+                ?: createdMs
+                ?: cached?.conversation?.updateAt?.toEpochMilli()
+                    ?.takeIf { it > 0L && it <= System.currentTimeMillis() }
                 ?: System.currentTimeMillis()
         }
-    }.flatMapLatest { startMs ->
+    }.distinctUntilChanged().flatMapLatest { startMs ->
         if (startMs == null) {
             flowOf<String?>(null)
         } else {
@@ -250,6 +277,13 @@ class AgentVM(
             _initialDraft.value = repository.getDraft(conversationId).orEmpty()
             _agentAssistant.value = repository.ensureDefaultAssistant().toDomainAssistant()
             repository.ensureDefaultModels()
+        }
+        viewModelScope.launch {
+            isGenerating.collect { generating ->
+                if (!generating) {
+                    _pendingTurnStartMs.value = null
+                }
+            }
         }
     }
 
@@ -501,6 +535,7 @@ class AgentVM(
         )
         val prompt = buildPromptFromParts(parts)
         val sources = extractSourcesFromParts(parts)
+        _pendingTurnStartMs.value = System.currentTimeMillis()
 
         when (category) {
             AgentModelCategory.CHAT -> {
@@ -574,6 +609,7 @@ class AgentVM(
         val modelEntity = currentOrFallbackModelEntity()
         val prompt = buildPromptFromParts(userMsg.parts)
         val sources = extractSourcesFromParts(userMsg.parts)
+        _pendingTurnStartMs.value = System.currentTimeMillis()
 
         when (modelEntity.modelCategory) {
             AgentModelCategory.CHAT -> {
@@ -675,9 +711,7 @@ class AgentVM(
                             modelId = modelEntity.modelId,
                         ),
                     )
-                    workingConv = workingConv.upsertMessage(nodeId, updatedAssistant).copy(
-                        updateAt = Instant.now(),
-                    )
+                    workingConv = workingConv.upsertMessage(nodeId, updatedAssistant)
                     _conversation.value = workingConv
                 }
                 repository.saveConversation(workingConv)
@@ -692,7 +726,7 @@ class AgentVM(
                         parts = currentMsg.parts + UIMessagePart.Notice(title = "请求失败", text = msg),
                     )
                 } ?: placeholderMsg.copy(parts = listOf(UIMessagePart.Notice(title = "请求失败", text = msg)))
-                val failedConv = workingConv.upsertMessage(nodeId, errAssistant).copy(updateAt = Instant.now())
+                val failedConv = workingConv.upsertMessage(nodeId, errAssistant)
                 _conversation.value = failedConv
                 repository.saveConversation(failedConv)
             } finally {
@@ -750,7 +784,7 @@ class AgentVM(
                         parts = listOf(UIMessagePart.Text(res.summaryMarkdown)),
                         usage = res.usage,
                     )
-                    val doneConv = initialConv.upsertMessage(nodeId, doneMsg).copy(updateAt = Instant.now())
+                    val doneConv = initialConv.upsertMessage(nodeId, doneMsg)
                     _conversation.value = doneConv
                     repository.saveConversation(doneConv)
                 }.onFailure { err ->
@@ -759,7 +793,7 @@ class AgentVM(
                     val errMsg = placeholderMsg.copy(
                         parts = listOf(UIMessagePart.Notice(title = "决策失败", text = msg)),
                     )
-                    val failedConv = initialConv.upsertMessage(nodeId, errMsg).copy(updateAt = Instant.now())
+                    val failedConv = initialConv.upsertMessage(nodeId, errMsg)
                     _conversation.value = failedConv
                     repository.saveConversation(failedConv)
                 }
@@ -821,7 +855,7 @@ class AgentVM(
                         append("如需实时同步云端执行步骤，可在右上角菜单连接 PocketBase 账号。")
                     }
                     val doneMsg = placeholderMsg.copy(parts = listOf(UIMessagePart.Text(summary)))
-                    val doneConv = initialConv.upsertMessage(nodeId, doneMsg).copy(updateAt = Instant.now())
+                    val doneConv = initialConv.upsertMessage(nodeId, doneMsg)
                     _conversation.value = doneConv
                     repository.saveConversation(doneConv)
                 }.onFailure { err ->
@@ -830,7 +864,7 @@ class AgentVM(
                     val errMsg = placeholderMsg.copy(
                         parts = listOf(UIMessagePart.Notice(title = "派发失败", text = msg)),
                     )
-                    val failedConv = initialConv.upsertMessage(nodeId, errMsg).copy(updateAt = Instant.now())
+                    val failedConv = initialConv.upsertMessage(nodeId, errMsg)
                     _conversation.value = failedConv
                     repository.saveConversation(failedConv)
                 }

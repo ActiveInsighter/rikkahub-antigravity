@@ -13,6 +13,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.finishReasoning
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.isAwaitingToolApproval
@@ -201,11 +204,20 @@ class ConversationSession(
     // 失败和取消也必须保存已收到的内容，且保存完成前不能释放生成任务。
     suspend fun finishGeneration(): Conversation = withContext(NonCancellable) {
         update { current ->
+            val latestUserInstant = current.messageNodes.asReversed()
+                .asSequence()
+                .map { it.currentMessage }
+                .firstOrNull { it.role == MessageRole.USER }
+                ?.createdAt
+                ?.toInstant(TimeZone.currentSystemDefault())
+                ?.toEpochMilliseconds()
+                ?.takeIf { it > 0L }
+                ?.let(Instant::ofEpochMilli)
             current.copy(
                 messageNodes = current.messageNodes.map { node ->
                     node.copy(messages = node.messages.map { it.finishReasoning() })
                 },
-                updateAt = Instant.now(),
+                updateAt = latestUserInstant ?: current.updateAt,
             )
         }
         flush()
