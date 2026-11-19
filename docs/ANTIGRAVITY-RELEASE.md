@@ -9,7 +9,10 @@
 - 支持通过私人提供商二维码配置 GitHub HTTPS Git/REST 出站认证；公开 APK 不含任何个人 GitHub Token。新版隐藏请求日志中的远程环境/MCP 认证信息。
 - Agent 页面使用 PocketBase Realtime 同步所有活跃会话。切换会话时，其他任务继续更新 Room，重连后会补齐遗漏分段。
 - Agent 新增本地输入草稿、侧边栏运行和未读状态，以及完成与失败通知。成功回复会显示最终保存的全文，历史消息也会按自身状态显示。
-- Actions 运行请求回归测试、构建 APK 并验证签名；未使用用户 API Key 调用 Google 实测，仍需安装后验证账号权限和真实响应。
+- Agent 支持手动添加 Gemini 模型。普通 Gemini 可设置思考程度，Antigravity 使用托管推理。
+- Agent 侧栏的「工作流」可定时执行提示词。每个任务可设置模型、系统提示词、Cron 和时区，也可暂停或立即执行。
+- Antigravity 的新对话由 Gemini 3.5 Flash-Lite 生成标题。点击运行耗时或消息末尾的执行详情，可查看执行总结及派发、首响和步骤时间线。
+- Actions 运行请求及同步回归测试，构建 APK 并验证签名。
 - Debug 版关闭 Firebase Analytics 和 Crashlytics 数据收集，使用本地占位配置，无需 Firebase 密钥。
 
 源代码及详细说明见仓库的 [ANTIGRAVITY.md](https://github.com/ActiveInsighter/rikkahub-antigravity/blob/main/ANTIGRAVITY.md)。
