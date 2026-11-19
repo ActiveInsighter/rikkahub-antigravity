@@ -18,8 +18,12 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
+import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.net.URLEncoder
@@ -697,6 +701,105 @@ class WorkflowLibraryRepository(
             )
             Unit
         }
+    }
+
+    fun hasSession(): Boolean = workflowRepository.session.value != null
+
+    suspend fun uploadLibraryImage(
+        file: File,
+        fileName: String,
+        mimeType: String,
+        onProgress: (Float) -> Unit = {},
+    ): Result<LibraryImage> = withContext(Dispatchers.IO) {
+        runCatching {
+            val session = workflowRepository.requireSession()
+            val cleanName = bounded(fileName, 240, "图片名称", required = true)
+            val encodedName = URLEncoder.encode(cleanName, "UTF-8").replace("+", "%20")
+            val totalBytes = file.length().coerceAtLeast(1L)
+            val mediaType = mimeType.toMediaType()
+            val streamingBody = object : RequestBody() {
+                override fun contentType(): MediaType = mediaType
+                override fun contentLength(): Long = file.length()
+                override fun writeTo(sink: BufferedSink) {
+                    val buffer = ByteArray(16 * 1024)
+                    var uploaded = 0L
+                    file.inputStream().use { input ->
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read <= 0) break
+                            sink.write(buffer, 0, read)
+                            uploaded += read
+                            onProgress((uploaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 0.98f))
+                        }
+                    }
+                }
+            }
+            val root = executeLibraryJson(
+                session = session,
+                path = "/api/library/images",
+                method = "PUT",
+                extraHeaders = mapOf("X-File-Name" to encodedName),
+                rawBody = streamingBody,
+            ).jsonObject
+            onProgress(1f)
+            parseLibraryImage(root)
+        }
+    }
+
+    suspend fun listLibraryImages(
+        cursor: String = "",
+        query: String = "",
+        limit: Int = 60,
+        sort: String = "newest",
+    ): Result<LibraryImagePage> = withContext(Dispatchers.IO) {
+        runCatching {
+            val session = workflowRepository.requireSession()
+            val params = buildMap {
+                put("limit", limit.coerceIn(1, 200).toString())
+                put("sort", if (sort == "oldest") "oldest" else "newest")
+                if (cursor.isNotBlank()) put("cursor", cursor)
+                if (query.isNotBlank()) put("q", query.trim())
+            }
+            val root = executeLibraryJson(
+                session = session,
+                path = "/api/library/images",
+                method = "GET",
+                query = params,
+            ).jsonObject
+            val items = root["items"]?.jsonArray.orEmpty().mapNotNull { el ->
+                runCatching { parseLibraryImage(el.jsonObject) }.getOrNull()
+            }
+            val nextCursor = root["cursor"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            LibraryImagePage(items = items, cursor = nextCursor)
+        }
+    }
+
+    suspend fun deleteLibraryImage(imageId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val session = workflowRepository.requireSession()
+            executeLibraryJson(
+                session = session,
+                path = "/api/library/images/${requiredId(imageId, "图片 ID")}",
+                method = "DELETE",
+            )
+            Unit
+        }
+    }
+
+    private fun parseLibraryImage(obj: JsonObject): LibraryImage {
+        val id = obj["id"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val sourceUrl = obj["sourceUrl"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        if (id.isEmpty() || sourceUrl.isEmpty()) {
+            throw WorkflowApiException("图片资料库数据格式无效", 502)
+        }
+        return LibraryImage(
+            id = id,
+            fileName = obj["fileName"]?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { id },
+            mimeType = obj["mimeType"]?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { "image/png" },
+            size = obj["size"]?.jsonPrimitive?.longOrNull ?: 0L,
+            createdAt = obj["createdAt"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            sourceUrl = sourceUrl,
+        )
     }
 
     // -----------------------------------------------------------------------

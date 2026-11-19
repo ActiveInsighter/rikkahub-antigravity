@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.ai
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -177,13 +178,25 @@ fun ChatInput(
     fun sendMessage() {
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
-        if (loading && state.isEmpty()) onCancelClick() else onSendClick()
+        if (loading && state.isEmpty()) {
+            onCancelClick()
+        } else if (state.hasUploadingImages) {
+            toaster.show(message = "图片正在上传，请稍候…", type = ToastType.Info)
+        } else {
+            onSendClick()
+        }
     }
 
     fun sendMessageWithoutAnswer() {
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
-        if (loading && state.isEmpty()) onCancelClick() else onLongSendClick()
+        if (loading && state.isEmpty()) {
+            onCancelClick()
+        } else if (state.hasUploadingImages) {
+            toaster.show(message = "图片正在上传，请稍候…", type = ToastType.Info)
+        } else {
+            onLongSendClick()
+        }
     }
 
     val asr = LocalASRState.current
@@ -387,7 +400,7 @@ fun ChatInput(
                         ) {
                             SendButton(
                                 loading = loading,
-                                empty = state.isEmpty(),
+                                empty = state.isEmpty() || state.hasUploadingImages,
                                 onClick = { sendMessage() },
                                 onLongClick = { sendMessageWithoutAnswer() },
                             )
@@ -544,8 +557,11 @@ private fun TextInputRow(
         var isFocused by remember { mutableStateOf(false) }
         var isFullScreen by remember { mutableStateOf(false) }
         var completionList by remember { mutableStateOf<ChatCompletionList?>(null) }
+        val uploadImages = rememberR2ImageUploader(state)
         val receiveContentListener = remember(
-            settings.displaySetting.pasteLongTextAsFile, settings.displaySetting.pasteLongTextThreshold
+            settings.displaySetting.pasteLongTextAsFile,
+            settings.displaySetting.pasteLongTextThreshold,
+            uploadImages,
         ) {
             ReceiveContentListener { transferableContent ->
                 when {
@@ -553,7 +569,7 @@ private fun TextInputRow(
                         transferableContent.consume { item ->
                             val uri = item.uri
                             if (uri != null) {
-                                state.addImages(
+                                uploadImages(
                                     filesManager.createChatFilesByContents(
                                         listOf(uri)
                                     )
