@@ -398,7 +398,7 @@ fun AgentPage(id: Uuid) {
                                 loading = isGenerating,
                                 settings = composedSettings,
                                 assistant = agentAssistant,
-                                chatModel = selectedModel,
+                                chatModel = resolvedChatModel,
                                 hazeState = hazeState,
                                 placeholderText = inputPlaceholder,
                                 alwaysShowReasoningButton = true,
