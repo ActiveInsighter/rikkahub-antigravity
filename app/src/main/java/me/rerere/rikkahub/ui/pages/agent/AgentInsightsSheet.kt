@@ -44,6 +44,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -577,6 +578,7 @@ private fun SummaryTabContent(
 
         if (summary.issues.isNotEmpty()) {
             item {
+                val issueContainerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
                 CardGroup(
                     title = { Text("遇到的问题 (${summary.issues.size})") },
                 ) {
@@ -590,7 +592,7 @@ private fun SummaryTabContent(
                                 )
                             },
                             colors = ListItemDefaults.colors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+                                containerColor = issueContainerColor,
                             ),
                             headlineContent = {
                                 Text(
