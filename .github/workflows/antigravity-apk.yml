@@ -97,7 +97,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - name: Publish downloadable APK release
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
