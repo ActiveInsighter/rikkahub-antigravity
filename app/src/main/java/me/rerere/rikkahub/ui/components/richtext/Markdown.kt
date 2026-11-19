@@ -141,7 +141,9 @@ fun MarkdownBlock(
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
     streaming: Boolean = false,
-    onClickCitation: (String) -> Unit = {}
+    onClickCitation: (String) -> Unit = {},
+    onLinkClick: ((url: String) -> Unit)? = null,
+    imageUrlResolver: ((String) -> String)? = null,
 ) {
     val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
     val enableQuoteHighlight = LocalSettings.current.displaySetting.enableQuoteHighlight
@@ -162,6 +164,7 @@ fun MarkdownBlock(
     }
 
     val currentOnClickCitation by rememberUpdatedState(onClickCitation)
+    val currentImageUrlResolver by rememberUpdatedState(imageUrlResolver)
     val components = remember(enableLatexRendering) {
         MarkdownComponents(
             codeBlock = { block ->
@@ -173,8 +176,11 @@ fun MarkdownBlock(
                 )
             },
             image = { image, _ ->
+                val resolvedUrl = remember(image.url, currentImageUrlResolver) {
+                    currentImageUrlResolver?.invoke(image.url) ?: image.url
+                }
                 ZoomableAsyncImage(
-                    model = rememberWorkspaceImageUrl(image.url),
+                    model = rememberWorkspaceImageUrl(resolvedUrl),
                     contentDescription = image.alt,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
@@ -212,6 +218,7 @@ fun MarkdownBlock(
         theme = theme,
         components = components,
         streaming = streaming,
+        onLinkClick = onLinkClick,
     )
 }
 

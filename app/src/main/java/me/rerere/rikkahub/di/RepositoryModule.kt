@@ -141,4 +141,8 @@ val repositoryModule = module {
     single {
         me.rerere.rikkahub.data.agent.AgentRealtimeSync(get(), get(), get())
     }
+
+    single {
+        me.rerere.rikkahub.data.examdocs.ExamDocsRepository(get(), get(), get())
+    }
 }
