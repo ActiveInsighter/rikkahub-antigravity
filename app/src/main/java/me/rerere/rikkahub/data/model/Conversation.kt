@@ -2,6 +2,8 @@ package me.rerere.rikkahub.data.model
 
 import android.net.Uri
 import androidx.core.net.toUri
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import me.rerere.ai.core.MessageRole
@@ -258,3 +260,20 @@ internal fun UIMessagePart.mapLocalFileUrls(transform: (String) -> String): UIMe
         else -> this
     }
 }
+
+fun List<MessageNode>.latestUserMessageEpochMilli(): Long? {
+    for (i in indices.reversed()) {
+        val node = this[i]
+        val msg = node.messages.getOrNull(node.selectIndex) ?: continue
+        if (msg.role == MessageRole.USER && !msg.isSynthetic && !msg.isNoticeOnly) {
+            return msg.createdAt
+                .toInstant(TimeZone.currentSystemDefault())
+                .toEpochMilliseconds()
+                .takeIf { it > 0L }
+        }
+    }
+    return null
+}
+
+fun Conversation.latestUserMessageInstant(): Instant? =
+    messageNodes.latestUserMessageEpochMilli()?.let { Instant.ofEpochMilli(it) }

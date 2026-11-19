@@ -88,7 +88,14 @@ class AgentVM(
 
     private val snapshot = MutableStateFlow<AgentConversationSnapshot?>(null)
     private val _isLocalGenerating = MutableStateFlow(false)
+    private val _localGenerationStartedAt = MutableStateFlow<Long?>(null)
+    private val _pendingRemoteSubmission = MutableStateFlow<Pair<Uuid, Long>?>(null)
     private var localGenerationJob: Job? = null
+
+    private fun setLocalGenerating(active: Boolean) {
+        _isLocalGenerating.value = active
+        _localGenerationStartedAt.value = if (active) System.currentTimeMillis() else null
+    }
 
     val isGenerating: StateFlow<Boolean> = combine(
         snapshot,
@@ -104,19 +111,37 @@ class AgentVM(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val activeStatusText: StateFlow<String?> = combine(isGenerating, snapshot) { generating, cached ->
+    val activeStatusText: StateFlow<String?> = combine(
+        isGenerating,
+        snapshot,
+        _localGenerationStartedAt,
+        repository.submittingStartedAt,
+        _pendingRemoteSubmission,
+    ) { generating, cached, localStartedAt, submittingMap, pendingRemote ->
         if (!generating) {
+            _pendingRemoteSubmission.value = null
             null
         } else {
-            val latestAssistant = cached?.conversation?.messageNodes?.lastOrNull()?.currentMessage
-                ?.takeIf { it.role == MessageRole.ASSISTANT }
-            val createdMs = latestAssistant?.createdAt
-                ?.toInstant(TimeZone.currentSystemDefault())
-                ?.toEpochMilliseconds()
-                ?.takeIf { it > 0L && it <= System.currentTimeMillis() }
-            createdMs ?: cached?.conversation?.updateAt?.toEpochMilli()
-                ?.takeIf { it > 0L && it <= System.currentTimeMillis() }
-                ?: System.currentTimeMillis()
+            val submittingStart = submittingMap[conversationId]
+            val pendingHasLanded = pendingRemote != null && cached?.conversation?.messageNodes?.any { node ->
+                node.messages.any { it.id == pendingRemote.first }
+            } == true
+            when {
+                localStartedAt != null -> localStartedAt
+                submittingStart != null -> submittingStart
+                pendingRemote != null && !pendingHasLanded -> pendingRemote.second
+                else -> {
+                    val latestAssistant = cached?.conversation?.messageNodes?.lastOrNull()?.currentMessage
+                        ?.takeIf { it.role == MessageRole.ASSISTANT }
+                    val createdMs = latestAssistant?.createdAt
+                        ?.toInstant(TimeZone.currentSystemDefault())
+                        ?.toEpochMilliseconds()
+                        ?.takeIf { it > 0L && it <= System.currentTimeMillis() }
+                    createdMs ?: cached?.conversation?.updateAt?.toEpochMilli()
+                        ?.takeIf { it > 0L && it <= System.currentTimeMillis() }
+                        ?: System.currentTimeMillis()
+                }
+            }
         }
     }.flatMapLatest { startMs ->
         if (startMs == null) {
@@ -548,7 +573,7 @@ class AgentVM(
         if (_isLocalGenerating.value) {
             localGenerationJob?.cancel()
             localGenerationJob = null
-            _isLocalGenerating.value = false
+            setLocalGenerating(false)
             return
         }
         viewModelScope.launch {
@@ -651,7 +676,7 @@ class AgentVM(
         )
 
         localGenerationJob?.cancel()
-        _isLocalGenerating.value = true
+        setLocalGenerating(true)
         _conversation.value = initialConv
 
         localGenerationJob = viewModelScope.launch {
@@ -675,9 +700,7 @@ class AgentVM(
                             modelId = modelEntity.modelId,
                         ),
                     )
-                    workingConv = workingConv.upsertMessage(nodeId, updatedAssistant).copy(
-                        updateAt = Instant.now(),
-                    )
+                    workingConv = workingConv.upsertMessage(nodeId, updatedAssistant)
                     _conversation.value = workingConv
                 }
                 repository.saveConversation(workingConv)
@@ -692,11 +715,11 @@ class AgentVM(
                         parts = currentMsg.parts + UIMessagePart.Notice(title = "请求失败", text = msg),
                     )
                 } ?: placeholderMsg.copy(parts = listOf(UIMessagePart.Notice(title = "请求失败", text = msg)))
-                val failedConv = workingConv.upsertMessage(nodeId, errAssistant).copy(updateAt = Instant.now())
+                val failedConv = workingConv.upsertMessage(nodeId, errAssistant)
                 _conversation.value = failedConv
                 repository.saveConversation(failedConv)
             } finally {
-                _isLocalGenerating.value = false
+                setLocalGenerating(false)
             }
         }
     }
@@ -730,7 +753,7 @@ class AgentVM(
         }
 
         localGenerationJob?.cancel()
-        _isLocalGenerating.value = true
+        setLocalGenerating(true)
         _conversation.value = initialConv
 
         localGenerationJob = viewModelScope.launch {
@@ -750,7 +773,7 @@ class AgentVM(
                         parts = listOf(UIMessagePart.Text(res.summaryMarkdown)),
                         usage = res.usage,
                     )
-                    val doneConv = initialConv.upsertMessage(nodeId, doneMsg).copy(updateAt = Instant.now())
+                    val doneConv = initialConv.upsertMessage(nodeId, doneMsg)
                     _conversation.value = doneConv
                     repository.saveConversation(doneConv)
                 }.onFailure { err ->
@@ -759,12 +782,12 @@ class AgentVM(
                     val errMsg = placeholderMsg.copy(
                         parts = listOf(UIMessagePart.Notice(title = "决策失败", text = msg)),
                     )
-                    val failedConv = initialConv.upsertMessage(nodeId, errMsg).copy(updateAt = Instant.now())
+                    val failedConv = initialConv.upsertMessage(nodeId, errMsg)
                     _conversation.value = failedConv
                     repository.saveConversation(failedConv)
                 }
             } finally {
-                _isLocalGenerating.value = false
+                setLocalGenerating(false)
             }
         }
     }
@@ -798,7 +821,7 @@ class AgentVM(
         }
 
         localGenerationJob?.cancel()
-        _isLocalGenerating.value = true
+        setLocalGenerating(true)
         _conversation.value = initialConv
 
         localGenerationJob = viewModelScope.launch {
@@ -821,7 +844,7 @@ class AgentVM(
                         append("如需实时同步云端执行步骤，可在右上角菜单连接 PocketBase 账号。")
                     }
                     val doneMsg = placeholderMsg.copy(parts = listOf(UIMessagePart.Text(summary)))
-                    val doneConv = initialConv.upsertMessage(nodeId, doneMsg).copy(updateAt = Instant.now())
+                    val doneConv = initialConv.upsertMessage(nodeId, doneMsg)
                     _conversation.value = doneConv
                     repository.saveConversation(doneConv)
                 }.onFailure { err ->
@@ -830,12 +853,12 @@ class AgentVM(
                     val errMsg = placeholderMsg.copy(
                         parts = listOf(UIMessagePart.Notice(title = "派发失败", text = msg)),
                     )
-                    val failedConv = initialConv.upsertMessage(nodeId, errMsg).copy(updateAt = Instant.now())
+                    val failedConv = initialConv.upsertMessage(nodeId, errMsg)
                     _conversation.value = failedConv
                     repository.saveConversation(failedConv)
                 }
             } finally {
-                _isLocalGenerating.value = false
+                setLocalGenerating(false)
             }
         }
     }
@@ -975,6 +998,7 @@ class AgentVM(
             )
             baseConversation.copy(messageNodes = baseConversation.messageNodes + newNode)
         }
+        _pendingRemoteSubmission.value = assistantMsgId to System.currentTimeMillis()
         val task = repository.submitMessage(
             conversation = initialConv,
             prompt = prompt,

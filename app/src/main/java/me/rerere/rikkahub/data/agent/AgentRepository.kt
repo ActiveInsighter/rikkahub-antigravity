@@ -24,6 +24,7 @@ import me.rerere.rikkahub.data.event.AppEvent
 import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.model.latestUserMessageEpochMilli
 import me.rerere.rikkahub.data.workflow.WorkflowRepository
 import me.rerere.rikkahub.data.workflow.WorkflowSession
 import me.rerere.rikkahub.utils.JsonInstant
@@ -70,6 +71,8 @@ class AgentRepository(
     private val conversationLocks = List(16) { Mutex() }
     private val _submittingIds = MutableStateFlow<Set<Uuid>>(emptySet())
     val submittingIds = _submittingIds.asStateFlow()
+    private val _submittingStartedAt = MutableStateFlow<Map<Uuid, Long>>(emptyMap())
+    val submittingStartedAt = _submittingStartedAt.asStateFlow()
 
     fun observeConversations(sortOrder: ConversationSortOrder): Flow<List<Conversation>> {
         val source = when (sortOrder) {
@@ -192,11 +195,16 @@ class AgentRepository(
                 val repaired = previousStatus in setOf("failed", "partial") && thread.status == "succeeded"
                 val status = if (repaired) thread.status else previousStatus ?: thread.status
                 val isVisible = (existing?.id ?: fallbackId) == visibleConversation?.toString()
+                val nextUpdateAt = if (existing != null && sameJob && existing.updateAt > 0L) {
+                    existing.updateAt
+                } else {
+                    remoteTime(thread.created, existing?.updateAt ?: created)
+                }
                 val updated = AgentConversationEntity(
                     id = existing?.id ?: fallbackId,
                     title = thread.title.ifBlank { existing?.title ?: "Agent" },
                     createAt = created,
-                    updateAt = maxOf(existing?.updateAt ?: 0L, remoteTime(thread.updated, created)),
+                    updateAt = nextUpdateAt,
                     isPinned = thread.pinned,
                     folderId = folderId,
                     assistantId = existing?.assistantId,
@@ -261,13 +269,10 @@ class AgentRepository(
                 val succeeded = status == "succeeded"
                 val becameUnread = (finished && (succeeded || status == "failed")) ||
                     (succeeded && existing.remoteStatus in setOf("failed", "partial"))
+                val latestUserAt = remote.messageNodes.latestUserMessageEpochMilli()
                 val updated = existing.copy(
                     title = remote.job.title.ifBlank { existing.title },
-                    updateAt = maxOf(
-                        existing.updateAt,
-                        remoteTime(remote.job.updated, existing.updateAt),
-                        remoteTime(remote.message?.updated.orEmpty(), existing.updateAt),
-                    ),
+                    updateAt = latestUserAt ?: existing.updateAt,
                     remoteStatus = status,
                     lastRemoteMessageId = remote.message?.id,
                     hasUnread = id != visibleConversation && (existing.hasUnread || becameUnread),
@@ -312,7 +317,9 @@ class AgentRepository(
         systemPrompt: String? = null,
     ): Deferred<Result<Unit>> {
         val session = workflowRepository.session.value
+        val startedAt = System.currentTimeMillis()
         _submittingIds.update { it + conversation.id }
+        _submittingStartedAt.update { it + (conversation.id to startedAt) }
         // Commit the job-to-conversation mapping even if navigation clears the submitting ViewModel.
         return appScope.async {
             try {
@@ -336,6 +343,7 @@ class AgentRepository(
                 }.onFailure { if (it is CancellationException) throw it }
             } finally {
                 _submittingIds.update { it - conversation.id }
+                _submittingStartedAt.update { it - conversation.id }
             }
         }
     }
@@ -362,7 +370,8 @@ class AgentRepository(
                 id = convId,
                 title = conversation.title,
                 createAt = conversation.createAt.toEpochMilli(),
-                updateAt = conversation.updateAt.toEpochMilli(),
+                updateAt = conversation.messageNodes.latestUserMessageEpochMilli()
+                    ?: conversation.updateAt.toEpochMilli(),
                 isPinned = existing?.isPinned ?: conversation.isPinned,
                 folderId = existing?.folderId ?: conversation.folderId?.toString(),
                 assistantId = conversation.assistantId.toString(),

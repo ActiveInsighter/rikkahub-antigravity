@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 import me.rerere.ai.ui.finishReasoning
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.isAwaitingToolApproval
+import me.rerere.rikkahub.data.model.latestUserMessageInstant
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.uuid.Uuid
@@ -205,7 +206,7 @@ class ConversationSession(
                 messageNodes = current.messageNodes.map { node ->
                     node.copy(messages = node.messages.map { it.finishReasoning() })
                 },
-                updateAt = Instant.now(),
+                updateAt = current.latestUserMessageInstant() ?: current.updateAt,
             )
         }
         flush()

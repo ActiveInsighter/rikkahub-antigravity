@@ -4,6 +4,9 @@ import android.app.Application
 import android.util.Log
 import androidx.annotation.StringRes
 import androidx.core.net.toUri
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
+import java.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
@@ -507,14 +510,19 @@ class ChatService(
                 // 等待中的通知存成用户消息之前的节点：写进回复的话，重新生成时就丢了。
                 // 不回复时留在收件箱，这一轮结束后单独开一轮
                 val notices = if (queued.answer) session.inbox.takeNotices() else emptyList()
+                val userMessage = UIMessage(
+                    role = MessageRole.USER,
+                    parts = processedContent,
+                )
+                val userSentAt = Instant.ofEpochMilli(
+                    userMessage.createdAt.toInstant(TimeZone.currentSystemDefault()).toEpochMilliseconds()
+                )
                 session.update {
                     it.copy(
                         messageNodes = it.messageNodes +
                             listOfNotNull(notices.takeIf { n -> n.isNotEmpty() }?.toNoticeNode()) +
-                            UIMessage(
-                                role = MessageRole.USER,
-                                parts = processedContent,
-                            ).toMessageNode(),
+                            userMessage.toMessageNode(),
+                        updateAt = userSentAt,
                     )
                 }
                 session.flush()
