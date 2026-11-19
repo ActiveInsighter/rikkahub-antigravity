@@ -61,6 +61,7 @@ import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.FolderAdd
+import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.GitFork
 import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.ImageToVideo
@@ -769,6 +770,13 @@ private fun DrawerActions(navController: Navigator) {
             icon = HugeIcons.GitFork,
             text = "工作流",
             onClick = { navController.navigate(Screen.Workflow) },
+        )
+
+        // 考研文档入口
+        DrawerEntry(
+            icon = HugeIcons.Book02,
+            text = "考研文档",
+            onClick = { navController.navigate(Screen.ExamDocs) },
         )
     }
 }

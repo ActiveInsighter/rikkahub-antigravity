@@ -141,6 +141,7 @@ import me.rerere.rikkahub.ui.pages.setting.SettingSpeechPage
 import me.rerere.rikkahub.ui.pages.setting.SettingWebPage
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
 import me.rerere.rikkahub.ui.pages.stats.StatsPage
+import me.rerere.rikkahub.ui.pages.examdocs.ExamDocsPage
 import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.pages.agent.AgentPage
@@ -452,6 +453,10 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.Translator> {
                                 TranslatorPage()
+                            }
+
+                            entry<Screen.ExamDocs> {
+                                ExamDocsPage()
                             }
 
                             entry<Screen.Setting> {
@@ -898,4 +903,7 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Workflow : Screen
+
+    @Serializable
+    data object ExamDocs : Screen
 }
