@@ -515,7 +515,7 @@ class ChatService(
                                 role = MessageRole.USER,
                                 parts = processedContent,
                             ).toMessageNode(),
-                        updateAt = Instant.now(),
+                        updateAt = java.time.Instant.now(),
                     )
                 }
                 session.flush()
