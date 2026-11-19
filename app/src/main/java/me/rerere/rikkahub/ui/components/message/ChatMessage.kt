@@ -12,6 +12,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -92,7 +93,7 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalWorkspaceId
-import me.rerere.rikkahub.ui.pages.agent.AgentMessageInsightsFooter
+import me.rerere.rikkahub.ui.pages.agent.AgentMessageDurationChip
 import me.rerere.rikkahub.ui.theme.LocalChatFontFamily
 import me.rerere.rikkahub.ui.theme.rememberChatFontFamily
 import me.rerere.rikkahub.utils.JsonInstant
@@ -246,15 +247,20 @@ fun ChatMessage(
             assistant = assistant,
         )
 
-        ProvideTextStyle(textStyle) {
-            ChatMessageNerdLine(message = message)
-        }
-
-        if (onOpenAgentInsights != null && message.role == MessageRole.ASSISTANT && !loading) {
-            AgentMessageInsightsFooter(
-                message = message,
-                onClick = { onOpenAgentInsights(message) },
-            )
+        val showAgentDuration = onOpenAgentInsights != null && message.role == MessageRole.ASSISTANT && !loading
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+        ) {
+            ProvideTextStyle(textStyle) {
+                ChatMessageNerdLine(message = message)
+            }
+            if (showAgentDuration) {
+                AgentMessageDurationChip(
+                    message = message,
+                    onClick = { onOpenAgentInsights(message) },
+                )
+            }
         }
 
     }
