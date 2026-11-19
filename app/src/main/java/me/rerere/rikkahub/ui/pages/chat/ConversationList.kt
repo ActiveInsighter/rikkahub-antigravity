@@ -316,13 +316,27 @@ private fun ConversationItem(
             }
             when {
                 statusBadge == ConversationStatusBadge.RUNNING -> {
-                    androidx.compose.material3.CircularProgressIndicator(
-                        modifier = Modifier
-                            .size(14.dp)
-                            .semantics { contentDescription = "Running" },
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.extendColors.green6,
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+                        shape = CircleShape,
+                        modifier = Modifier.semantics { contentDescription = "Running" },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            androidx.compose.material3.LoadingIndicator(
+                                modifier = Modifier.size(13.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                text = "运行中",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        }
+                    }
                 }
                 statusBadge == ConversationStatusBadge.COMPLETED_UNREAD -> {
                     Box(
@@ -334,23 +348,25 @@ private fun ConversationItem(
                     )
                 }
                 statusBadge == ConversationStatusBadge.FAILED -> {
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.error)
-                            .size(8.dp)
-                            .semantics { contentDescription = "Failed" }
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = CircleShape,
+                        modifier = Modifier.semantics { contentDescription = "Failed" },
+                    ) {
+                        Text(
+                            text = "失败",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                        )
+                    }
                 }
                 loading -> {
-                    Box(
+                    androidx.compose.material3.LoadingIndicator(
                         modifier = Modifier
-                            .clip(CircleShape)
-                            .background(MaterialTheme.extendColors.green6)
-                            .size(4.dp)
-                            .semantics {
-                                contentDescription = "Loading"
-                            }
+                            .size(14.dp)
+                            .semantics { contentDescription = "Loading" },
+                        color = MaterialTheme.colorScheme.primary,
                     )
                 }
             }

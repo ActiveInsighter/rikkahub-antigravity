@@ -259,7 +259,8 @@ class AgentRepository(
                 }
                 val finished = !remote.isActive && PocketBaseAgentCloudClient.isActiveStatus(existing.remoteStatus.orEmpty())
                 val succeeded = status == "succeeded"
-                val becameReadable = succeeded && (finished || existing.remoteStatus in setOf("failed", "partial"))
+                val becameUnread = (finished && (succeeded || status == "failed")) ||
+                    (succeeded && existing.remoteStatus in setOf("failed", "partial"))
                 val updated = existing.copy(
                     title = remote.job.title.ifBlank { existing.title },
                     updateAt = maxOf(
@@ -269,7 +270,7 @@ class AgentRepository(
                     ),
                     remoteStatus = status,
                     lastRemoteMessageId = remote.message?.id,
-                    hasUnread = id != visibleConversation && (existing.hasUnread || becameReadable),
+                    hasUnread = id != visibleConversation && (existing.hasUnread || becameUnread),
                 )
                 saveNodesForConversation(existing.id, remote.messageNodes)
                 val usage = if (finished) saveCompletedUsage(existing, remote) else null

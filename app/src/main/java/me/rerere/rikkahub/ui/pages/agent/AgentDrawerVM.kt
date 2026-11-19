@@ -59,7 +59,7 @@ class AgentDrawerVM(
                     when {
                         status != null && PocketBaseAgentCloudClient.isActiveStatus(status) ->
                             ConversationStatusBadge.RUNNING
-                        status.equals("failed", ignoreCase = true) ->
+                        status.equals("failed", ignoreCase = true) && info.hasUnread ->
                             ConversationStatusBadge.FAILED
                         info.hasUnread ->
                             ConversationStatusBadge.COMPLETED_UNREAD
