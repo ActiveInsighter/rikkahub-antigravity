@@ -50,12 +50,12 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AlertCircle
+import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.hugeicons.stroke.CheckmarkCircle02
 import me.rerere.hugeicons.stroke.Clock01
 import me.rerere.hugeicons.stroke.Flash
 import me.rerere.hugeicons.stroke.Message01
-import me.rerere.hugeicons.stroke.Sent
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.Time02
 import me.rerere.hugeicons.stroke.Wrench01
@@ -398,7 +398,7 @@ private fun SummaryTabContent(
 
             if (fallbackTools.isNotEmpty() || fallbackIssues.isNotEmpty()) {
                 item {
-                    CardGroup(title = "本次执行概况") {
+                    CardGroup(title = { Text("本次执行概况") }) {
                         if (fallbackTools.isNotEmpty()) {
                             item(
                                 leadingContent = {
@@ -491,7 +491,7 @@ private fun SummaryTabContent(
 
         if (summary.sentWhat.isNotBlank()) {
             item {
-                CardGroup(title = "任务目标") {
+                CardGroup(title = { Text("任务目标") }) {
                     item(
                         leadingContent = {
                             Icon(
@@ -512,7 +512,7 @@ private fun SummaryTabContent(
 
         if (summary.actionsDone.isNotEmpty()) {
             item {
-                CardGroup(title = "已执行操作 (${summary.actionsDone.size})") {
+                CardGroup(title = { Text("已执行操作 (${summary.actionsDone.size})") }) {
                     summary.actionsDone.forEach { action ->
                         item(
                             leadingContent = {
@@ -535,7 +535,7 @@ private fun SummaryTabContent(
 
         if (summary.completed.isNotEmpty()) {
             item {
-                CardGroup(title = "已完成 (${summary.completed.size})") {
+                CardGroup(title = { Text("已完成 (${summary.completed.size})") }) {
                     summary.completed.forEach { done ->
                         item(
                             leadingContent = {
@@ -558,12 +558,13 @@ private fun SummaryTabContent(
 
         if (summary.issues.isNotEmpty()) {
             item {
-                CardGroup(title = "遇到的问题 (${summary.issues.size})") {
+                val errorItemColors = ListItemDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                )
+                CardGroup(title = { Text("遇到的问题 (${summary.issues.size})") }) {
                     summary.issues.forEach { issue ->
                         item(
-                            colors = ListItemDefaults.colors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
-                            ),
+                            colors = errorItemColors,
                             leadingContent = {
                                 Icon(
                                     imageVector = HugeIcons.AlertCircle,
@@ -786,7 +787,7 @@ private fun TimingsTabContent(
                 "时间节点 (${timings.steps.size})"
             }
             item {
-                CardGroup(title = stepsTitle) {
+                CardGroup(title = { Text(stepsTitle) }) {
                     timings.steps.forEachIndexed { idx, step ->
                         val isFailed = step.status == "failed"
                         val stepIcon = when {
