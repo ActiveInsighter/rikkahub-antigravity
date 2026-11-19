@@ -35,6 +35,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenuGroup
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenuPopup
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -98,6 +99,9 @@ import me.rerere.hugeicons.stroke.Refresh
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.agent.AgentModelCategory
+import me.rerere.rikkahub.data.agent.AgentModelEntity
+import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
 import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
 import me.rerere.rikkahub.ui.components.ai.AgentFilesPicker
 import me.rerere.rikkahub.ui.components.ai.ChatInput
@@ -129,9 +133,11 @@ fun AgentPage(id: Uuid) {
     val isInitialLoading by vm.isInitialLoading.collectAsStateWithLifecycle()
     val agentAssistant by vm.agentAssistant.collectAsStateWithLifecycle()
     val selectedModel by vm.selectedModel.collectAsStateWithLifecycle()
+    val localModels by vm.localModels.collectAsStateWithLifecycle()
+    val selectedModelEntity by vm.selectedModelEntity.collectAsStateWithLifecycle()
+    val selectedModelCategory by vm.selectedModelCategory.collectAsStateWithLifecycle()
     val selectedAgentModelName by vm.selectedAgentModelName.collectAsStateWithLifecycle()
-    val customGeminiModels by vm.customGeminiModels.collectAsStateWithLifecycle()
-    val availableAgentModels by vm.availableAgentModels.collectAsStateWithLifecycle()
+    val decisionSchemaJson by vm.decisionSchemaJson.collectAsStateWithLifecycle()
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     val isSyncing by vm.isSyncing.collectAsStateWithLifecycle()
     val activeStatusText by vm.activeStatusText.collectAsStateWithLifecycle()
@@ -322,8 +328,10 @@ fun AgentPage(id: Uuid) {
                                         isGenerating && !activeStatusText.isNullOrBlank() -> "运行中 · $activeStatusText"
                                         !activeStatusText.isNullOrBlank() -> activeStatusText!!
                                         isSyncing -> "正在同步…"
-                                        session == null -> "未连接云端 · $selectedAgentModelName"
-                                        else -> selectedAgentModelName
+                                        selectedModelCategory == AgentModelCategory.CHAT -> "Chat 流式 · $selectedAgentModelName"
+                                        selectedModelCategory == AgentModelCategory.DECISION -> "Decision 决策 · $selectedAgentModelName"
+                                        session == null -> "Agent Action · $selectedAgentModelName"
+                                        else -> "Agent · $selectedAgentModelName"
                                     }
                                     Text(
                                         text = subtitleText,
@@ -373,40 +381,53 @@ fun AgentPage(id: Uuid) {
                         )
                     },
                     bottomBar = {
-                        ChatInput(
-                            state = inputState,
-                            loading = isGenerating,
-                            settings = composedSettings,
-                            assistant = agentAssistant,
-                            chatModel = selectedModel,
-                            hazeState = hazeState,
-                            placeholderText = "输入指令…",
-                            alwaysShowReasoningButton = true,
-                            showReasoningButton = !selectedAgentModelName.isManagedAgentModel(),
-                            showAsrButton = false,
-                            overrideModelId = selectedAgentModelName,
-                            onModelSelectorClick = { showModelPickerSheet = true },
-                            onUpdateChatModel = vm::updateAgentModel,
-                            onUpdateAssistant = vm::updateAgentAssistant,
-                            onMoreClick = { showAttachSheet = true },
-                            onCancelClick = { vm.stopGeneration() },
-                            onSendClick = {
-                                val parts = inputState.getContents()
-                                if (vm.sendMessage(parts)) {
-                                    inputState.clearInput()
-                                    scope.launch {
-                                        delay(100.milliseconds)
-                                        listState.requestScrollToItem(conversation.messageNodes.size + 5)
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            if (selectedModelCategory == AgentModelCategory.DECISION) {
+                                DecisionSchemaBar(
+                                    schemaJson = decisionSchemaJson,
+                                    onUpdateSchema = vm::updateDecisionSchemaJson,
+                                )
+                            }
+                            val inputPlaceholder = when (selectedModelCategory) {
+                                AgentModelCategory.CHAT -> "输入对话内容（流式输出）…"
+                                AgentModelCategory.DECISION -> "输入决策问题（返回结构化 JSON）…"
+                                AgentModelCategory.AGENT -> "输入 Agent 任务指令…"
+                            }
+                            ChatInput(
+                                state = inputState,
+                                loading = isGenerating,
+                                settings = composedSettings,
+                                assistant = agentAssistant,
+                                chatModel = selectedModel,
+                                hazeState = hazeState,
+                                placeholderText = inputPlaceholder,
+                                alwaysShowReasoningButton = true,
+                                showReasoningButton = selectedModelCategory != AgentModelCategory.AGENT,
+                                showAsrButton = false,
+                                overrideModelId = selectedAgentModelName,
+                                onModelSelectorClick = { showModelPickerSheet = true },
+                                onUpdateChatModel = vm::updateAgentModel,
+                                onUpdateAssistant = vm::updateAgentAssistant,
+                                onMoreClick = { showAttachSheet = true },
+                                onCancelClick = { vm.stopGeneration() },
+                                onSendClick = {
+                                    val parts = inputState.getContents()
+                                    if (vm.sendMessage(parts)) {
+                                        inputState.clearInput()
+                                        scope.launch {
+                                            delay(100.milliseconds)
+                                            listState.requestScrollToItem(conversation.messageNodes.size + 5)
+                                        }
                                     }
-                                }
-                            },
-                            onLongSendClick = {
-                                val parts = inputState.getContents()
-                                if (vm.sendMessage(parts)) {
-                                    inputState.clearInput()
-                                }
-                            },
-                        )
+                                },
+                                onLongSendClick = {
+                                    val parts = inputState.getContents()
+                                    if (vm.sendMessage(parts)) {
+                                        inputState.clearInput()
+                                    }
+                                },
+                            )
+                        }
                     },
                 ) { innerPadding ->
                     val showLoadingPlaceholder =
@@ -525,19 +546,27 @@ fun AgentPage(id: Uuid) {
 
     if (showModelPickerSheet) {
         AgentModelPickerSheet(
-            selectedModel = selectedAgentModelName,
-            availableModels = availableAgentModels,
-            customModels = customGeminiModels,
+            selectedModelId = selectedModelEntity?.id.orEmpty(),
+            models = localModels,
+            defaultBaseUrl = uiSettings.gatewayBaseUrl,
+            defaultApiKey = uiSettings.gatewayApiKey,
             onSelectModel = { model ->
-                vm.selectAgentModel(model)
+                vm.selectLocalModel(model)
                 showModelPickerSheet = false
             },
-            onAddModel = { model ->
-                vm.addCustomGeminiModel(model)
-                showModelPickerSheet = false
+            onSaveModel = { id, modelId, displayName, category, baseUrl, apiKey ->
+                vm.saveLocalModel(
+                    id = id,
+                    modelId = modelId,
+                    displayName = displayName,
+                    category = category,
+                    baseUrl = baseUrl,
+                    apiKey = apiKey,
+                    selectAfterSave = true,
+                )
             },
-            onRemoveCustomModel = { model ->
-                vm.removeCustomGeminiModel(model)
+            onDeleteModel = { id ->
+                vm.deleteLocalModel(id)
             },
             onDismiss = { showModelPickerSheet = false },
         )
@@ -826,13 +855,118 @@ private fun AgentPageMenu(
 }
 
 @Composable
+private fun DecisionSchemaBar(
+    schemaJson: String,
+    onUpdateSchema: (String) -> Unit,
+) {
+    var showEditor by remember { mutableStateOf(false) }
+    var draftSchema by remember(schemaJson) { mutableStateOf(schemaJson) }
+
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        ) {
+            Tag(type = TagType.INFO) {
+                Text("Decision JSON")
+            }
+            Text(
+                text = if (schemaJson.isBlank()) "默认结构化决策输出" else "已配置自定义 Schema",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { showEditor = true }) {
+                Text(if (schemaJson.isBlank()) "设置 Schema" else "编辑")
+            }
+        }
+    }
+
+    if (showEditor) {
+        val routePreset = """{"type":"OBJECT","properties":{"route":{"type":"STRING"},"confidence":{"type":"NUMBER"},"reason":{"type":"STRING"}},"required":["route","reason"]}"""
+        val scorePreset = """{"type":"OBJECT","properties":{"approved":{"type":"BOOLEAN"},"score":{"type":"INTEGER"},"summary":{"type":"STRING"}},"required":["approved","score"]}"""
+        AlertDialog(
+            onDismissRequest = { showEditor = false },
+            title = { Text("Decision JSON Schema") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        FilterChip(
+                            selected = draftSchema.isBlank(),
+                            onClick = { draftSchema = "" },
+                            label = { Text("自由 JSON") },
+                        )
+                        FilterChip(
+                            selected = draftSchema == routePreset,
+                            onClick = { draftSchema = routePreset },
+                            label = { Text("路由分类") },
+                        )
+                        FilterChip(
+                            selected = draftSchema == scorePreset,
+                            onClick = { draftSchema = scorePreset },
+                            label = { Text("评分审批") },
+                        )
+                    }
+                    OutlinedTextField(
+                        value = draftSchema,
+                        onValueChange = { draftSchema = it },
+                        label = { Text("responseSchema (可选)") },
+                        placeholder = { Text("留空则由模型自动决定 JSON 字段") },
+                        minLines = 4,
+                        maxLines = 8,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onUpdateSchema(draftSchema.trim())
+                        showEditor = false
+                    },
+                ) {
+                    Text("应用")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditor = false }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+}
+
+@Composable
 private fun AgentModelPickerSheet(
-    selectedModel: String,
-    availableModels: List<String>,
-    customModels: List<String>,
-    onSelectModel: (String) -> Unit,
-    onAddModel: (String) -> Unit,
-    onRemoveCustomModel: (String) -> Unit,
+    selectedModelId: String,
+    models: List<AgentModelEntity>,
+    defaultBaseUrl: String,
+    defaultApiKey: String,
+    onSelectModel: (AgentModelEntity) -> Unit,
+    onSaveModel: (
+        id: String?,
+        modelId: String,
+        displayName: String,
+        category: AgentModelCategory,
+        baseUrl: String,
+        apiKey: String,
+    ) -> Unit,
+    onDeleteModel: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -840,7 +974,10 @@ private fun AgentModelPickerSheet(
         initialValue = SheetValue.Hidden,
         enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
     )
-    var searchOrCustomInput by rememberSaveable { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var filterCategory by rememberSaveable { mutableStateOf<AgentModelCategory?>(null) }
+    var editingModel by remember { mutableStateOf<AgentModelEntity?>(null) }
+    var showAddDialog by remember { mutableStateOf(false) }
 
     fun dismiss(afterHide: () -> Unit = {}) {
         coroutineScope.launch {
@@ -850,14 +987,16 @@ private fun AgentModelPickerSheet(
         }
     }
 
-    val filteredModels = remember(availableModels, searchOrCustomInput) {
-        val query = searchOrCustomInput.trim()
-        if (query.isEmpty()) availableModels
-        else availableModels.filter { it.contains(query, ignoreCase = true) }
+    val filteredModels = remember(models, searchQuery, filterCategory) {
+        val q = searchQuery.trim()
+        models.filter { item ->
+            val matchCat = filterCategory == null || item.modelCategory == filterCategory
+            val matchQuery = q.isEmpty() ||
+                item.modelId.contains(q, ignoreCase = true) ||
+                item.displayName.contains(q, ignoreCase = true)
+            matchCat && matchQuery
+        }
     }
-    val trimmedQuery = searchOrCustomInput.trim()
-    val canAddCustom = trimmedQuery.isNotEmpty() &&
-        availableModels.none { it.equals(trimmedQuery, ignoreCase = true) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -866,50 +1005,72 @@ private fun AgentModelPickerSheet(
         Column(
             modifier = Modifier
                 .padding(8.dp)
-                .fillMaxHeight(0.8f)
+                .fillMaxHeight(0.82f)
                 .imePadding(),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Surface(
-                shape = RoundedCornerShape(50),
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp),
             ) {
-                OutlinedTextField(
-                    value = searchOrCustomInput,
-                    onValueChange = { searchOrCustomInput = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = {
-                        Text(text = "搜索或输入 Gemini 模型名添加…")
-                    },
+                Surface(
                     shape = RoundedCornerShape(50),
-                    colors = TextFieldDefaults.colors(
-                        unfocusedIndicatorColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                    ),
-                    leadingIcon = {
-                        Icon(HugeIcons.Search01, contentDescription = null)
-                    },
-                    trailingIcon = if (canAddCustom) {
-                        {
-                            IconButton(
-                                onClick = {
-                                    dismiss { onAddModel(trimmedQuery) }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = HugeIcons.Add01,
-                                    contentDescription = "添加模型",
-                                )
-                            }
-                        }
-                    } else null,
-                    maxLines = 1,
-                    singleLine = true,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("搜索本地 Gemini 模型…") },
+                        shape = RoundedCornerShape(50),
+                        colors = TextFieldDefaults.colors(
+                            unfocusedIndicatorColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                        ),
+                        leadingIcon = { Icon(HugeIcons.Search01, contentDescription = null) },
+                        maxLines = 1,
+                        singleLine = true,
+                    )
+                }
+                Button(
+                    onClick = { showAddDialog = true },
+                    shape = RoundedCornerShape(50),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.Add01,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(4.dp))
+                    Text("添加")
+                }
+            }
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+            ) {
+                FilterChip(
+                    selected = filterCategory == null,
+                    onClick = { filterCategory = null },
+                    label = { Text("全部 (${models.size})") },
                 )
+                AgentModelCategory.entries.forEach { cat ->
+                    val count = models.count { it.modelCategory == cat }
+                    FilterChip(
+                        selected = filterCategory == cat,
+                        onClick = { filterCategory = if (filterCategory == cat) null else cat },
+                        label = { Text("${cat.name.lowercase().replaceFirstChar { it.uppercase() }} ($count)") },
+                    )
+                }
             }
 
             LazyColumn(
@@ -919,67 +1080,13 @@ private fun AgentModelPickerSheet(
                     .weight(1f)
                     .fillMaxWidth(),
             ) {
-                if (canAddCustom) {
-                    item(key = "add_custom:$trimmedQuery") {
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            ),
-                            modifier = Modifier.animateItem(),
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        dismiss { onAddModel(trimmedQuery) }
-                                    }
-                                    .padding(vertical = 12.dp, horizontal = 16.dp),
-                            ) {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                    shape = MaterialTheme.shapes.small,
-                                ) {
-                                    AutoAIIcon(
-                                        name = trimmedQuery,
-                                        modifier = Modifier
-                                            .padding(4.dp)
-                                            .size(32.dp),
-                                    )
-                                }
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                                ) {
-                                    Text(
-                                        text = "添加并使用 \"$trimmedQuery\"",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        text = "作为自定义 Gemini 模型保存",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
-                                    )
-                                }
-                                Icon(
-                                    imageVector = HugeIcons.Add01,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-                        }
+                items(filteredModels, key = { it.id }) { model ->
+                    val isSelected = model.id == selectedModelId
+                    val cat = model.modelCategory
+                    val hostLabel = remember(model.baseUrl) {
+                        runCatching { java.net.URI(model.baseUrl).host }.getOrNull()
+                            ?: model.baseUrl.ifBlank { "gemini.any1.tech" }
                     }
-                }
-
-                items(filteredModels, key = { it }) { modelName ->
-                    val isSelected = modelName.equals(selectedModel, ignoreCase = true)
-                    val isCustom = modelName in customModels
-                    val isAntigravity = modelName.equals("antigravity", ignoreCase = true) ||
-                        modelName.startsWith("antigravity-", ignoreCase = true)
 
                     Card(
                         modifier = Modifier.animateItem(),
@@ -987,7 +1094,7 @@ private fun AgentModelPickerSheet(
                             containerColor = if (isSelected) {
                                 MaterialTheme.colorScheme.primaryContainer
                             } else {
-                                MaterialTheme.colorScheme.surface
+                                MaterialTheme.colorScheme.surfaceContainerLow
                             },
                             contentColor = if (isSelected) {
                                 MaterialTheme.colorScheme.onPrimaryContainer
@@ -1001,17 +1108,15 @@ private fun AgentModelPickerSheet(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    dismiss { onSelectModel(modelName) }
-                                }
-                                .padding(vertical = 12.dp, horizontal = 16.dp),
+                                .clickable { dismiss { onSelectModel(model) } }
+                                .padding(vertical = 12.dp, horizontal = 14.dp),
                         ) {
                             Surface(
                                 color = MaterialTheme.colorScheme.secondaryContainer,
                                 shape = MaterialTheme.shapes.small,
                             ) {
                                 AutoAIIcon(
-                                    name = modelName,
+                                    name = model.modelId,
                                     modifier = Modifier
                                         .padding(4.dp)
                                         .size(32.dp),
@@ -1019,43 +1124,55 @@ private fun AgentModelPickerSheet(
                             }
                             Column(
                                 modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
                             ) {
                                 Text(
-                                    text = modelName,
+                                    text = model.displayName.ifBlank { model.modelId },
                                     style = MaterialTheme.typography.titleSmall,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                Text(
+                                    text = "${model.modelId} · $hostLabel",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                                 FlowRow(
-                                    modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                                     verticalArrangement = Arrangement.spacedBy(2.dp),
                                 ) {
-                                    Tag(type = if (isAntigravity) TagType.SUCCESS else TagType.INFO) {
-                                        Text(
-                                            when {
-                                                isAntigravity -> "Antigravity Agent"
-                                                isCustom -> "自定义 Gemini"
-                                                else -> "Gemini"
-                                            }
-                                        )
+                                    val tagType = when (cat) {
+                                        AgentModelCategory.AGENT -> TagType.SUCCESS
+                                        AgentModelCategory.CHAT -> TagType.INFO
+                                        AgentModelCategory.DECISION -> TagType.WARNING
                                     }
-                                    if (isAntigravity) {
-                                        Tag(type = TagType.INFO) {
-                                            Text("工具与沙盒")
-                                        }
+                                    Tag(type = tagType) {
+                                        Text(cat.label)
+                                    }
+                                    Tag(type = TagType.INFO) {
+                                        Text("Gemini")
                                     }
                                 }
                             }
-                            if (isCustom) {
-                                IconButton(
-                                    onClick = { onRemoveCustomModel(modelName) },
-                                ) {
+                            IconButton(onClick = { editingModel = model }) {
+                                Icon(
+                                    imageVector = HugeIcons.PencilEdit01,
+                                    contentDescription = "编辑模型",
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            if (!model.isBuiltin) {
+                                IconButton(onClick = { onDeleteModel(model.id) }) {
                                     Icon(
                                         imageVector = HugeIcons.Delete01,
-                                        contentDescription = "删除自定义模型",
-                                        modifier = Modifier.size(20.dp),
+                                        contentDescription = "删除模型",
+                                        modifier = Modifier.size(18.dp),
                                     )
                                 }
                             }
@@ -1065,4 +1182,152 @@ private fun AgentModelPickerSheet(
             }
         }
     }
+
+    if (showAddDialog || editingModel != null) {
+        AgentModelEditDialog(
+            initial = editingModel,
+            defaultBaseUrl = defaultBaseUrl.ifBlank { DEFAULT_GEMINI_GATEWAY_URL },
+            defaultApiKey = defaultApiKey,
+            initialModelIdHint = searchQuery.trim(),
+            onDismiss = {
+                showAddDialog = false
+                editingModel = null
+            },
+            onSave = { id, modelId, displayName, category, baseUrl, apiKey ->
+                onSaveModel(id, modelId, displayName, category, baseUrl, apiKey)
+                showAddDialog = false
+                editingModel = null
+            },
+        )
+    }
 }
+
+@Composable
+private fun AgentModelEditDialog(
+    initial: AgentModelEntity?,
+    defaultBaseUrl: String,
+    defaultApiKey: String,
+    initialModelIdHint: String,
+    onDismiss: () -> Unit,
+    onSave: (
+        id: String?,
+        modelId: String,
+        displayName: String,
+        category: AgentModelCategory,
+        baseUrl: String,
+        apiKey: String,
+    ) -> Unit,
+) {
+    var modelId by remember(initial) {
+        mutableStateOf(initial?.modelId ?: initialModelIdHint)
+    }
+    var displayName by remember(initial) {
+        mutableStateOf(initial?.displayName ?: "")
+    }
+    var category by remember(initial) {
+        mutableStateOf(
+            initial?.modelCategory ?: if (initialModelIdHint.isNotBlank()) {
+                AgentModelCategory.inferFromModelId(initialModelIdHint)
+            } else {
+                AgentModelCategory.CHAT
+            }
+        )
+    }
+    var baseUrl by remember(initial) {
+        mutableStateOf(initial?.baseUrl?.ifBlank { defaultBaseUrl } ?: defaultBaseUrl)
+    }
+    var apiKey by remember(initial) {
+        mutableStateOf(initial?.apiKey ?: "")
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (initial == null) "添加 Gemini 模型" else "编辑 Gemini 模型") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "当前仅支持 Gemini 协议，模型配置保存在本地数据库。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = modelId,
+                    onValueChange = {
+                        modelId = it
+                        if (initial == null && it.isNotBlank()) {
+                            category = AgentModelCategory.inferFromModelId(it)
+                        }
+                    },
+                    label = { Text("模型 ID *") },
+                    placeholder = { Text("例如 gemini-2.5-flash / gemini-decision") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = displayName,
+                    onValueChange = { displayName = it },
+                    label = { Text("显示名称（可选）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = "模型类别",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    AgentModelCategory.entries.forEach { item ->
+                        FilterChip(
+                            selected = category == item,
+                            onClick = { category = item },
+                            label = { Text(item.label) },
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    label = { Text("请求地址 (默认 gemini.any1.tech)") },
+                    placeholder = { Text(DEFAULT_GEMINI_GATEWAY_URL) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text("网关密钥（留空则继承全局）") },
+                    placeholder = { Text(if (defaultApiKey.isNotBlank()) "已配置全局密钥" else "GATEWAY_AUTH_TOKEN") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = modelId.isNotBlank(),
+                onClick = {
+                    onSave(
+                        initial?.id,
+                        modelId.trim(),
+                        displayName.trim(),
+                        category,
+                        baseUrl.trim().ifBlank { DEFAULT_GEMINI_GATEWAY_URL },
+                        apiKey.trim(),
+                    )
+                },
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+

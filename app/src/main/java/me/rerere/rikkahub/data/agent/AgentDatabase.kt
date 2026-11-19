@@ -15,8 +15,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AgentFolderEntity::class,
         AgentUsageRecordEntity::class,
         AgentDraftEntity::class,
+        AgentModelEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class AgentDatabase : RoomDatabase() {
@@ -26,6 +27,7 @@ abstract class AgentDatabase : RoomDatabase() {
     abstract fun folderDao(): AgentFolderDao
     abstract fun usageRecordDao(): AgentUsageRecordDao
     abstract fun draftDao(): AgentDraftDao
+    abstract fun modelDao(): AgentModelDao
 
     companion object {
         const val DATABASE_NAME = "agent.db"
@@ -121,9 +123,33 @@ abstract class AgentDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `agent_model` (
+                        `id` TEXT NOT NULL PRIMARY KEY,
+                        `model_id` TEXT NOT NULL,
+                        `display_name` TEXT NOT NULL,
+                        `category` TEXT NOT NULL DEFAULT 'CHAT',
+                        `provider_type` TEXT NOT NULL DEFAULT 'GEMINI',
+                        `base_url` TEXT NOT NULL DEFAULT 'https://gemini.any1.tech/v1beta',
+                        `api_key` TEXT NOT NULL DEFAULT '',
+                        `is_builtin` INTEGER NOT NULL DEFAULT 0,
+                        `sort_order` INTEGER NOT NULL DEFAULT 0,
+                        `created_at` INTEGER NOT NULL,
+                        `updated_at` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_model_sort_order` ON `agent_model` (`sort_order`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_model_category` ON `agent_model` (`category`)")
+            }
+        }
+
         fun create(context: Context): AgentDatabase =
             Room.databaseBuilder(context, AgentDatabase::class.java, DATABASE_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .build()
     }

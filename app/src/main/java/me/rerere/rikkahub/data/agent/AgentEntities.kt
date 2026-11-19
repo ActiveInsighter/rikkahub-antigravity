@@ -173,3 +173,67 @@ data class AgentDraftEntity(
     @ColumnInfo("updated_at")
     val updatedAt: Long,
 )
+
+enum class AgentModelCategory(val label: String) {
+    AGENT("Agent (Action)"),
+    CHAT("Chat (流式)"),
+    DECISION("Decision (决策)");
+
+    companion object {
+        fun fromRaw(raw: String?): AgentModelCategory = when (raw?.trim()?.uppercase()) {
+            "AGENT" -> AGENT
+            "DECISION" -> DECISION
+            else -> CHAT
+        }
+
+        fun inferFromModelId(modelId: String): AgentModelCategory {
+            val clean = modelId.trim().removePrefix("models/")
+            return when {
+                clean.equals("Antigravity", ignoreCase = true) ||
+                    clean.startsWith("antigravity-", ignoreCase = true) ||
+                    clean.startsWith("deep-research", ignoreCase = true) ||
+                    clean.startsWith("agent-", ignoreCase = true) -> AGENT
+                clean.contains("decision", ignoreCase = true) -> DECISION
+                else -> CHAT
+            }
+        }
+    }
+}
+
+const val DEFAULT_GEMINI_GATEWAY_URL = "https://gemini.any1.tech/v1beta"
+
+/**
+ * Local-only Gemini model configuration for the Agent page.
+ */
+@Entity(
+    tableName = "agent_model",
+    indices = [Index("sort_order"), Index("category")],
+)
+data class AgentModelEntity(
+    @PrimaryKey
+    val id: String,
+    @ColumnInfo("model_id")
+    val modelId: String,
+    @ColumnInfo("display_name")
+    val displayName: String,
+    @ColumnInfo("category", defaultValue = "'CHAT'")
+    val category: String = AgentModelCategory.CHAT.name,
+    @ColumnInfo("provider_type", defaultValue = "'GEMINI'")
+    val providerType: String = "GEMINI",
+    @ColumnInfo("base_url", defaultValue = "'https://gemini.any1.tech/v1beta'")
+    val baseUrl: String = DEFAULT_GEMINI_GATEWAY_URL,
+    @ColumnInfo("api_key", defaultValue = "''")
+    val apiKey: String = "",
+    @ColumnInfo("is_builtin", defaultValue = "0")
+    val isBuiltin: Boolean = false,
+    @ColumnInfo("sort_order", defaultValue = "0")
+    val sortOrder: Int = 0,
+    @ColumnInfo("created_at")
+    val createdAt: Long,
+    @ColumnInfo("updated_at")
+    val updatedAt: Long,
+) {
+    val modelCategory: AgentModelCategory
+        get() = AgentModelCategory.fromRaw(category)
+}
+

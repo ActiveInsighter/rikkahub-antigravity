@@ -351,4 +351,8 @@ val dataSourceModule = module {
     single {
         get<me.rerere.rikkahub.data.agent.AgentDatabase>().draftDao()
     }
+
+    single {
+        get<me.rerere.rikkahub.data.agent.AgentDatabase>().modelDao()
+    }
 }

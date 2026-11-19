@@ -1,0 +1,249 @@
+package me.rerere.rikkahub.data.agent
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.core.TokenUsage
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.providers.google.GoogleProvider
+import me.rerere.ai.provider.stream.StreamChunk
+import me.rerere.ai.ui.UIMessage
+import me.rerere.rikkahub.utils.JsonInstant
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+
+data class GatewayDecisionResponse(
+    val model: String,
+    val decisionJson: String,
+    val summaryMarkdown: String,
+    val usage: TokenUsage? = null,
+)
+
+data class GatewayAgentDispatchResponse(
+    val requestId: String,
+    val repo: String,
+    val workflow: String,
+    val ref: String,
+)
+
+class AgentGatewayClient(
+    private val okHttpClient: OkHttpClient,
+) {
+    private val googleProvider = GoogleProvider(okHttpClient)
+
+    fun streamChat(
+        modelEntity: AgentModelEntity,
+        messages: List<UIMessage>,
+        systemPrompt: String,
+        reasoningLevel: ReasoningLevel,
+        temperature: Float?,
+        fallbackBaseUrl: String,
+        fallbackApiKey: String,
+    ): Flow<StreamChunk> {
+        val baseUrl = resolveGeminiBaseUrl(modelEntity.baseUrl, fallbackBaseUrl)
+        val apiKey = modelEntity.apiKey.ifBlank { fallbackApiKey }.trim()
+        val cleanModelId = modelEntity.modelId.trim().removePrefix("models/")
+
+        val model = Model(
+            modelId = cleanModelId,
+            displayName = modelEntity.displayName.ifBlank { cleanModelId },
+        )
+        val providerSetting = ProviderSetting.Google(
+            name = "Gemini Gateway",
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            models = listOf(model),
+            vertexAI = false,
+            useInteractionsApi = false,
+        )
+
+        val params = TextGenerationParams(
+            model = model,
+            temperature = temperature,
+            reasoningLevel = reasoningLevel,
+            systemPrompt = systemPrompt.ifBlank { null },
+        )
+
+        return googleProvider.streamText(providerSetting, messages, params)
+    }
+
+    suspend fun callDecision(
+        modelEntity: AgentModelEntity,
+        prompt: String,
+        systemPrompt: String,
+        reasoningLevel: ReasoningLevel,
+        schemaJson: String?,
+        fallbackBaseUrl: String,
+        fallbackApiKey: String,
+    ): Result<GatewayDecisionResponse> = withContext(Dispatchers.IO) {
+        runCatching {
+            val rootUrl = resolveGatewayRootUrl(modelEntity.baseUrl, fallbackBaseUrl)
+            val apiKey = modelEntity.apiKey.ifBlank { fallbackApiKey }.trim()
+            val cleanModelId = modelEntity.modelId.trim().removePrefix("models/")
+
+            val payload = buildJsonObject {
+                put("model", cleanModelId)
+                put("prompt", prompt)
+                if (systemPrompt.isNotBlank()) {
+                    put("systemPrompt", systemPrompt)
+                }
+                val thinking = when (reasoningLevel) {
+                    ReasoningLevel.OFF, ReasoningLevel.AUTO -> ""
+                    ReasoningLevel.LOW -> "low"
+                    ReasoningLevel.MEDIUM -> "medium"
+                    ReasoningLevel.HIGH, ReasoningLevel.XHIGH, ReasoningLevel.MAX -> "high"
+                }
+                if (thinking.isNotEmpty()) {
+                    put("thinkingLevel", thinking)
+                }
+                if (!schemaJson.isNullOrBlank()) {
+                    val parsedSchema = JsonInstant.parseToJsonElement(schemaJson)
+                    put("schema", parsedSchema)
+                }
+            }
+
+            val reqBuilder = Request.Builder()
+                .url("$rootUrl/v1/decision")
+                .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+            if (apiKey.isNotEmpty()) {
+                reqBuilder.header("Authorization", "Bearer $apiKey")
+            }
+
+            okHttpClient.newCall(reqBuilder.build()).execute().use { response ->
+                val raw = response.body.string()
+                if (!response.isSuccessful) {
+                    error("Decision 请求失败 (${response.code}): ${raw.take(400)}")
+                }
+                val rootObj = JsonInstant.parseToJsonElement(raw).jsonObject
+                val decisionElem = rootObj["decision"] ?: JsonPrimitive("")
+                val prettyDecision = formatJsonElement(decisionElem)
+                val returnedModel = rootObj["model"]?.jsonPrimitive?.content ?: cleanModelId
+                val usageObj = rootObj["usage"] as? JsonObject
+                val usage = usageObj?.let {
+                    TokenUsage(
+                        promptTokens = it["promptTokenCount"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
+                        completionTokens = it["candidatesTokenCount"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
+                        totalTokens = it["totalTokenCount"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
+                    )
+                }
+
+                val summary = buildDecisionSummaryMarkdown(returnedModel, decisionElem, prettyDecision)
+                GatewayDecisionResponse(
+                    model = returnedModel,
+                    decisionJson = prettyDecision,
+                    summaryMarkdown = summary,
+                    usage = usage,
+                )
+            }
+        }
+    }
+
+    suspend fun dispatchAgent(
+        modelEntity: AgentModelEntity,
+        prompt: String,
+        reasoningLevel: ReasoningLevel,
+        fallbackBaseUrl: String,
+        fallbackApiKey: String,
+    ): Result<GatewayAgentDispatchResponse> = withContext(Dispatchers.IO) {
+        runCatching {
+            val rootUrl = resolveGatewayRootUrl(modelEntity.baseUrl, fallbackBaseUrl)
+            val apiKey = modelEntity.apiKey.ifBlank { fallbackApiKey }.trim()
+            val cleanModelId = modelEntity.modelId.trim().removePrefix("models/")
+
+            val payload = buildJsonObject {
+                put("model", cleanModelId)
+                put("prompt", prompt)
+                val thinking = when (reasoningLevel) {
+                    ReasoningLevel.OFF, ReasoningLevel.AUTO -> ""
+                    ReasoningLevel.LOW -> "low"
+                    ReasoningLevel.MEDIUM -> "medium"
+                    ReasoningLevel.HIGH, ReasoningLevel.XHIGH, ReasoningLevel.MAX -> "high"
+                }
+                if (thinking.isNotEmpty()) {
+                    put("thinkingLevel", thinking)
+                }
+            }
+
+            val reqBuilder = Request.Builder()
+                .url("$rootUrl/v1/agent/dispatch")
+                .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+            if (apiKey.isNotEmpty()) {
+                reqBuilder.header("Authorization", "Bearer $apiKey")
+            }
+
+            okHttpClient.newCall(reqBuilder.build()).execute().use { response ->
+                val raw = response.body.string()
+                if (!response.isSuccessful) {
+                    error("Agent 派发失败 (${response.code}): ${raw.take(400)}")
+                }
+                val obj = JsonInstant.parseToJsonElement(raw).jsonObject
+                GatewayAgentDispatchResponse(
+                    requestId = obj["requestId"]?.jsonPrimitive?.content.orEmpty(),
+                    repo = obj["repo"]?.jsonPrimitive?.content.orEmpty(),
+                    workflow = obj["workflow"]?.jsonPrimitive?.content.orEmpty(),
+                    ref = obj["ref"]?.jsonPrimitive?.content.orEmpty(),
+                )
+            }
+        }
+    }
+
+    companion object {
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+        fun resolveGeminiBaseUrl(modelBaseUrl: String, fallbackBaseUrl: String): String {
+            val raw = modelBaseUrl.ifBlank { fallbackBaseUrl }.ifBlank { DEFAULT_GEMINI_GATEWAY_URL }
+            val trimmed = raw.trim().trimEnd('/')
+            return if (trimmed.endsWith("/v1beta", ignoreCase = true)) trimmed else "$trimmed/v1beta"
+        }
+
+        fun resolveGatewayRootUrl(modelBaseUrl: String, fallbackBaseUrl: String): String {
+            val raw = modelBaseUrl.ifBlank { fallbackBaseUrl }.ifBlank { DEFAULT_GEMINI_GATEWAY_URL }
+            val trimmed = raw.trim().trimEnd('/')
+            return trimmed
+                .removeSuffix("/v1beta")
+                .removeSuffix("/v1")
+                .trimEnd('/')
+        }
+
+        private fun formatJsonElement(element: JsonElement): String = when (element) {
+            is JsonPrimitive -> if (element.isString) element.content else element.toString()
+            else -> kotlinx.serialization.json.Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), element)
+        }
+
+        private fun buildDecisionSummaryMarkdown(
+            model: String,
+            decisionElem: JsonElement,
+            prettyJson: String,
+        ): String = buildString {
+            appendLine("### 结构化决策结果 (`$model`)")
+            appendLine()
+            if (decisionElem is JsonObject && decisionElem.isNotEmpty()) {
+                for ((k, v) in decisionElem) {
+                    val valueText = when (v) {
+                        is JsonPrimitive -> v.content
+                        is JsonArray -> v.joinToString(", ") { it.toString() }
+                        is JsonObject -> v.toString()
+                    }
+                    appendLine("- **$k**: $valueText")
+                }
+                appendLine()
+            }
+            appendLine("```json")
+            appendLine(prettyJson)
+            append("```")
+        }
+    }
+}

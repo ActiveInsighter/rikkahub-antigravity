@@ -173,3 +173,28 @@ interface AgentDraftDao {
     @Query("DELETE FROM agent_draft WHERE conversation_id = :conversationId")
     suspend fun deleteByConversationId(conversationId: String)
 }
+
+@Dao
+interface AgentModelDao {
+    @Query("SELECT * FROM agent_model ORDER BY sort_order ASC, created_at ASC")
+    fun observeAll(): Flow<List<AgentModelEntity>>
+
+    @Query("SELECT * FROM agent_model ORDER BY sort_order ASC, created_at ASC")
+    suspend fun getAll(): List<AgentModelEntity>
+
+    @Query("SELECT * FROM agent_model WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): AgentModelEntity?
+
+    @Query("SELECT * FROM agent_model WHERE LOWER(model_id) = LOWER(:modelId) LIMIT 1")
+    suspend fun getByModelId(modelId: String): AgentModelEntity?
+
+    @Upsert
+    suspend fun upsert(entity: AgentModelEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAllIgnore(entities: List<AgentModelEntity>)
+
+    @Query("DELETE FROM agent_model WHERE id = :id")
+    suspend fun deleteById(id: String)
+}
+

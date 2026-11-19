@@ -60,6 +60,7 @@ class AgentRepository(
     private val folderDao = database.folderDao()
     private val usageRecordDao = database.usageRecordDao()
     private val draftDao = database.draftDao()
+    private val modelDao = database.modelDao()
     @Volatile
     private var visibleConversation: Uuid? = null
 

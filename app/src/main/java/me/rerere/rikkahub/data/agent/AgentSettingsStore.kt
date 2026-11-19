@@ -77,6 +77,9 @@ data class AgentUiSettings(
     val chatFontFamily: ChatFontFamily = ChatFontFamily.DEFAULT,
     val conversationSortOrder: ConversationSortOrder = ConversationSortOrder.UPDATE_TIME,
     val selectedAgentModel: String = "Antigravity",
+    val selectedAgentModelId: String = "",
+    val gatewayBaseUrl: String = DEFAULT_GEMINI_GATEWAY_URL,
+    val gatewayApiKey: String = "",
     val customGeminiModels: List<String> = emptyList(),
     val localAgentSchedules: List<AgentSchedule> = emptyList(),
 ) {

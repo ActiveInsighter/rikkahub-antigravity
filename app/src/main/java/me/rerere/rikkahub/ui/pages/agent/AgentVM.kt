@@ -2,8 +2,10 @@ package me.rerere.rikkahub.ui.pages.agent
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -22,14 +24,19 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.ModelSnapshot
+import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentAssistantEntity
 import me.rerere.rikkahub.data.agent.AgentConversationSnapshot
+import me.rerere.rikkahub.data.agent.AgentGatewayClient
+import me.rerere.rikkahub.data.agent.AgentModelCategory
+import me.rerere.rikkahub.data.agent.AgentModelEntity
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
 import me.rerere.rikkahub.data.agent.AgentUiSettings
 import me.rerere.rikkahub.data.agent.DEFAULT_AGENT_MODELS
+import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
 import me.rerere.rikkahub.data.agent.RemoteAgentSourceInput
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import me.rerere.rikkahub.data.model.Assistant
@@ -49,6 +56,7 @@ class AgentVM(
     private val repository: AgentRepository,
     private val settingsStore: AgentSettingsStore,
     private val workflowRepository: WorkflowRepository,
+    private val gatewayClient: AgentGatewayClient,
 ) : ViewModel() {
     private val conversationId: Uuid = Uuid.parse(id)
 
@@ -78,9 +86,15 @@ class AgentVM(
     val selectedModel: StateFlow<Model?> = _selectedModel.asStateFlow()
 
     private val snapshot = MutableStateFlow<AgentConversationSnapshot?>(null)
+    private val _isLocalGenerating = MutableStateFlow(false)
+    private var localGenerationJob: Job? = null
 
-    val isGenerating: StateFlow<Boolean> = combine(snapshot, repository.submittingIds) { cached, submitting ->
-        cached?.isActive == true || conversationId in submitting
+    val isGenerating: StateFlow<Boolean> = combine(
+        snapshot,
+        repository.submittingIds,
+        _isLocalGenerating,
+    ) { cached, submitting, localGen ->
+        cached?.isActive == true || conversationId in submitting || localGen
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private val _isSyncing = MutableStateFlow(false)
@@ -134,9 +148,35 @@ class AgentVM(
     val uiSettings: StateFlow<AgentUiSettings> = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current)
 
-    val selectedAgentModelName: StateFlow<String> = settingsStore.settingsFlow
-        .map { it.selectedAgentModel.ifBlank { "Antigravity" } }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current.selectedAgentModel.ifBlank { "Antigravity" })
+    val localModels: StateFlow<List<AgentModelEntity>> = repository.observeModels()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val selectedModelEntity: StateFlow<AgentModelEntity?> = combine(
+        localModels,
+        settingsStore.settingsFlow,
+    ) { models, settings ->
+        models.firstOrNull { it.id == settings.selectedAgentModelId }
+            ?: models.firstOrNull { it.modelId.equals(settings.selectedAgentModel, ignoreCase = true) }
+            ?: models.firstOrNull()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val selectedAgentModelName: StateFlow<String> = combine(
+        selectedModelEntity,
+        settingsStore.settingsFlow,
+    ) { entity, settings ->
+        entity?.displayName?.ifBlank { entity.modelId }
+            ?: settings.selectedAgentModel.ifBlank { "Antigravity" }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current.selectedAgentModel.ifBlank { "Antigravity" })
+
+    val selectedModelCategory: StateFlow<AgentModelCategory> = combine(
+        selectedModelEntity,
+        selectedAgentModelName,
+    ) { entity, name ->
+        entity?.modelCategory ?: AgentModelCategory.inferFromModelId(name)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, AgentModelCategory.AGENT)
+
+    private val _decisionSchemaJson = MutableStateFlow("")
+    val decisionSchemaJson: StateFlow<String> = _decisionSchemaJson.asStateFlow()
 
     val customGeminiModels: StateFlow<List<String>> = settingsStore.settingsFlow
         .map { it.customGeminiModels }
@@ -162,7 +202,8 @@ class AgentVM(
     private var submission: Deferred<Result<Unit>>? = null
     private val isBusy: Boolean
         get() = snapshot.value?.isActive == true || conversationId in repository.submittingIds.value ||
-            _isInitialLoading.value || (session.value != null && snapshot.value?.waitingForMessages == true)
+            _isLocalGenerating.value || _isInitialLoading.value ||
+            (session.value != null && snapshot.value?.waitingForMessages == true)
 
     init {
         viewModelScope.launch {
@@ -185,39 +226,114 @@ class AgentVM(
         viewModelScope.launch {
             _initialDraft.value = repository.getDraft(conversationId).orEmpty()
             _agentAssistant.value = repository.ensureDefaultAssistant().toDomainAssistant()
+            repository.ensureDefaultModels()
+        }
+    }
+
+    fun selectLocalModel(model: AgentModelEntity) {
+        settingsStore.update {
+            it.copy(
+                selectedAgentModelId = model.id,
+                selectedAgentModel = model.modelId,
+            )
+        }
+    }
+
+    fun saveLocalModel(
+        id: String? = null,
+        modelId: String,
+        displayName: String,
+        category: AgentModelCategory,
+        baseUrl: String,
+        apiKey: String,
+        selectAfterSave: Boolean = true,
+    ) {
+        val cleanModelId = modelId.trim()
+        if (cleanModelId.isEmpty()) return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val existing = id?.let { targetId -> localModels.value.firstOrNull { it.id == targetId } }
+            val entity = AgentModelEntity(
+                id = existing?.id ?: "local-${Uuid.random()}",
+                modelId = cleanModelId,
+                displayName = displayName.trim().ifBlank { cleanModelId },
+                category = category.name,
+                providerType = "GEMINI",
+                baseUrl = baseUrl.trim().ifBlank { DEFAULT_GEMINI_GATEWAY_URL },
+                apiKey = apiKey.trim(),
+                isBuiltin = existing?.isBuiltin ?: false,
+                sortOrder = existing?.sortOrder ?: (localModels.value.size + 10),
+                createdAt = existing?.createdAt ?: now,
+                updatedAt = now,
+            )
+            val saved = repository.saveLocalModel(entity)
+            if (selectAfterSave) {
+                selectLocalModel(saved)
+            }
+        }
+    }
+
+    fun deleteLocalModel(id: String) {
+        viewModelScope.launch {
+            repository.deleteLocalModel(id)
+            if (settingsStore.current.selectedAgentModelId == id) {
+                val fallback = localModels.value.firstOrNull { it.id != id }
+                settingsStore.update {
+                    it.copy(
+                        selectedAgentModelId = fallback?.id.orEmpty(),
+                        selectedAgentModel = fallback?.modelId ?: "Antigravity",
+                    )
+                }
+            }
+        }
+    }
+
+    fun updateDecisionSchemaJson(schema: String) {
+        _decisionSchemaJson.value = schema
+    }
+
+    fun updateGatewayConfig(baseUrl: String, apiKey: String) {
+        settingsStore.update {
+            it.copy(
+                gatewayBaseUrl = baseUrl.trim().ifBlank { DEFAULT_GEMINI_GATEWAY_URL },
+                gatewayApiKey = apiKey.trim(),
+            )
         }
     }
 
     fun selectAgentModel(modelName: String) {
         val normalized = modelName.trim()
         if (normalized.isEmpty()) return
-        settingsStore.update { it.copy(selectedAgentModel = normalized) }
+        val matched = localModels.value.firstOrNull {
+            it.modelId.equals(normalized, ignoreCase = true) ||
+                it.displayName.equals(normalized, ignoreCase = true)
+        }
+        if (matched != null) {
+            selectLocalModel(matched)
+        } else {
+            settingsStore.update { it.copy(selectedAgentModel = normalized) }
+        }
     }
 
     fun addCustomGeminiModel(modelName: String) {
         val normalized = modelName.trim()
         if (normalized.isEmpty()) return
-        settingsStore.update { current ->
-            val updatedCustom = if (normalized in DEFAULT_AGENT_MODELS || normalized in current.customGeminiModels) {
-                current.customGeminiModels
-            } else {
-                current.customGeminiModels + normalized
-            }
-            current.copy(
-                selectedAgentModel = normalized,
-                customGeminiModels = updatedCustom,
-            )
-        }
+        saveLocalModel(
+            modelId = normalized,
+            displayName = normalized,
+            category = AgentModelCategory.inferFromModelId(normalized),
+            baseUrl = settingsStore.current.gatewayBaseUrl,
+            apiKey = settingsStore.current.gatewayApiKey,
+            selectAfterSave = true,
+        )
     }
 
     fun removeCustomGeminiModel(modelName: String) {
-        settingsStore.update { current ->
-            val updatedCustom = current.customGeminiModels.filterNot { it == modelName }
-            val nextSelected = if (current.selectedAgentModel == modelName) "Antigravity" else current.selectedAgentModel
-            current.copy(
-                selectedAgentModel = nextSelected,
-                customGeminiModels = updatedCustom,
-            )
+        val matched = localModels.value.firstOrNull {
+            !it.isBuiltin && it.modelId.equals(modelName, ignoreCase = true)
+        }
+        if (matched != null) {
+            deleteLocalModel(matched.id)
         }
     }
 
@@ -315,13 +431,29 @@ class AgentVM(
         }
     }
 
+    private fun currentOrFallbackModelEntity(): AgentModelEntity {
+        val selected = selectedModelEntity.value
+        if (selected != null) return selected
+        val now = System.currentTimeMillis()
+        val name = selectedAgentModelName.value.ifBlank { "Antigravity" }
+        return AgentModelEntity(
+            id = "fallback-$name",
+            modelId = name,
+            displayName = name,
+            category = AgentModelCategory.inferFromModelId(name).name,
+            baseUrl = settingsStore.current.gatewayBaseUrl.ifBlank { DEFAULT_GEMINI_GATEWAY_URL },
+            apiKey = settingsStore.current.gatewayApiKey,
+            createdAt = now,
+            updatedAt = now,
+        )
+    }
+
     fun sendMessage(parts: List<UIMessagePart>): Boolean {
         if (parts.isEmpty() || isBusy) return false
-        if (session.value == null) {
-            openConnectDialog()
-            return false
-        }
         _errorMessage.value = null
+
+        val modelEntity = currentOrFallbackModelEntity()
+        val category = modelEntity.modelCategory
 
         val userMessage = UIMessage(
             role = MessageRole.USER,
@@ -333,7 +465,7 @@ class AgentVM(
             userMessage.toText().trim()
                 .replace('\n', ' ')
                 .take(36)
-                .ifBlank { "Antigravity Agent" }
+                .ifBlank { modelEntity.displayName.ifBlank { "Agent" } }
         } else {
             current.title
         }
@@ -347,20 +479,55 @@ class AgentVM(
         val prompt = buildPromptFromParts(parts)
         val sources = extractSourcesFromParts(parts)
 
-        submitRemote(
-            baseConversation = updatedWithUser,
-            prompt = prompt,
-            sources = sources,
-            parentMessageId = snapshot.value?.lastRemoteMessageId,
-            replacesMessageId = null,
-            title = if (current.title.isBlank()) nextTitle else "",
-            targetNodeId = null,
-        )
+        when (category) {
+            AgentModelCategory.CHAT -> {
+                executeLocalChatStreaming(
+                    baseConversation = updatedWithUser,
+                    modelEntity = modelEntity,
+                    targetNodeId = null,
+                )
+            }
+            AgentModelCategory.DECISION -> {
+                executeLocalDecision(
+                    baseConversation = updatedWithUser,
+                    modelEntity = modelEntity,
+                    prompt = prompt,
+                    targetNodeId = null,
+                )
+            }
+            AgentModelCategory.AGENT -> {
+                if (session.value != null) {
+                    submitRemote(
+                        baseConversation = updatedWithUser,
+                        prompt = prompt,
+                        sources = sources,
+                        parentMessageId = snapshot.value?.lastRemoteMessageId,
+                        replacesMessageId = null,
+                        title = if (current.title.isBlank()) nextTitle else "",
+                        targetNodeId = null,
+                    )
+                } else {
+                    executeGatewayAgentDispatch(
+                        baseConversation = updatedWithUser,
+                        modelEntity = modelEntity,
+                        prompt = prompt,
+                        targetNodeId = null,
+                    )
+                }
+            }
+        }
+
         saveDraft("")
         return true
     }
 
     fun stopGeneration() {
+        if (_isLocalGenerating.value) {
+            localGenerationJob?.cancel()
+            localGenerationJob = null
+            _isLocalGenerating.value = false
+            return
+        }
         viewModelScope.launch {
             if (submission?.await()?.isFailure == true) return@launch
             repository.cancelConversationJob(conversationId).onFailure {
@@ -371,10 +538,6 @@ class AgentVM(
 
     fun regenerate(message: UIMessage) {
         if (isBusy) return
-        if (session.value == null) {
-            openConnectDialog()
-            return
-        }
         val current = _conversation.value
         val nodeIndex = current.messageNodes.indexOfFirst { node ->
             node.messages.any { it.id == message.id }
@@ -385,18 +548,273 @@ class AgentVM(
         val historyBefore = current.messageNodes.take(nodeIndex).map { it.currentMessage }
         val userMsg = historyBefore.lastOrNull { it.role == MessageRole.USER } ?: return
 
+        val modelEntity = currentOrFallbackModelEntity()
         val prompt = buildPromptFromParts(userMsg.parts)
         val sources = extractSourcesFromParts(userMsg.parts)
 
-        submitRemote(
-            baseConversation = current,
-            prompt = prompt,
-            sources = sources,
-            parentMessageId = null,
-            replacesMessageId = snapshot.value?.lastRemoteMessageId,
-            title = "",
-            targetNodeId = node.id,
+        when (modelEntity.modelCategory) {
+            AgentModelCategory.CHAT -> {
+                executeLocalChatStreaming(
+                    baseConversation = current,
+                    modelEntity = modelEntity,
+                    targetNodeId = node.id,
+                    historyOverride = historyBefore,
+                )
+            }
+            AgentModelCategory.DECISION -> {
+                executeLocalDecision(
+                    baseConversation = current,
+                    modelEntity = modelEntity,
+                    prompt = prompt,
+                    targetNodeId = node.id,
+                )
+            }
+            AgentModelCategory.AGENT -> {
+                if (session.value != null) {
+                    submitRemote(
+                        baseConversation = current,
+                        prompt = prompt,
+                        sources = sources,
+                        parentMessageId = null,
+                        replacesMessageId = snapshot.value?.lastRemoteMessageId,
+                        title = "",
+                        targetNodeId = node.id,
+                    )
+                } else {
+                    executeGatewayAgentDispatch(
+                        baseConversation = current,
+                        modelEntity = modelEntity,
+                        prompt = prompt,
+                        targetNodeId = node.id,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun executeLocalChatStreaming(
+        baseConversation: Conversation,
+        modelEntity: AgentModelEntity,
+        targetNodeId: Uuid?,
+        historyOverride: List<UIMessage>? = null,
+    ) {
+        val nodeId = targetNodeId ?: Uuid.random()
+        val placeholderMsg = UIMessage(
+            id = Uuid.random(),
+            role = MessageRole.ASSISTANT,
+            parts = emptyList(),
+            modelSnapshot = ModelSnapshot(
+                displayName = modelEntity.displayName.ifBlank { modelEntity.modelId },
+                modelId = modelEntity.modelId,
+            ),
         )
+        val initialConv = if (targetNodeId != null) {
+            baseConversation.upsertMessage(nodeId, placeholderMsg)
+        } else {
+            baseConversation.copy(
+                messageNodes = baseConversation.messageNodes + MessageNode(
+                    id = nodeId,
+                    messages = listOf(placeholderMsg),
+                    selectIndex = 0,
+                ),
+            )
+        }
+        val historyMessages = historyOverride ?: baseConversation.messageNodes.map { it.currentMessage }
+        val handler = StreamChunkHandler(
+            Model(
+                modelId = modelEntity.modelId,
+                displayName = modelEntity.displayName.ifBlank { modelEntity.modelId },
+            )
+        )
+
+        localGenerationJob?.cancel()
+        _isLocalGenerating.value = true
+        _conversation.value = initialConv
+
+        localGenerationJob = viewModelScope.launch {
+            var workingMessages = historyMessages + placeholderMsg
+            var workingConv = initialConv
+            try {
+                repository.saveConversation(initialConv)
+                gatewayClient.streamChat(
+                    modelEntity = modelEntity,
+                    messages = historyMessages,
+                    systemPrompt = _agentAssistant.value.systemPrompt,
+                    reasoningLevel = _agentAssistant.value.reasoningLevel,
+                    temperature = _agentAssistant.value.temperature,
+                    fallbackBaseUrl = settingsStore.current.gatewayBaseUrl,
+                    fallbackApiKey = settingsStore.current.gatewayApiKey,
+                ).collect { chunk ->
+                    workingMessages = handler.handle(workingMessages, chunk)
+                    val updatedAssistant = workingMessages.last().copy(
+                        modelSnapshot = ModelSnapshot(
+                            displayName = modelEntity.displayName.ifBlank { modelEntity.modelId },
+                            modelId = modelEntity.modelId,
+                        ),
+                    )
+                    workingConv = workingConv.upsertMessage(nodeId, updatedAssistant).copy(
+                        updateAt = Instant.now(),
+                    )
+                    _conversation.value = workingConv
+                }
+                repository.saveConversation(workingConv)
+            } catch (e: CancellationException) {
+                repository.saveConversation(workingConv)
+                throw e
+            } catch (e: Exception) {
+                val msg = e.message ?: "Chat 流式请求失败"
+                _errorMessage.value = msg
+                val errAssistant = workingMessages.lastOrNull()?.let { currentMsg ->
+                    currentMsg.copy(
+                        parts = currentMsg.parts + UIMessagePart.Notice(title = "请求失败", text = msg),
+                    )
+                } ?: placeholderMsg.copy(parts = listOf(UIMessagePart.Notice(title = "请求失败", text = msg)))
+                val failedConv = workingConv.upsertMessage(nodeId, errAssistant).copy(updateAt = Instant.now())
+                _conversation.value = failedConv
+                repository.saveConversation(failedConv)
+            } finally {
+                _isLocalGenerating.value = false
+            }
+        }
+    }
+
+    private fun executeLocalDecision(
+        baseConversation: Conversation,
+        modelEntity: AgentModelEntity,
+        prompt: String,
+        targetNodeId: Uuid?,
+    ) {
+        val nodeId = targetNodeId ?: Uuid.random()
+        val placeholderMsg = UIMessage(
+            id = Uuid.random(),
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Text("正在执行结构化决策…")),
+            modelSnapshot = ModelSnapshot(
+                displayName = modelEntity.displayName.ifBlank { modelEntity.modelId },
+                modelId = modelEntity.modelId,
+            ),
+        )
+        val initialConv = if (targetNodeId != null) {
+            baseConversation.upsertMessage(nodeId, placeholderMsg)
+        } else {
+            baseConversation.copy(
+                messageNodes = baseConversation.messageNodes + MessageNode(
+                    id = nodeId,
+                    messages = listOf(placeholderMsg),
+                    selectIndex = 0,
+                ),
+            )
+        }
+
+        localGenerationJob?.cancel()
+        _isLocalGenerating.value = true
+        _conversation.value = initialConv
+
+        localGenerationJob = viewModelScope.launch {
+            try {
+                repository.saveConversation(initialConv)
+                val result = gatewayClient.callDecision(
+                    modelEntity = modelEntity,
+                    prompt = prompt,
+                    systemPrompt = _agentAssistant.value.systemPrompt,
+                    reasoningLevel = _agentAssistant.value.reasoningLevel,
+                    schemaJson = _decisionSchemaJson.value.takeIf { it.isNotBlank() },
+                    fallbackBaseUrl = settingsStore.current.gatewayBaseUrl,
+                    fallbackApiKey = settingsStore.current.gatewayApiKey,
+                )
+                result.onSuccess { res ->
+                    val doneMsg = placeholderMsg.copy(
+                        parts = listOf(UIMessagePart.Text(res.summaryMarkdown)),
+                        usage = res.usage,
+                    )
+                    val doneConv = initialConv.upsertMessage(nodeId, doneMsg).copy(updateAt = Instant.now())
+                    _conversation.value = doneConv
+                    repository.saveConversation(doneConv)
+                }.onFailure { err ->
+                    val msg = err.message ?: "Decision 请求失败"
+                    _errorMessage.value = msg
+                    val errMsg = placeholderMsg.copy(
+                        parts = listOf(UIMessagePart.Notice(title = "决策失败", text = msg)),
+                    )
+                    val failedConv = initialConv.upsertMessage(nodeId, errMsg).copy(updateAt = Instant.now())
+                    _conversation.value = failedConv
+                    repository.saveConversation(failedConv)
+                }
+            } finally {
+                _isLocalGenerating.value = false
+            }
+        }
+    }
+
+    private fun executeGatewayAgentDispatch(
+        baseConversation: Conversation,
+        modelEntity: AgentModelEntity,
+        prompt: String,
+        targetNodeId: Uuid?,
+    ) {
+        val nodeId = targetNodeId ?: Uuid.random()
+        val placeholderMsg = UIMessage(
+            id = Uuid.random(),
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Text("正在派发到 GitHub Actions…")),
+            modelSnapshot = ModelSnapshot(
+                displayName = modelEntity.displayName.ifBlank { modelEntity.modelId },
+                modelId = modelEntity.modelId,
+            ),
+        )
+        val initialConv = if (targetNodeId != null) {
+            baseConversation.upsertMessage(nodeId, placeholderMsg)
+        } else {
+            baseConversation.copy(
+                messageNodes = baseConversation.messageNodes + MessageNode(
+                    id = nodeId,
+                    messages = listOf(placeholderMsg),
+                    selectIndex = 0,
+                ),
+            )
+        }
+
+        localGenerationJob?.cancel()
+        _isLocalGenerating.value = true
+        _conversation.value = initialConv
+
+        localGenerationJob = viewModelScope.launch {
+            try {
+                repository.saveConversation(initialConv)
+                val result = gatewayClient.dispatchAgent(
+                    modelEntity = modelEntity,
+                    prompt = prompt,
+                    reasoningLevel = _agentAssistant.value.reasoningLevel,
+                    fallbackBaseUrl = settingsStore.current.gatewayBaseUrl,
+                    fallbackApiKey = settingsStore.current.gatewayApiKey,
+                )
+                result.onSuccess { res ->
+                    val summary = buildString {
+                        appendLine("已通过网关派发 Agent 任务到 GitHub Actions：")
+                        appendLine("- **Request ID**: `${res.requestId}`")
+                        appendLine("- **仓库**: `${res.repo}`")
+                        appendLine("- **工作流**: `${res.workflow}` (`${res.ref}`)")
+                        appendLine()
+                        append("如需实时同步云端执行步骤，可在右上角菜单连接 PocketBase 账号。")
+                    }
+                    val doneMsg = placeholderMsg.copy(parts = listOf(UIMessagePart.Text(summary)))
+                    val doneConv = initialConv.upsertMessage(nodeId, doneMsg).copy(updateAt = Instant.now())
+                    _conversation.value = doneConv
+                    repository.saveConversation(doneConv)
+                }.onFailure { err ->
+                    val msg = err.message ?: "派发 Agent Action 失败"
+                    _errorMessage.value = msg
+                    val errMsg = placeholderMsg.copy(
+                        parts = listOf(UIMessagePart.Notice(title = "派发失败", text = msg)),
+                    )
+                    val failedConv = initialConv.upsertMessage(nodeId, errMsg).copy(updateAt = Instant.now())
+                    _conversation.value = failedConv
+                    repository.saveConversation(failedConv)
+                }
+            } finally {
+                _isLocalGenerating.value = false
+            }
+        }
     }
 
     fun editMessage(message: UIMessage, newParts: List<UIMessagePart>) {

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -19,12 +20,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
 import me.rerere.rikkahub.data.agent.AgentUiSettings
+import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
 import me.rerere.rikkahub.data.datastore.BackgroundEffectType
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -70,6 +73,34 @@ fun AgentSettingPage() {
             contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            item {
+                CardGroup(title = { Text("Gemini Gateway 默认配置") }) {
+                    formItem(
+                        headlineContent = { Text("默认请求地址") },
+                    ) {
+                        OutlinedTextField(
+                            value = uiSettings.gatewayBaseUrl,
+                            onValueChange = { value -> update { it.copy(gatewayBaseUrl = value) } },
+                            placeholder = { Text(DEFAULT_GEMINI_GATEWAY_URL) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    formItem(
+                        headlineContent = { Text("全局网关密钥 (GATEWAY_AUTH_TOKEN)") },
+                    ) {
+                        OutlinedTextField(
+                            value = uiSettings.gatewayApiKey,
+                            onValueChange = { value -> update { it.copy(gatewayApiKey = value) } },
+                            placeholder = { Text("留空则不发送鉴权头或使用单模型密钥") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            }
+
             item {
                 CardGroup(title = { Text("导航与滚动") }) {
                     switchItem(
