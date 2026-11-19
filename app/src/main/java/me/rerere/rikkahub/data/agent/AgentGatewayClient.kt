@@ -11,14 +11,16 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.providers.google.GoogleProvider
-import me.rerere.ai.provider.stream.StreamChunk
+import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.utils.JsonInstant
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -44,7 +46,7 @@ class AgentGatewayClient(
 ) {
     private val googleProvider = GoogleProvider(okHttpClient)
 
-    fun streamChat(
+    suspend fun streamChat(
         modelEntity: AgentModelEntity,
         messages: List<UIMessage>,
         systemPrompt: String,
@@ -70,14 +72,24 @@ class AgentGatewayClient(
             useInteractionsApi = false,
         )
 
+        val effectiveMessages = if (systemPrompt.isNotBlank() && messages.none { it.role == MessageRole.SYSTEM }) {
+            listOf(
+                UIMessage(
+                    role = MessageRole.SYSTEM,
+                    parts = listOf(UIMessagePart.Text(systemPrompt.trim())),
+                )
+            ) + messages
+        } else {
+            messages
+        }
+
         val params = TextGenerationParams(
             model = model,
             temperature = temperature,
             reasoningLevel = reasoningLevel,
-            systemPrompt = systemPrompt.ifBlank { null },
         )
 
-        return googleProvider.streamText(providerSetting, messages, params)
+        return googleProvider.streamText(providerSetting, effectiveMessages, params)
     }
 
     suspend fun callDecision(

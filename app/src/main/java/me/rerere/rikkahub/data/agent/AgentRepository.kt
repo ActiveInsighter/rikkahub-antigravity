@@ -726,4 +726,90 @@ class AgentRepository(
             }
         }
     }
+
+    // ---- Local-only Agent Models (Room DB, no cloud sync) ----
+
+    fun observeModels(): Flow<List<AgentModelEntity>> = modelDao.observeAll()
+
+    suspend fun ensureDefaultModels(): List<AgentModelEntity> {
+        val existing = modelDao.getAll()
+        if (existing.isNotEmpty()) return existing
+        val now = System.currentTimeMillis()
+        val defaults = listOf(
+            AgentModelEntity(
+                id = "builtin-antigravity",
+                modelId = "Antigravity",
+                displayName = "Antigravity",
+                category = AgentModelCategory.AGENT.name,
+                baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
+                isBuiltin = true,
+                sortOrder = 0,
+                createdAt = now,
+                updatedAt = now,
+            ),
+            AgentModelEntity(
+                id = "builtin-gemini-2.5-flash",
+                modelId = "gemini-2.5-flash",
+                displayName = "Gemini 2.5 Flash",
+                category = AgentModelCategory.CHAT.name,
+                baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
+                isBuiltin = true,
+                sortOrder = 1,
+                createdAt = now,
+                updatedAt = now,
+            ),
+            AgentModelEntity(
+                id = "builtin-gemini-2.5-pro",
+                modelId = "gemini-2.5-pro",
+                displayName = "Gemini 2.5 Pro",
+                category = AgentModelCategory.CHAT.name,
+                baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
+                isBuiltin = true,
+                sortOrder = 2,
+                createdAt = now,
+                updatedAt = now,
+            ),
+            AgentModelEntity(
+                id = "builtin-gemini-3-flash-preview",
+                modelId = "gemini-3-flash-preview",
+                displayName = "Gemini 3 Flash Preview",
+                category = AgentModelCategory.CHAT.name,
+                baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
+                isBuiltin = true,
+                sortOrder = 3,
+                createdAt = now,
+                updatedAt = now,
+            ),
+            AgentModelEntity(
+                id = "builtin-gemini-decision",
+                modelId = "gemini-decision",
+                displayName = "Gemini Decision",
+                category = AgentModelCategory.DECISION.name,
+                baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
+                isBuiltin = true,
+                sortOrder = 4,
+                createdAt = now,
+                updatedAt = now,
+            ),
+        )
+        modelDao.insertAllIgnore(defaults)
+        return modelDao.getAll()
+    }
+
+    suspend fun saveLocalModel(model: AgentModelEntity): AgentModelEntity {
+        val now = System.currentTimeMillis()
+        val normalized = model.copy(
+            modelId = model.modelId.trim(),
+            displayName = model.displayName.trim().ifBlank { model.modelId.trim() },
+            baseUrl = model.baseUrl.trim().ifBlank { DEFAULT_GEMINI_GATEWAY_URL },
+            apiKey = model.apiKey.trim(),
+            updatedAt = now,
+        )
+        modelDao.upsert(normalized)
+        return normalized
+    }
+
+    suspend fun deleteLocalModel(id: String) {
+        modelDao.deleteById(id)
+    }
 }
