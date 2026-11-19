@@ -77,7 +77,7 @@ fun AgentImageLibrarySheet(
     val scope = rememberCoroutineScope()
     val sheetState = rememberBottomSheetState(
         initialValue = SheetValue.Expanded,
-        skipPartiallyExpanded = true,
+        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
     )
 
     var sortOrder by remember { mutableStateOf("newest") }
