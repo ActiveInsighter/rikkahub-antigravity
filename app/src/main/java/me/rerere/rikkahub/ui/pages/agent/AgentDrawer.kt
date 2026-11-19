@@ -47,6 +47,7 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Clock01
 import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.TransactionHistory
@@ -73,6 +74,7 @@ fun AgentDrawerContent(
     onSelectConversation: (Uuid) -> Unit,
     onNewConversation: () -> Unit,
     onCloseDrawer: () -> Unit,
+    onOpenImageLibrary: () -> Unit = {},
 ) {
     val navController = LocalNavController.current
     val settings = LocalSettings.current
@@ -162,6 +164,15 @@ fun AgentDrawerContent(
                 onClick = {
                     onCloseDrawer()
                     navController.navigate(Screen.AgentWorkflow)
+                },
+            )
+
+            DrawerEntry(
+                icon = HugeIcons.Image02,
+                text = "资料库",
+                onClick = {
+                    onCloseDrawer()
+                    onOpenImageLibrary()
                 },
             )
 

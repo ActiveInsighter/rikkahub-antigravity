@@ -9,10 +9,21 @@ import androidx.compose.runtime.setValue
 import me.rerere.ai.ui.UIMessagePart
 import kotlin.uuid.Uuid
 
+sealed interface ImageUploadState {
+    data class Uploading(val progress: Float) : ImageUploadState
+    data class Failed(val message: String) : ImageUploadState
+}
+
 class ChatInputState {
     val textContent = TextFieldState()
     var messageContent by mutableStateOf(listOf<UIMessagePart>())
     var editingMessage by mutableStateOf<Uuid?>(null)
+    var imageUploadStates by mutableStateOf<Map<String, ImageUploadState>>(emptyMap())
+
+    val hasUploadingImages: Boolean
+        get() = messageContent.any { part ->
+            part is UIMessagePart.Image && imageUploadStates[part.url] is ImageUploadState.Uploading
+        }
 
     /** 编辑中的消息允许改思考内容时不为 null，见 [setContents] */
     var editingReasoning by mutableStateOf<TextFieldState?>(null)
@@ -23,6 +34,7 @@ class ChatInputState {
     fun clearInput() {
         textContent.setTextAndPlaceCursorAtEnd("")
         messageContent = emptyList()
+        imageUploadStates = emptyMap()
         editingMessage = null
         editingReasoning = null
         editingParts = null
@@ -121,6 +133,30 @@ class ChatInputState {
             newMessage.add(UIMessagePart.Image(uri.toString()))
         }
         messageContent = newMessage
+    }
+
+    fun addRemoteImage(url: String) {
+        if (url.isBlank()) return
+        messageContent = messageContent + UIMessagePart.Image(url)
+    }
+
+    fun setImageUploadState(url: String, state: ImageUploadState?) {
+        imageUploadStates = if (state == null) {
+            imageUploadStates - url
+        } else {
+            imageUploadStates + (url to state)
+        }
+    }
+
+    fun replaceImageUrl(oldUrl: String, newUrl: String) {
+        messageContent = messageContent.map { part ->
+            if (part is UIMessagePart.Image && part.url == oldUrl) {
+                UIMessagePart.Image(newUrl)
+            } else {
+                part
+            }
+        }
+        imageUploadStates = imageUploadStates - oldUrl
     }
 
     fun addVideos(uris: List<Uri>) {

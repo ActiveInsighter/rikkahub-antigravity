@@ -37,21 +37,28 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEach
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.core.net.toUri
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.CloudUpload
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.MusicNote03
 import me.rerere.hugeicons.stroke.PaintBoard
+import me.rerere.hugeicons.stroke.Refresh
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.workflow.WorkflowLibraryRepository
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.ui.sketch.SketchDialog
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.hooks.ImageUploadState
 import org.koin.compose.koinInject
 
 @Composable
@@ -59,6 +66,7 @@ internal fun MediaFileInputRow(
     state: ChatInputState,
 ) {
     val filesManager: FilesManager = koinInject()
+    val libraryRepository: WorkflowLibraryRepository = koinInject()
     val managedFiles by filesManager.observe().collectAsState(initial = emptyList())
     val displayNameByRelativePath = remember(managedFiles) {
         managedFiles.associate { it.relativePath to it.displayName }
@@ -69,6 +77,7 @@ internal fun MediaFileInputRow(
 
     fun removePart(part: UIMessagePart, url: String) {
         state.messageContent = state.messageContent.filterNot { it == part }
+        state.setImageUploadState(url, null)
         if (state.shouldDeleteFileOnRemove(part)) {
             filesManager.deleteChatFiles(listOf(url.toUri()))
         }
@@ -93,9 +102,17 @@ internal fun MediaFileInputRow(
                     state.messageContent = state.messageContent.map {
                         if (it == part) UIMessagePart.Image(uri.toString()) else it
                     }
+                    state.setImageUploadState(part.url, null)
                     if (state.shouldDeleteFileOnRemove(part)) {
                         filesManager.deleteChatFiles(listOf(part.url.toUri()))
                     }
+                    launchR2ImageUpload(
+                        scope = scope,
+                        inputState = state,
+                        filesManager = filesManager,
+                        libraryRepository = libraryRepository,
+                        uri = uri,
+                    )
                 }
             },
         )
@@ -136,29 +153,88 @@ internal fun MediaFileInputRow(
         state.messageContent.fastForEach { part ->
             when (part) {
                 is UIMessagePart.Image -> {
+                    val uploadState = state.imageUploadStates[part.url]
+                    val baseTitle = attachmentNameFromUrl(
+                        url = part.url,
+                        fallback = "image",
+                        displayNameByRelativePath = displayNameByRelativePath,
+                        displayNameByFileName = displayNameByFileName
+                    )
+                    val chipTitle = when (uploadState) {
+                        is ImageUploadState.Uploading -> "上传中 ${(uploadState.progress * 100).toInt().coerceIn(0, 100)}%"
+                        is ImageUploadState.Failed -> "上传失败 · 点击重试"
+                        null -> baseTitle
+                    }
                     AttachmentChip(
-                        title = attachmentNameFromUrl(
-                            url = part.url,
-                            fallback = "image",
-                            displayNameByRelativePath = displayNameByRelativePath,
-                            displayNameByFileName = displayNameByFileName
-                        ),
+                        title = chipTitle,
                         leading = {
                             Surface(
                                 modifier = Modifier.size(34.dp),
                                 shape = RoundedCornerShape(10.dp),
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                             ) {
-                                AsyncImage(
-                                    model = part.url,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    AsyncImage(
+                                        model = part.url,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                    when (uploadState) {
+                                        is ImageUploadState.Uploading -> {
+                                            val animatedProgress by animateFloatAsState(
+                                                targetValue = uploadState.progress.coerceIn(0.05f, 1f),
+                                                label = "r2_upload_progress",
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(Color.Black.copy(alpha = 0.48f)),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                CircularProgressIndicator(
+                                                    progress = { animatedProgress },
+                                                    modifier = Modifier.size(20.dp),
+                                                    color = Color.White,
+                                                    trackColor = Color.White.copy(alpha = 0.28f),
+                                                    strokeWidth = 2.4.dp,
+                                                )
+                                            }
+                                        }
+                                        is ImageUploadState.Failed -> {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f)),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                Icon(
+                                                    imageVector = HugeIcons.Refresh,
+                                                    contentDescription = "重试上传",
+                                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                            }
+                                        }
+                                        null -> Unit
+                                    }
+                                }
                             }
                         },
                         onRemove = { removePart(part, part.url) },
-                        onClick = { previewing = part },
+                        onClick = {
+                            if (uploadState is ImageUploadState.Failed) {
+                                launchR2ImageUpload(
+                                    scope = scope,
+                                    inputState = state,
+                                    filesManager = filesManager,
+                                    libraryRepository = libraryRepository,
+                                    uri = part.url.toUri(),
+                                )
+                            } else {
+                                previewing = part
+                            }
+                        },
                     )
                 }
 

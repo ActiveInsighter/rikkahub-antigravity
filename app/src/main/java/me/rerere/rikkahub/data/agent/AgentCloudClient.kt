@@ -113,6 +113,7 @@ data class RemoteGeminiJob(
     val updated: String,
     val sources: List<RemoteSourceRef> = emptyList(),
     val history: List<RemoteHistoryTurn> = emptyList(),
+    val images: List<String> = emptyList(),
 )
 
 data class RemoteSourceRef(
@@ -217,6 +218,7 @@ interface AgentCloudClient {
     suspend fun submitMessage(
         prompt: String,
         sources: List<RemoteAgentSourceInput> = emptyList(),
+        images: List<String> = emptyList(),
         parentMessageId: String? = null,
         replacesMessageId: String? = null,
         title: String = "",
@@ -384,6 +386,7 @@ class PocketBaseAgentCloudClient(
     override suspend fun submitMessage(
         prompt: String,
         sources: List<RemoteAgentSourceInput>,
+        images: List<String>,
         parentMessageId: String?,
         replacesMessageId: String?,
         title: String,
@@ -399,6 +402,7 @@ class PocketBaseAgentCloudClient(
             config = config,
             prompt = prompt,
             sources = sources,
+            images = images,
             parentMessageId = parentMessageId,
             replacesMessageId = replacesMessageId,
             title = title,
@@ -817,8 +821,12 @@ class PocketBaseAgentCloudClient(
                     mime = "text/markdown",
                 )
             }
-            if (userText.isNotBlank() || userParts.isEmpty()) {
-                userParts.add(0, UIMessagePart.Text(userText))
+            val (cleanTurnText, turnImages) = extractImageUrlsAndStripMarker(userText)
+            turnImages.forEach { url ->
+                userParts += UIMessagePart.Image(url = url)
+            }
+            if (cleanTurnText.isNotBlank() || userParts.isEmpty()) {
+                userParts.add(0, UIMessagePart.Text(cleanTurnText))
             }
             val userMsg = UIMessage(
                 id = stableUuid("aw-user:${prior?.id ?: "${job.id}-h-$i"}"),
@@ -855,7 +863,13 @@ class PocketBaseAgentCloudClient(
         } else {
             listOf(job.prompt, currentMessage?.inputText.orEmpty()).filter { it.isNotBlank() }.joinToString("\n\n")
         }
-        currentUserParts += UIMessagePart.Text(userPromptText)
+        val (cleanCurrentPrompt, currentImages) = extractImageUrlsAndStripMarker(userPromptText, job.images)
+        if (cleanCurrentPrompt.isNotBlank() || (source == null && currentImages.isEmpty())) {
+            currentUserParts += UIMessagePart.Text(cleanCurrentPrompt)
+        }
+        currentImages.forEach { url ->
+            currentUserParts += UIMessagePart.Image(url = url)
+        }
         if (source != null) {
             currentUserParts += UIMessagePart.Document(
                 url = source.id,
@@ -1009,6 +1023,9 @@ class PocketBaseAgentCloudClient(
             val o = el as? JsonObject ?: return@mapNotNull null
             RemoteHistoryTurn(role = o.str("role"), text = o.str("text"))
         }
+        val images = obj["images"]?.jsonArray.orEmpty().mapNotNull { el ->
+            (el as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
+        }
         return RemoteGeminiJob(
             id = obj.str("id"),
             owner = obj.str("owner"),
@@ -1026,6 +1043,7 @@ class PocketBaseAgentCloudClient(
             updated = obj.str("updated"),
             sources = sources,
             history = history,
+            images = images,
         )
     }
 
@@ -1217,11 +1235,36 @@ class PocketBaseAgentCloudClient(
     )
 
     companion object {
+        private val IMAGE_MARKER_REGEX = Regex("""<!--\s*aw:images:(\[[\s\S]*?])\s*-->""")
+
+        internal fun extractImageUrlsAndStripMarker(
+            text: String,
+            extraImages: List<String> = emptyList(),
+        ): Pair<String, List<String>> {
+            val urls = LinkedHashSet<String>()
+            extraImages.forEach { url ->
+                val trimmed = url.trim()
+                if (trimmed.isNotEmpty()) urls += trimmed
+            }
+            val cleaned = IMAGE_MARKER_REGEX.replace(text) { match ->
+                val rawJson = match.groupValues.getOrNull(1).orEmpty()
+                runCatching {
+                    JsonInstant.parseToJsonElement(rawJson).jsonArray.forEach { el ->
+                        val url = (el as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+                        if (url.isNotEmpty()) urls += url
+                    }
+                }
+                ""
+            }.trim()
+            return cleaned to urls.toList()
+        }
+
         internal fun buildSubmitJobPayload(
             jobId: String,
             config: RemoteAgentConfig,
             prompt: String,
             sources: List<RemoteAgentSourceInput>,
+            images: List<String> = emptyList(),
             parentMessageId: String? = null,
             replacesMessageId: String? = null,
             title: String = "",
@@ -1242,13 +1285,26 @@ class PocketBaseAgentCloudClient(
                 selectedModel.startsWith("antigravity-", ignoreCase = true)
             val selectedThinkingLevel = thinkingLevelOverride ?: config.thinkingLevel
             val selectedSystemPrompt = systemPromptOverride ?: config.systemPrompt
+            val cleanImages = images.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+            val imagesJson = if (cleanImages.isNotEmpty()) {
+                buildJsonArray { cleanImages.forEach { add(JsonPrimitive(it)) } }
+            } else null
+            val finalPrompt = if (imagesJson != null) {
+                val base = prompt.trimEnd()
+                if (base.isEmpty()) "<!-- aw:images:$imagesJson -->" else "$base\n<!-- aw:images:$imagesJson -->"
+            } else {
+                prompt
+            }
             return buildJsonObject {
                 put("id", jobId)
                 put("responseVersion", 1)
                 put("title", title)
-                put("prompt", prompt)
+                put("prompt", finalPrompt)
                 put("systemPrompt", selectedSystemPrompt)
                 put("text", "")
+                if (imagesJson != null) {
+                    put("images", imagesJson)
+                }
                 put(
                     "sources",
                     buildJsonArray {

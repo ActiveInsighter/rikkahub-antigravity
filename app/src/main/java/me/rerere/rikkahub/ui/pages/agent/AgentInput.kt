@@ -75,6 +75,7 @@ fun AgentInput(
     )
 
     fun submit() {
+        if (state.hasUploadingImages) return
         val parts = state.getContents()
         if (parts.isNotEmpty() && !loading) {
             onSend(parts)
@@ -220,7 +221,7 @@ fun AgentInput(
                             )
                         }
                     } else {
-                        val canSend = !state.isEmpty()
+                        val canSend = !state.isEmpty() && !state.hasUploadingImages
                         FilledIconButton(
                             onClick = { submit() },
                             enabled = canSend,

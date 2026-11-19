@@ -304,6 +304,7 @@ class AgentRepository(
         conversation: Conversation,
         prompt: String,
         sources: List<RemoteAgentSourceInput>,
+        images: List<String> = emptyList(),
         parentMessageId: String?,
         replacesMessageId: String?,
         title: String,
@@ -322,6 +323,7 @@ class AgentRepository(
                         val submitted = cloudClient.submitMessage(
                             prompt = prompt,
                             sources = sources,
+                            images = images,
                             parentMessageId = parentMessageId,
                             replacesMessageId = replacesMessageId,
                             title = title,
