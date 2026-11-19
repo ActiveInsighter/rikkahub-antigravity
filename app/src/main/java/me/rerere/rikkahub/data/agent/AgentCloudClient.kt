@@ -777,7 +777,7 @@ class PocketBaseAgentCloudClient(
             role = MessageRole.ASSISTANT,
             parts = uiParts,
             annotations = annotations,
-            createdAt = parseLocalDateTime(message?.startedAt?.ifBlank { job.created } ?: job.created),
+            createdAt = parseLocalDateTime(if (isHistorical) message?.startedAt?.ifBlank { job.created } ?: job.created else job.created),
             finishedAt = finishedAt,
             modelSnapshot = ModelSnapshot(
                 displayName = "Antigravity Agent",

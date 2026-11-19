@@ -94,7 +94,7 @@ fun AgentWorkflowPage() {
         topBar = {
             LargeFlexibleTopAppBar(
                 title = { Text("Agent 工作流") },
-                subtitle = { Text("定时执行任务（批量执行敬请期待）") },
+                subtitle = { Text("定时执行任务") },
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(onClick = { vm.refresh() }) {
@@ -378,6 +378,19 @@ private fun ScheduleTaskCard(
                 }
             }
 
+            if (schedule.nextRunAt.isNotBlank()) {
+                val nextRun = remember(schedule.nextRunAt, schedule.timezone) {
+                    runCatching {
+                        val instant = java.time.Instant.parse(schedule.nextRunAt.replace(' ', 'T'))
+                        java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                            .withZone(java.time.ZoneId.of(schedule.timezone)).format(instant)
+                    }.getOrDefault(schedule.nextRunAt)
+                }
+                Text("下次执行 · $nextRun", style = MaterialTheme.typography.labelMedium)
+            }
+            if (schedule.lastError.isNotBlank()) {
+                Text(schedule.lastError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+            }
             HorizontalDivider()
 
             Row(
@@ -513,7 +526,7 @@ private fun ScheduleEditorSheet(
             }
 
             Text(
-                text = "思考程度",
+                text = if (model.isManagedAgentModel()) "思考程度 · 由 Antigravity 管理" else "思考程度",
                 style = MaterialTheme.typography.labelLarge,
             )
             Row(
@@ -524,7 +537,8 @@ private fun ScheduleEditorSheet(
             ) {
                 thinkingOptions.forEach { (value, label) ->
                     FilterChip(
-                        selected = thinkingLevel == value,
+                        enabled = !model.isManagedAgentModel(),
+                        selected = !model.isManagedAgentModel() && thinkingLevel == value,
                         onClick = { thinkingLevel = value },
                         label = { Text(label) },
                     )
@@ -586,7 +600,7 @@ private fun ScheduleEditorSheet(
                                 prompt = prompt.trim(),
                                 systemPrompt = systemPrompt.trim(),
                                 model = model.trim().ifBlank { "Antigravity" },
-                                thinkingLevel = thinkingLevel,
+                                thinkingLevel = if (model.isManagedAgentModel()) "" else thinkingLevel,
                                 cron = cron.trim().ifBlank { "0 9 * * *" },
                                 timezone = timezone.trim().ifBlank { "Asia/Shanghai" },
                             )
