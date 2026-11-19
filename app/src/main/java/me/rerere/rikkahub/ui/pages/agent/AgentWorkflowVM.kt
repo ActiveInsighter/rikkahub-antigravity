@@ -69,13 +69,14 @@ class AgentWorkflowVM(
         }
     }
 
-    fun saveSchedule(schedule: AgentSchedule) = update("保存定时任务失败") { current ->
+    fun saveSchedule(schedule: AgentSchedule, onSaved: () -> Unit = {}) = update("保存定时任务失败") { current ->
         val isNew = schedule.id.isBlank()
         val saved = if (isNew) cloudClient.createSchedule(schedule) else cloudClient.updateSchedule(schedule)
         if (session.value == current) {
             val schedules = _schedules.value
             _schedules.value = if (isNew) schedules + saved else schedules.map { if (it.id == saved.id) saved else it }
             _statusMessage.value = if (isNew) "已创建定时任务" else "已更新定时任务"
+            onSaved()
         }
     }
 

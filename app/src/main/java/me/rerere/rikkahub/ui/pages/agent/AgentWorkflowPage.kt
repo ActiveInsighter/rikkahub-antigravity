@@ -257,8 +257,7 @@ fun AgentWorkflowPage() {
             availableModels = availableModels,
             onDismiss = { editingSchedule = null },
             onSave = { updated ->
-                vm.saveSchedule(updated)
-                editingSchedule = null
+                vm.saveSchedule(updated) { editingSchedule = null }
             },
         )
     }
