@@ -115,7 +115,7 @@ fun AgentLibraryPage() {
                         FilledTonalButton(
                             onClick = {
                                 vm.reuseImages(uiState.selectedUrls.toList())
-                                navController.navigateUp()
+                                navController.popBackStack()
                             },
                             modifier = Modifier.padding(end = 8.dp),
                         ) {
@@ -351,7 +351,7 @@ fun AgentLibraryPage() {
                     onClick = {
                         vm.reuseImages(listOf(target.sourceUrl))
                         previewItem = null
-                        navController.navigateUp()
+                        navController.popBackStack()
                     },
                 ) {
                     Icon(

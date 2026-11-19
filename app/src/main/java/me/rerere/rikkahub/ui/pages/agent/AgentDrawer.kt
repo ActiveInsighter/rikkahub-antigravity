@@ -47,6 +47,7 @@ import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Clock01
 import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.Image02
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.TransactionHistory
@@ -166,7 +167,7 @@ fun AgentDrawerContent(
             )
 
             DrawerEntry(
-                icon = me.rerere.hugeicons.stroke.Image02,
+                icon = HugeIcons.Image02,
                 text = "资料库",
                 onClick = {
                     onCloseDrawer()
