@@ -50,11 +50,14 @@ import me.rerere.hugeicons.stroke.ArrowUp02
 import me.rerere.hugeicons.stroke.Camera01
 import me.rerere.hugeicons.stroke.Files02
 import me.rerere.hugeicons.stroke.Image02
+import me.rerere.hugeicons.stroke.PaintBoard
 import me.rerere.hugeicons.stroke.StopCircle
+import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.ai.MediaFileInputRow
 import me.rerere.rikkahub.ui.components.ai.chatInputHaze
 import me.rerere.rikkahub.ui.components.ai.rememberChatAttachmentPickerActions
+import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 
 @Composable
@@ -67,6 +70,7 @@ fun AgentInput(
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val navController = LocalNavController.current
     var showAttachMenu by remember { mutableStateOf(false) }
     val pickerActions = rememberChatAttachmentPickerActions(
         inputState = state,
@@ -76,7 +80,7 @@ fun AgentInput(
 
     fun submit() {
         val parts = state.getContents()
-        if (parts.isNotEmpty() && !loading) {
+        if (parts.isNotEmpty() && !loading && !state.hasUploadingImages) {
             onSend(parts)
             state.clearInput()
         }
@@ -202,6 +206,22 @@ fun AgentInput(
                                     pickerActions.onTakePicture()
                                 },
                             )
+                            DropdownMenuItem(
+                                text = { Text("画草图") },
+                                leadingIcon = { Icon(HugeIcons.PaintBoard, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                onClick = {
+                                    showAttachMenu = false
+                                    pickerActions.onSketch()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("从资料库选择") },
+                                leadingIcon = { Icon(HugeIcons.Image02, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                onClick = {
+                                    showAttachMenu = false
+                                    navController.navigate(Screen.AgentLibrary)
+                                },
+                            )
                         }
                     }
 
@@ -220,7 +240,7 @@ fun AgentInput(
                             )
                         }
                     } else {
-                        val canSend = !state.isEmpty()
+                        val canSend = !state.isEmpty() && !state.hasUploadingImages
                         FilledIconButton(
                             onClick = { submit() },
                             enabled = canSend,

@@ -143,6 +143,7 @@ import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerPage
 import me.rerere.rikkahub.ui.pages.stats.StatsPage
 import me.rerere.rikkahub.ui.pages.translator.TranslatorPage
 import me.rerere.rikkahub.ui.pages.webview.WebViewPage
+import me.rerere.rikkahub.ui.pages.agent.AgentLibraryPage
 import me.rerere.rikkahub.ui.pages.agent.AgentPage
 import me.rerere.rikkahub.ui.pages.agent.AgentSettingPage
 import me.rerere.rikkahub.ui.pages.agent.AgentWorkflowPage
@@ -651,6 +652,10 @@ class RouteActivity : ComponentActivity() {
                                 AgentWorkflowPage()
                             }
 
+                            entry<Screen.AgentLibrary> {
+                                AgentLibraryPage()
+                            }
+
                             entry<Screen.Workflow> {
                                 WorkflowPage()
                             }
@@ -895,6 +900,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object AgentWorkflow : Screen
+
+    @Serializable
+    data object AgentLibrary : Screen
 
     @Serializable
     data object Workflow : Screen

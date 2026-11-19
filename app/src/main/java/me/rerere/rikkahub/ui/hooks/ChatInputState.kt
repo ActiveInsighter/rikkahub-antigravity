@@ -9,9 +9,16 @@ import androidx.compose.runtime.setValue
 import me.rerere.ai.ui.UIMessagePart
 import kotlin.uuid.Uuid
 
+sealed interface ImageUploadStatus {
+    data class Uploading(val progress: Float) : ImageUploadStatus
+    data class Uploaded(val remoteUrl: String) : ImageUploadStatus
+    data class Failed(val error: String) : ImageUploadStatus
+}
+
 class ChatInputState {
     val textContent = TextFieldState()
     var messageContent by mutableStateOf(listOf<UIMessagePart>())
+    var imageUploadStates by mutableStateOf<Map<String, ImageUploadStatus>>(emptyMap())
     var editingMessage by mutableStateOf<Uuid?>(null)
 
     /** 编辑中的消息允许改思考内容时不为 null，见 [setContents] */
@@ -20,9 +27,15 @@ class ChatInputState {
     private var editingParts: List<UIMessagePart>? = null
     private var editingAttachmentUrls: Set<String> = emptySet()
 
+    val hasUploadingImages: Boolean
+        get() = messageContent.any { part ->
+            part is UIMessagePart.Image && imageUploadStates[part.url] is ImageUploadStatus.Uploading
+        }
+
     fun clearInput() {
         textContent.setTextAndPlaceCursorAtEnd("")
         messageContent = emptyList()
+        imageUploadStates = emptyMap()
         editingMessage = null
         editingReasoning = null
         editingParts = null
@@ -121,6 +134,25 @@ class ChatInputState {
             newMessage.add(UIMessagePart.Image(uri.toString()))
         }
         messageContent = newMessage
+    }
+
+    fun updateImageUploadStatus(url: String, status: ImageUploadStatus?) {
+        imageUploadStates = if (status == null) {
+            imageUploadStates - url
+        } else {
+            imageUploadStates + (url to status)
+        }
+    }
+
+    fun replaceImageUrl(oldUrl: String, newUrl: String) {
+        messageContent = messageContent.map { part ->
+            if (part is UIMessagePart.Image && part.url == oldUrl) {
+                part.copy(url = newUrl)
+            } else {
+                part
+            }
+        }
+        imageUploadStates = (imageUploadStates - oldUrl) + (newUrl to ImageUploadStatus.Uploaded(newUrl))
     }
 
     fun addVideos(uris: List<Uri>) {

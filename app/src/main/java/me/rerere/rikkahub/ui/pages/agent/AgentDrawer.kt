@@ -165,6 +165,15 @@ fun AgentDrawerContent(
                 },
             )
 
+            DrawerEntry(
+                icon = me.rerere.hugeicons.stroke.Image02,
+                text = "资料库",
+                onClick = {
+                    onCloseDrawer()
+                    navController.navigate(Screen.AgentLibrary)
+                },
+            )
+
             // 文件夹栏与排序按钮（复用官方组件）
             Row(
                 modifier = Modifier

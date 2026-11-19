@@ -191,7 +191,18 @@ fun AgentPage(id: Uuid) {
     var previewMode by rememberSaveable { mutableStateOf(false) }
     val hazeState = rememberHazeState()
     val inputState = remember(id) { ChatInputState() }
+    val libraryImageRepository: me.rerere.rikkahub.data.workflow.LibraryImageRepository = org.koin.compose.koinInject()
+    val pendingReuseUrls by libraryImageRepository.pendingReuseUrls.collectAsStateWithLifecycle()
     var draftLoaded by remember(id) { mutableStateOf(false) }
+
+    LaunchedEffect(pendingReuseUrls) {
+        if (pendingReuseUrls.isNotEmpty()) {
+            val urls = libraryImageRepository.consumeReuseImages()
+            if (urls.isNotEmpty()) {
+                inputState.addImages(urls.map { android.net.Uri.parse(it) })
+            }
+        }
+    }
 
     LaunchedEffect(id, initialDraft) {
         val draft = initialDraft

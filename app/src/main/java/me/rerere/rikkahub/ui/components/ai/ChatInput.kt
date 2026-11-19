@@ -175,12 +175,14 @@ fun ChatInput(
     )
 
     fun sendMessage() {
+        if (state.hasUploadingImages && !(loading && state.isEmpty())) return
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
         if (loading && state.isEmpty()) onCancelClick() else onSendClick()
     }
 
     fun sendMessageWithoutAnswer() {
+        if (state.hasUploadingImages && !(loading && state.isEmpty())) return
         focusManager.clearFocus(force = true)
         keyboardController?.hide()
         if (loading && state.isEmpty()) onCancelClick() else onLongSendClick()
@@ -387,7 +389,7 @@ fun ChatInput(
                         ) {
                             SendButton(
                                 loading = loading,
-                                empty = state.isEmpty(),
+                                empty = state.isEmpty() || state.hasUploadingImages,
                                 onClick = { sendMessage() },
                                 onLongClick = { sendMessageWithoutAnswer() },
                             )

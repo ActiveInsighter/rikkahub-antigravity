@@ -13,6 +13,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.core.content.FileProvider
+import androidx.core.net.toUri
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -20,11 +22,13 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.workflow.LibraryImageRepository
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionCamera
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.rememberPermissionState
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.hooks.ImageUploadStatus
 import me.rerere.rikkahub.utils.isAllowedFileType
 import me.rerere.ui.sketch.SketchDialog
 import me.rerere.ui.sketch.SketchResult
@@ -52,14 +56,30 @@ internal fun rememberChatAttachmentPickerActions(
     val resources = LocalResources.current
     val toaster = LocalToaster.current
     val filesManager: FilesManager = koinInject()
+    val libraryImageRepository: LibraryImageRepository = koinInject()
+    val uploadScope = rememberCoroutineScope()
     val cameraPermission = rememberPermissionState(PermissionCamera)
     PermissionManager(permissionState = cameraPermission)
+
+    fun addAndUploadImages(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        inputState.addImages(uris)
+        uris.forEach { uri ->
+            uploadImageUriToR2(
+                inputState = inputState,
+                uri = uri,
+                libraryImageRepository = libraryImageRepository,
+                filesManager = filesManager,
+                scope = uploadScope,
+            )
+        }
+    }
 
     var cameraOutputUri by remember { mutableStateOf<Uri?>(null) }
     var cameraOutputFile by remember { mutableStateOf<File?>(null) }
     val launchCameraCrop = useCropLauncher(
         onCroppedImageReady = { croppedUri ->
-            inputState.addImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
+            addAndUploadImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
             onAttachmentAdded()
         },
         onCleanup = {
@@ -71,7 +91,7 @@ internal fun rememberChatAttachmentPickerActions(
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captureSuccessful ->
         if (captureSuccessful && cameraOutputUri != null) {
             if (setting.displaySetting.skipCropImage) {
-                inputState.addImages(filesManager.createChatFilesByContents(listOf(cameraOutputUri!!)))
+                addAndUploadImages(filesManager.createChatFilesByContents(listOf(cameraOutputUri!!)))
                 cameraOutputFile?.delete()
                 cameraOutputFile = null
                 cameraOutputUri = null
@@ -101,7 +121,7 @@ internal fun rememberChatAttachmentPickerActions(
 
     val launchImageCrop = useCropLauncher(
         onCroppedImageReady = { croppedUri ->
-            inputState.addImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
+            addAndUploadImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
             onAttachmentAdded()
         },
     )
@@ -112,7 +132,7 @@ internal fun rememberChatAttachmentPickerActions(
                 if (!setting.displaySetting.skipCropImage && selectedUris.size == 1) {
                     launchImageCrop(selectedUris.first())
                 } else {
-                    inputState.addImages(filesManager.createChatFilesByContents(selectedUris))
+                    addAndUploadImages(filesManager.createChatFilesByContents(selectedUris))
                     onAttachmentAdded()
                 }
             } else {
@@ -174,8 +194,8 @@ internal fun rememberChatAttachmentPickerActions(
             onDismiss = { showSketch = false },
             onConfirm = { result ->
                 showSketch = false
-                scope.launch {
-                    inputState.addImages(listOfNotNull(filesManager.createChatFileBySketch(result)))
+                uploadScope.launch {
+                    addAndUploadImages(listOfNotNull(filesManager.createChatFileBySketch(result)))
                     onAttachmentAdded()
                 }
             },
@@ -190,6 +210,35 @@ internal fun rememberChatAttachmentPickerActions(
         onPickFile = { filePickerLauncher.launch(arrayOf("*/*")) },
         onSketch = { showSketch = true },
     )
+}
+
+internal fun uploadImageUriToR2(
+    inputState: ChatInputState,
+    uri: Uri,
+    libraryImageRepository: LibraryImageRepository,
+    filesManager: FilesManager,
+    scope: CoroutineScope,
+) {
+    val localUrl = uri.toString()
+    if (localUrl.startsWith("http://") || localUrl.startsWith("https://")) return
+    if (!libraryImageRepository.isSignedIn) return
+
+    inputState.updateImageUploadStatus(localUrl, ImageUploadStatus.Uploading(0f))
+    scope.launch {
+        libraryImageRepository.uploadImage(uri) { progress ->
+            inputState.updateImageUploadStatus(localUrl, ImageUploadStatus.Uploading(progress))
+        }.onSuccess { uploaded ->
+            inputState.replaceImageUrl(localUrl, uploaded.sourceUrl)
+            if (localUrl.startsWith("file:")) {
+                filesManager.deleteChatFiles(listOf(localUrl.toUri()))
+            }
+        }.onFailure { error ->
+            inputState.updateImageUploadStatus(
+                localUrl,
+                ImageUploadStatus.Failed(error.message ?: "上传失败"),
+            )
+        }
+    }
 }
 
 /** 把画板的结果存成聊天附件。 */

@@ -1,10 +1,13 @@
 package me.rerere.rikkahub.ui.components.ai
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,8 +18,10 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -49,9 +54,11 @@ import me.rerere.hugeicons.stroke.PaintBoard
 import me.rerere.hugeicons.stroke.Video01
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.files.FilesManager
+import me.rerere.rikkahub.data.workflow.LibraryImageRepository
 import me.rerere.rikkahub.ui.components.ui.ImagePreviewDialog
 import me.rerere.ui.sketch.SketchDialog
 import me.rerere.rikkahub.ui.hooks.ChatInputState
+import me.rerere.rikkahub.ui.hooks.ImageUploadStatus
 import org.koin.compose.koinInject
 
 @Composable
@@ -59,6 +66,7 @@ internal fun MediaFileInputRow(
     state: ChatInputState,
 ) {
     val filesManager: FilesManager = koinInject()
+    val libraryImageRepository: LibraryImageRepository = koinInject()
     val managedFiles by filesManager.observe().collectAsState(initial = emptyList())
     val displayNameByRelativePath = remember(managedFiles) {
         managedFiles.associate { it.relativePath to it.displayName }
@@ -69,6 +77,8 @@ internal fun MediaFileInputRow(
 
     fun removePart(part: UIMessagePart, url: String) {
         state.messageContent = state.messageContent.filterNot { it == part }
+        state.updateImageUploadStatus(url, null)
+        // 上传到 R2 后 url 为 https://，shouldDeleteFileOnRemove 返回 false，不会从 R2 删除
         if (state.shouldDeleteFileOnRemove(part)) {
             filesManager.deleteChatFiles(listOf(url.toUri()))
         }
@@ -93,9 +103,17 @@ internal fun MediaFileInputRow(
                     state.messageContent = state.messageContent.map {
                         if (it == part) UIMessagePart.Image(uri.toString()) else it
                     }
+                    state.updateImageUploadStatus(part.url, null)
                     if (state.shouldDeleteFileOnRemove(part)) {
                         filesManager.deleteChatFiles(listOf(part.url.toUri()))
                     }
+                    uploadImageUriToR2(
+                        inputState = state,
+                        uri = uri,
+                        libraryImageRepository = libraryImageRepository,
+                        filesManager = filesManager,
+                        scope = scope,
+                    )
                 }
             },
         )
@@ -136,29 +154,87 @@ internal fun MediaFileInputRow(
         state.messageContent.fastForEach { part ->
             when (part) {
                 is UIMessagePart.Image -> {
-                    AttachmentChip(
-                        title = attachmentNameFromUrl(
+                    val uploadStatus = state.imageUploadStates[part.url]
+                    val rawProgress = (uploadStatus as? ImageUploadStatus.Uploading)?.progress ?: 0f
+                    val animatedProgress by animateFloatAsState(
+                        targetValue = rawProgress,
+                        label = "imageUploadProgress",
+                    )
+                    val isUploading = uploadStatus is ImageUploadStatus.Uploading
+                    val isFailed = uploadStatus is ImageUploadStatus.Failed
+                    val chipTitle = when (uploadStatus) {
+                        is ImageUploadStatus.Uploading -> "上传中 ${(animatedProgress * 100).toInt().coerceIn(0, 99)}%"
+                        is ImageUploadStatus.Failed -> "上传失败 · 点击重试"
+                        else -> attachmentNameFromUrl(
                             url = part.url,
                             fallback = "image",
                             displayNameByRelativePath = displayNameByRelativePath,
                             displayNameByFileName = displayNameByFileName
-                        ),
+                        )
+                    }
+                    AttachmentChip(
+                        title = chipTitle,
+                        progress = if (isUploading) animatedProgress else null,
+                        isError = isFailed,
                         leading = {
                             Surface(
                                 modifier = Modifier.size(34.dp),
                                 shape = RoundedCornerShape(10.dp),
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                             ) {
-                                AsyncImage(
-                                    model = part.url,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    AsyncImage(
+                                        model = part.url,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                    if (isUploading) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(Color.Black.copy(alpha = 0.45f)),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            CircularProgressIndicator(
+                                                progress = { animatedProgress },
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.2.dp,
+                                                color = Color.White,
+                                                trackColor = Color.White.copy(alpha = 0.28f),
+                                            )
+                                        }
+                                    } else if (isFailed) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f)),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                text = "!",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         },
                         onRemove = { removePart(part, part.url) },
-                        onClick = { previewing = part },
+                        onClick = {
+                            if (isFailed) {
+                                uploadImageUriToR2(
+                                    inputState = state,
+                                    uri = part.url.toUri(),
+                                    libraryImageRepository = libraryImageRepository,
+                                    filesManager = filesManager,
+                                    scope = scope,
+                                )
+                            } else {
+                                previewing = part
+                            }
+                        },
                     )
                 }
 
@@ -213,7 +289,14 @@ private fun AttachmentChip(
     leading: @Composable () -> Unit,
     onRemove: () -> Unit,
     onClick: (() -> Unit)? = null,
+    progress: Float? = null,
+    isError: Boolean = false,
 ) {
+    val borderColor = if (isError) {
+        MaterialTheme.colorScheme.error.copy(alpha = 0.65f)
+    } else {
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+    }
     Surface(
         modifier = Modifier
             .clip(RoundedCornerShape(18.dp))
@@ -222,35 +305,48 @@ private fun AttachmentChip(
         tonalElevation = 1.dp,
         shadowElevation = 0.dp,
         color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+        border = BorderStroke(1.dp, borderColor)
     ) {
-        Row(
-            modifier = Modifier
-                .height(44.dp)
-                .padding(start = 8.dp, end = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            leading()
-            Text(
-                text = title,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.widthIn(min = 40.dp, max = 180.dp),
-            )
-            Box(
+        Column {
+            Row(
                 modifier = Modifier
-                    .clip(CircleShape)
-                    .size(26.dp)
-                    .clickable(onClick = onRemove),
-                contentAlignment = Alignment.Center
+                    .height(44.dp)
+                    .padding(start = 8.dp, end = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    imageVector = HugeIcons.Cancel01,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp)
+                leading()
+                Text(
+                    text = title,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.widthIn(min = 40.dp, max = 180.dp),
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .size(26.dp)
+                        .clickable(onClick = onRemove),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.Cancel01,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            if (progress != null) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.5.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                 )
             }
         }

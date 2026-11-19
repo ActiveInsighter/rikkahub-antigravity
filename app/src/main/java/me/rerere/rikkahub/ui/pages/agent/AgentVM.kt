@@ -1026,13 +1026,18 @@ class AgentVM(
         val text = parts.filterIsInstance<UIMessagePart.Text>()
             .joinToString("\n") { it.text }
             .trim()
-        if (text.isNotEmpty()) return text
+        val imageMarkers = parts.filterIsInstance<UIMessagePart.Image>()
+            .map { it.url.trim() }
+            .filter { it.startsWith("http://") || it.startsWith("https://") }
+            .joinToString("\n") { "<!-- aw:image:$it -->" }
         val docNames = parts.filterIsInstance<UIMessagePart.Document>().map { it.fileName }
-        return if (docNames.isNotEmpty()) {
-            "请处理附件文件：${docNames.joinToString(", ")}"
-        } else {
-            ""
+        val baseText = when {
+            text.isNotEmpty() -> text
+            docNames.isNotEmpty() -> "请处理附件文件：${docNames.joinToString(", ")}"
+            imageMarkers.isNotEmpty() -> "请分析以上图片"
+            else -> ""
         }
+        return listOf(baseText, imageMarkers).filter { it.isNotBlank() }.joinToString("\n\n")
     }
 
     private fun extractSourcesFromParts(parts: List<UIMessagePart>): List<RemoteAgentSourceInput> {

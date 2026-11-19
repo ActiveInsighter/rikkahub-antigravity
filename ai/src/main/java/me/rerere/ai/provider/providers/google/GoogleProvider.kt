@@ -789,11 +789,11 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         }
 
         is UIMessagePart.Image -> {
-            encodeBase64(false).getOrNull()?.let { encoded ->
+            encodeBase64(client = client, withPrefix = false).getOrNull()?.let { encoded ->
                 buildJsonObject {
                     put("inlineData", buildJsonObject {
                         put("mimeType", encoded.mimeType)
-                        put("data", encoded.base64)
+                        put("data", encoded.base64.substringAfter(";base64,"))
                     })
                     metadataAs<GoogleThoughtMetadata>()?.thoughtSignature?.let {
                         put("thoughtSignature", it)

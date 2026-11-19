@@ -8,6 +8,8 @@ import android.util.Base64
 import android.util.Base64OutputStream
 import androidx.core.net.toUri
 import me.rerere.ai.ui.UIMessagePart
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.ByteArrayOutputStream
 import java.io.File
 
@@ -49,7 +51,13 @@ internal fun mapExifOrientationToTransform(orientation: Int): ExifTransformType 
     else -> ExifTransformType.NONE
 }
 
-fun UIMessagePart.Image.encodeBase64(withPrefix: Boolean = true): Result<EncodedImage> = runCatching {
+fun UIMessagePart.Image.encodeBase64(withPrefix: Boolean = true): Result<EncodedImage> =
+    encodeBase64(client = null, withPrefix = withPrefix)
+
+fun UIMessagePart.Image.encodeBase64(
+    client: OkHttpClient? = null,
+    withPrefix: Boolean = true,
+): Result<EncodedImage> = runCatching {
     when {
         this.url.startsWith("file://") -> {
             val filePath =
@@ -73,8 +81,38 @@ fun UIMessagePart.Image.encodeBase64(withPrefix: Boolean = true): Result<Encoded
             EncodedImage(base64 = url, mimeType = mimeType)
         }
         this.url.startsWith("http") -> {
-            // HTTP URL 无法确定 mime type，默认使用 image/png
-            EncodedImage(base64 = url, mimeType = "image/png")
+            if (client == null) {
+                // 普通 OpenAI 兼容模型可直接传 URL
+                EncodedImage(base64 = url, mimeType = "image/png")
+            } else {
+                val request = Request.Builder().url(url).get().build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        throw IllegalStateException("Failed to download image (${response.code}): $url")
+                    }
+                    val bytes = response.body?.bytes()
+                        ?: throw IllegalStateException("Empty image body: $url")
+                    val headerMime = response.header("Content-Type")
+                        ?.substringBefore(';')
+                        ?.trim()
+                        ?.lowercase()
+                        ?.takeIf { it.startsWith("image/") }
+                    val mimeType = when {
+                        headerMime == "image/jpg" -> "image/jpeg"
+                        headerMime != null -> headerMime
+                        url.substringBefore('?').endsWith(".jpg", ignoreCase = true) ||
+                            url.substringBefore('?').endsWith(".jpeg", ignoreCase = true) -> "image/jpeg"
+                        url.substringBefore('?').endsWith(".webp", ignoreCase = true) -> "image/webp"
+                        url.substringBefore('?').endsWith(".gif", ignoreCase = true) -> "image/gif"
+                        else -> "image/png"
+                    }
+                    val encoded = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    EncodedImage(
+                        base64 = if (withPrefix) "data:$mimeType;base64,$encoded" else encoded,
+                        mimeType = mimeType,
+                    )
+                }
+            }
         }
         else -> throw IllegalArgumentException("Unsupported URL format: $url")
     }

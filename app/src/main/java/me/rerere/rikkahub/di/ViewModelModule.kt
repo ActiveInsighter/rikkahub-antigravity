@@ -143,4 +143,10 @@ val viewModelModule = module {
             workflowRepository = get(),
         )
     }
+    viewModel {
+        me.rerere.rikkahub.ui.pages.agent.AgentLibraryVM(
+            libraryImageRepository = get(),
+            workflowRepository = get(),
+        )
+    }
 }

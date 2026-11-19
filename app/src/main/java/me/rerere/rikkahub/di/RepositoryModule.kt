@@ -115,6 +115,10 @@ val repositoryModule = module {
     }
 
     single {
+        me.rerere.rikkahub.data.workflow.LibraryImageRepository(get(), get(), get(), get())
+    }
+
+    single {
         me.rerere.rikkahub.data.workflow.WorkflowConverterRepository(get())
     }
 

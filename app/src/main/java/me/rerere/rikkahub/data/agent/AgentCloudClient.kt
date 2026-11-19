@@ -817,6 +817,11 @@ class PocketBaseAgentCloudClient(
                     mime = "text/markdown",
                 )
             }
+            val (cleanTurnText, turnImageUrls) = extractAwImages(userText)
+            userText = cleanTurnText
+            turnImageUrls.forEach { imageUrl ->
+                userParts += UIMessagePart.Image(url = imageUrl)
+            }
             if (userText.isNotBlank() || userParts.isEmpty()) {
                 userParts.add(0, UIMessagePart.Text(userText))
             }
@@ -850,12 +855,16 @@ class PocketBaseAgentCloudClient(
         val currentId = currentMessage?.id ?: job.id
         val currentUserParts = mutableListOf<UIMessagePart>()
         val source = job.sources.firstOrNull { it.id == currentMessage?.sourceId || it.name == currentMessage?.sourceName }
-        val userPromptText = if (source != null) {
+        val rawUserPromptText = if (source != null) {
             job.prompt
         } else {
             listOf(job.prompt, currentMessage?.inputText.orEmpty()).filter { it.isNotBlank() }.joinToString("\n\n")
         }
+        val (userPromptText, currentImageUrls) = extractAwImages(rawUserPromptText)
         currentUserParts += UIMessagePart.Text(userPromptText)
+        currentImageUrls.forEach { imageUrl ->
+            currentUserParts += UIMessagePart.Image(url = imageUrl)
+        }
         if (source != null) {
             currentUserParts += UIMessagePart.Document(
                 url = source.id,
@@ -1315,6 +1324,18 @@ class PocketBaseAgentCloudClient(
             return instant.toLocalDateTime(TimeZone.currentSystemDefault())
         }
     }
+}
+
+private val AW_IMAGE_MARKER_REGEX = Regex("""<!--\s*aw:image:(https?://[^\s>]+)\s*-->""")
+
+private fun extractAwImages(raw: String): Pair<String, List<String>> {
+    if (!raw.contains("aw:image:")) return raw to emptyList()
+    val urls = mutableListOf<String>()
+    val cleaned = AW_IMAGE_MARKER_REGEX.replace(raw) { match ->
+        urls += match.groupValues[1].trim()
+        ""
+    }.replace(Regex("""\n{3,}"""), "\n\n").trim()
+    return cleaned to urls
 }
 
 private fun JsonObject.str(key: String): String =
