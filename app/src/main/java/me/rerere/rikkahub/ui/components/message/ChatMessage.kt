@@ -246,15 +246,27 @@ fun ChatMessage(
             assistant = assistant,
         )
 
-        ProvideTextStyle(textStyle) {
-            ChatMessageNerdLine(message = message)
-        }
-
-        if (onOpenAgentInsights != null && message.role == MessageRole.ASSISTANT && !loading) {
-            AgentMessageInsightsFooter(
-                message = message,
-                onClick = { onOpenAgentInsights(message) },
-            )
+        val showAgentTiming = onOpenAgentInsights != null && message.role == MessageRole.ASSISTANT && !loading
+        if (showAgentTiming) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    ProvideTextStyle(textStyle) {
+                        ChatMessageNerdLine(message = message)
+                    }
+                }
+                AgentMessageTimingBadge(
+                    message = message,
+                    onClick = { onOpenAgentInsights(message) },
+                )
+            }
+        } else {
+            ProvideTextStyle(textStyle) {
+                ChatMessageNerdLine(message = message)
+            }
         }
 
     }

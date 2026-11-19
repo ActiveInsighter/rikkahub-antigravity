@@ -1,10 +1,11 @@
 package me.rerere.rikkahub.ui.pages.agent
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,19 +15,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -43,21 +44,26 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.AlertCircle
-import me.rerere.hugeicons.stroke.ArrowRight01
+import me.rerere.hugeicons.stroke.Brain02
 import me.rerere.hugeicons.stroke.CheckmarkCircle02
+import me.rerere.hugeicons.stroke.Clock01
 import me.rerere.hugeicons.stroke.Flash
 import me.rerere.hugeicons.stroke.Message01
+import me.rerere.hugeicons.stroke.Sent
 import me.rerere.hugeicons.stroke.Sparkles
 import me.rerere.hugeicons.stroke.Time02
 import me.rerere.hugeicons.stroke.Wrench01
+import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.PagerTab
 import me.rerere.rikkahub.ui.components.ui.PagerTabs
+import me.rerere.rikkahub.ui.components.ui.Tag
+import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.utils.JsonInstant
 import java.util.Locale
 
@@ -140,7 +146,7 @@ internal fun parseAgentTimings(raw: String?): AgentTimingsData? {
         val obj = JsonInstant.parseToJsonElement(text).jsonObject
         fun str(key: String) = obj[key]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
         fun dbl(key: String) = obj[key]?.jsonPrimitive?.doubleOrNull
-        val steps = (obj["steps"] as? JsonArray)?.mapNotNull { el ->
+        val rawSteps = (obj["steps"] as? JsonArray)?.mapNotNull { el ->
             val sObj = el as? JsonObject ?: return@mapNotNull null
             AgentTimingStep(
                 index = sObj["index"]?.jsonPrimitive?.intOrNull ?: 0,
@@ -151,6 +157,12 @@ internal fun parseAgentTimings(raw: String?): AgentTimingsData? {
                 status = sObj["status"]?.jsonPrimitive?.contentOrNull ?: "completed",
             )
         }.orEmpty()
+        // 对同一节点（index + type + label）去重，保留最新状态，避免流式更新或重复记录导致步骤数不一致
+        val deduplicatedSteps = rawSteps
+            .groupBy { Triple(it.index, it.type, it.label) }
+            .values
+            .map { group -> group.last() }
+            .sortedWith(compareBy({ it.index }, { it.elapsedSeconds }))
         AgentTimingsData(
             submittedAt = str("submittedAt"),
             dispatchedAt = str("dispatchedAt"),
@@ -160,7 +172,7 @@ internal fun parseAgentTimings(raw: String?): AgentTimingsData? {
             completedAt = str("completedAt"),
             totalSeconds = dbl("totalSeconds"),
             status = str("status"),
-            steps = steps,
+            steps = deduplicatedSteps,
         )
     }.getOrNull()
 }
@@ -177,105 +189,40 @@ private enum class AgentInsightTab(
 }
 
 @Composable
-fun AgentMessageInsightsFooter(
+fun AgentMessageTimingBadge(
     message: UIMessage,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val summary = remember(message.agentSummaryJson) { parseAgentSummary(message.agentSummaryJson) }
     val timings = remember(message.agentTimingsJson) { parseAgentTimings(message.agentTimingsJson) }
-    val durationBadge = remember(timings, message.generationTimeMs) {
+    val label = remember(timings, message.generationTimeMs) {
         when {
             timings?.totalSeconds != null -> formatSecondsLabel(timings.totalSeconds)
-            message.generationTimeMs != null && message.generationTimeMs!! > 0 ->
-                formatAgentElapsed(message.generationTimeMs!! / 1000L)
-            else -> null
+            message.generationTimeMs != null && message.generationTimeMs!! > 0L ->
+                formatSecondsLabel(message.generationTimeMs!! / 1000.0)
+            else -> "执行详情"
         }
     }
-    val subtitle = when {
-        summary?.summary?.isNotBlank() == true -> summary.summary
-        timings != null && timings.steps.isNotEmpty() -> "${timings.steps.size} 个执行步骤 · 点击查看总结与时间节点"
-        else -> "点击查看执行总结与关键时间节点"
-    }
-
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        border = BorderStroke(
-            width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-        ),
+    val tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 6.dp),
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(30.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = HugeIcons.Sparkles,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
-            }
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = "执行总结与耗时",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    if (durationBadge != null) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                        ) {
-                            Text(
-                                text = durationBadge,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                            )
-                        }
-                    }
-                }
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            Icon(
-                imageVector = HugeIcons.ArrowRight01,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
-            )
-        }
+        Icon(
+            imageVector = HugeIcons.Time02,
+            contentDescription = "查看执行总结与时间节点",
+            tint = tint,
+            modifier = Modifier.size(12.dp),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = tint,
+        )
     }
 }
 
@@ -299,7 +246,7 @@ fun AgentInsightsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.8f)
+                .fillMaxHeight(0.82f)
                 .padding(horizontal = 16.dp),
         ) {
             Row(
@@ -309,16 +256,20 @@ fun AgentInsightsSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
                     Text(
                         text = "Agent 执行详情",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLargeEmphasized,
                     )
                     val statusHint = when {
                         isRunning && !liveElapsedText.isNullOrBlank() -> "运行中 · 已耗时 $liveElapsedText"
                         isRunning -> "运行中"
                         timings?.totalSeconds != null -> "已完成 · 总耗时 ${formatSecondsLabel(timings.totalSeconds)}"
+                        message?.generationTimeMs != null && message.generationTimeMs!! > 0L ->
+                            "已完成 · 总耗时 ${formatSecondsLabel(message.generationTimeMs!! / 1000.0)}"
                         else -> "执行记录"
                     }
                     Text(
@@ -328,26 +279,8 @@ fun AgentInsightsSheet(
                     )
                 }
 
-                val badgeColor = if (isRunning) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.secondaryContainer
-                }
-                val badgeTextColor = if (isRunning) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSecondaryContainer
-                }
-                Surface(
-                    shape = CircleShape,
-                    color = badgeColor,
-                ) {
-                    Text(
-                        text = if (isRunning) "实时同步" else "已归档",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = badgeTextColor,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    )
+                Tag(type = if (isRunning) TagType.INFO else TagType.SUCCESS) {
+                    Text(if (isRunning) "实时同步" else "已归档")
                 }
             }
 
@@ -365,13 +298,18 @@ fun AgentInsightsSheet(
             ) { page ->
                 when (AgentInsightTab.entries[page]) {
                     AgentInsightTab.SUMMARY -> SummaryTabContent(
+                        message = message,
                         summary = summary,
                         isRunning = isRunning,
-                        stepCount = message?.stepCount ?: timings?.steps?.size ?: 0,
+                        stepCount = summary?.stepCount?.takeIf { it > 0 }
+                            ?: message?.stepCount
+                            ?: timings?.steps?.size
+                            ?: 0,
                     )
 
                     AgentInsightTab.TIMINGS -> TimingsTabContent(
                         timings = timings,
+                        reportedStepCount = message?.stepCount ?: summary?.stepCount?.takeIf { it > 0 },
                         isRunning = isRunning,
                         liveElapsedText = liveElapsedText,
                     )
@@ -383,55 +321,115 @@ fun AgentInsightsSheet(
 
 @Composable
 private fun SummaryTabContent(
+    message: UIMessage?,
     summary: AgentSummaryData?,
     isRunning: Boolean,
     stepCount: Int,
 ) {
+    val fallbackTools = remember(message?.parts) {
+        message?.parts?.filterIsInstance<UIMessagePart.ServerTool>()
+            ?.map { it.toolName }
+            ?.distinct()
+            .orEmpty()
+    }
+    val fallbackIssues = remember(message?.parts) {
+        message?.parts?.filterIsInstance<UIMessagePart.Notice>()
+            ?.mapNotNull { it.text.takeIf { t -> t.isNotBlank() } }
+            .orEmpty()
+    }
+    val hasReplyText = remember(message?.parts) {
+        message?.parts?.any { it is UIMessagePart.Text && it.text.isNotBlank() } == true
+    }
+
     if (summary == null) {
-        Box(
+        LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
+            contentPadding = PaddingValues(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+            item {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.size(44.dp),
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center,
+                        ) {
                             Icon(
                                 imageVector = HugeIcons.Sparkles,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(22.dp),
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = if (isRunning) "正在等待阶段总结" else "快速总结暂未生成",
+                                style = MaterialTheme.typography.titleSmallEmphasized,
+                            )
+                            Text(
+                                text = if (isRunning) {
+                                    "任务持续运行期间会定期生成进度总结（当前 $stepCount 步）。"
+                                } else if (hasReplyText) {
+                                    "本次回复已直接完成输出。"
+                                } else {
+                                    "暂无阶段性总结记录。"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
-                    Text(
-                        text = if (isRunning) "正在等待首次阶段总结" else "暂无快速模型总结",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = if (isRunning) {
-                            "Agent 运行期间每 2 分钟且有新增步骤时，将自动调用快速模型生成进度总结（当前步骤数：$stepCount）。"
-                        } else {
-                            "该消息暂无总结记录（可能为 0 步骤快速回复，或 PocketBase 尚未迁移 agentSummary 字段）。"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                }
+            }
+
+            if (fallbackTools.isNotEmpty() || fallbackIssues.isNotEmpty()) {
+                item {
+                    CardGroup(title = "本次执行概况") {
+                        if (fallbackTools.isNotEmpty()) {
+                            item(
+                                leadingContent = {
+                                    Icon(
+                                        imageVector = HugeIcons.Wrench01,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                },
+                                supportingContent = {
+                                    Text(fallbackTools.joinToString("、"))
+                                },
+                            ) {
+                                Text("已调用工具 (${fallbackTools.size})")
+                            }
+                        }
+                        fallbackIssues.forEach { issue ->
+                            item(
+                                leadingContent = {
+                                    Icon(
+                                        imageVector = HugeIcons.AlertCircle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                    )
+                                },
+                                supportingContent = { Text(issue) },
+                            ) {
+                                Text("异常提示")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -447,7 +445,7 @@ private fun SummaryTabContent(
             item {
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(
@@ -471,22 +469,13 @@ private fun SummaryTabContent(
                                 )
                                 Text(
                                     text = "阶段总览",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.titleSmallEmphasized,
                                     color = MaterialTheme.colorScheme.primary,
                                 )
                             }
                             if (summary.model.isNotBlank()) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
-                                ) {
-                                    Text(
-                                        text = summary.model,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                    )
+                                Tag(type = TagType.INFO) {
+                                    Text(summary.model)
                                 }
                             }
                         }
@@ -502,104 +491,94 @@ private fun SummaryTabContent(
 
         if (summary.sentWhat.isNotBlank()) {
             item {
-                SummarySectionCard(
-                    title = "发送内容",
-                    icon = HugeIcons.Message01,
-                    accent = MaterialTheme.colorScheme.primary,
-                    items = listOf(summary.sentWhat),
-                )
+                CardGroup(title = "任务目标") {
+                    item(
+                        leadingContent = {
+                            Icon(
+                                imageVector = HugeIcons.Message01,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        },
+                    ) {
+                        Text(
+                            text = summary.sentWhat,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
             }
         }
 
         if (summary.actionsDone.isNotEmpty()) {
             item {
-                SummarySectionCard(
-                    title = "已执行操作",
-                    icon = HugeIcons.Wrench01,
-                    accent = MaterialTheme.colorScheme.tertiary,
-                    items = summary.actionsDone,
-                )
+                CardGroup(title = "已执行操作 (${summary.actionsDone.size})") {
+                    summary.actionsDone.forEach { action ->
+                        item(
+                            leadingContent = {
+                                Icon(
+                                    imageVector = HugeIcons.Wrench01,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.tertiary,
+                                )
+                            },
+                        ) {
+                            Text(
+                                text = action,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
             }
         }
 
         if (summary.completed.isNotEmpty()) {
             item {
-                SummarySectionCard(
-                    title = "已完成",
-                    icon = HugeIcons.CheckmarkCircle02,
-                    accent = MaterialTheme.colorScheme.secondary,
-                    items = summary.completed,
-                )
+                CardGroup(title = "已完成 (${summary.completed.size})") {
+                    summary.completed.forEach { done ->
+                        item(
+                            leadingContent = {
+                                Icon(
+                                    imageVector = HugeIcons.CheckmarkCircle02,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            },
+                        ) {
+                            Text(
+                                text = done,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
             }
         }
 
-        item {
-            SummarySectionCard(
-                title = "遇到的问题",
-                icon = HugeIcons.AlertCircle,
-                accent = if (summary.issues.isNotEmpty()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                containerColor = if (summary.issues.isNotEmpty()) {
-                    MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHigh
-                },
-                items = if (summary.issues.isNotEmpty()) summary.issues else listOf("暂未发现阻塞或报错"),
-            )
-        }
-    }
-}
-
-@Composable
-private fun SummarySectionCard(
-    title: String,
-    icon: ImageVector,
-    accent: Color,
-    items: List<String>,
-    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
-) {
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = containerColor,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(16.dp),
-                )
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            items.forEach { entry ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .padding(top = 7.dp)
-                            .size(5.dp)
-                            .clip(CircleShape)
-                            .background(accent.copy(alpha = 0.8f)),
-                    )
-                    Text(
-                        text = entry,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
+        if (summary.issues.isNotEmpty()) {
+            item {
+                CardGroup(title = "遇到的问题 (${summary.issues.size})") {
+                    summary.issues.forEach { issue ->
+                        item(
+                            colors = ListItemDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                            ),
+                            leadingContent = {
+                                Icon(
+                                    imageVector = HugeIcons.AlertCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            },
+                        ) {
+                            Text(
+                                text = issue,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -609,6 +588,7 @@ private fun SummarySectionCard(
 @Composable
 private fun TimingsTabContent(
     timings: AgentTimingsData?,
+    reportedStepCount: Int?,
     isRunning: Boolean,
     liveElapsedText: String?,
 ) {
@@ -624,46 +604,62 @@ private fun TimingsTabContent(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Row(
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TimingMetricCard(
-                    label = "正式发出",
-                    value = formatSecondsLabel(timings?.dispatchSeconds),
-                    modifier = Modifier.weight(1f),
-                )
-                TimingMetricCard(
-                    label = "首个回复",
-                    value = formatSecondsLabel(timings?.firstReplySeconds),
-                    modifier = Modifier.weight(1f),
-                )
-                TimingMetricCard(
-                    label = if (isRunning) "已运行" else "总耗时",
-                    value = totalLabel,
-                    modifier = Modifier.weight(1f),
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min)
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TimingMetricCell(
+                        label = "正式发出",
+                        value = formatSecondsLabel(timings?.dispatchSeconds),
+                        modifier = Modifier.weight(1f),
+                    )
+                    VerticalDivider(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    )
+                    TimingMetricCell(
+                        label = "首个回复",
+                        value = formatSecondsLabel(timings?.firstReplySeconds),
+                        modifier = Modifier.weight(1f),
+                    )
+                    VerticalDivider(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    )
+                    TimingMetricCell(
+                        label = if (isRunning) "已运行" else "总耗时",
+                        value = totalLabel,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
 
         if (timings == null) {
             item {
                 Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Text(
                             text = "暂无时间节点记录",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.titleSmallEmphasized,
                         )
                         Text(
-                            text = "任务启动后将自动记录消息正式发出、首个回复到达以及每个步骤的增量耗时。",
+                            text = "任务启动后将自动记录消息发出、首个回复到达以及每个节点的增量耗时。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -674,222 +670,253 @@ private fun TimingsTabContent(
         }
 
         item {
-            Text(
-                text = "关键时间节点",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-        }
+            CardGroup(title = { Text("关键时间节点") }) {
+                item(
+                    leadingContent = {
+                        MilestoneIconBadge(
+                            icon = HugeIcons.ArrowUp02,
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    },
+                    supportingContent = {
+                        Text(
+                            text = timings.submittedAt.ifBlank { "已进入执行队列" },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    trailingContent = {
+                        TimingTrailingValue(elapsedLabel = "0.0s", deltaLabel = null)
+                    },
+                ) {
+                    Text("任务提交到执行器")
+                }
 
-        item {
-            TimelineMilestoneRow(
-                title = "任务提交到执行器",
-                subtitle = timings.submittedAt.ifBlank { "已进入执行队列" },
-                elapsedLabel = "0.0s",
-                deltaLabel = null,
-                dotColor = MaterialTheme.colorScheme.primary,
-                showConnector = true,
-            )
-        }
+                if (timings.dispatchSeconds != null) {
+                    item(
+                        leadingContent = {
+                            MilestoneIconBadge(
+                                icon = HugeIcons.Flash,
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            )
+                        },
+                        supportingContent = {
+                            Text(
+                                text = timings.dispatchedAt.ifBlank { "已建立远程 Interaction" },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        trailingContent = {
+                            TimingTrailingValue(
+                                elapsedLabel = formatSecondsLabel(timings.dispatchSeconds),
+                                deltaLabel = "+${formatSecondsLabel(timings.dispatchSeconds)}",
+                            )
+                        },
+                    ) {
+                        Text("正式发往 Antigravity")
+                    }
+                }
 
-        if (timings.dispatchSeconds != null) {
-            item {
-                TimelineMilestoneRow(
-                    title = "正式发往 Antigravity",
-                    subtitle = timings.dispatchedAt.ifBlank { "已建立远程 Interaction" },
-                    elapsedLabel = formatSecondsLabel(timings.dispatchSeconds),
-                    deltaLabel = "+${formatSecondsLabel(timings.dispatchSeconds)}",
-                    dotColor = MaterialTheme.colorScheme.tertiary,
-                    showConnector = timings.firstReplySeconds != null || timings.steps.isNotEmpty() || timings.totalSeconds != null,
-                )
-            }
-        }
+                if (timings.firstReplySeconds != null) {
+                    val deltaFromDispatch = timings.dispatchSeconds?.let {
+                        (timings.firstReplySeconds - it).coerceAtLeast(0.0)
+                    }
+                    item(
+                        leadingContent = {
+                            MilestoneIconBadge(
+                                icon = HugeIcons.Message01,
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                        },
+                        supportingContent = {
+                            Text(
+                                text = timings.firstReplyAt.ifBlank { "模型开始返回首个输出/步骤" },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        trailingContent = {
+                            TimingTrailingValue(
+                                elapsedLabel = formatSecondsLabel(timings.firstReplySeconds),
+                                deltaLabel = deltaFromDispatch?.let { "+${formatSecondsLabel(it)}" },
+                            )
+                        },
+                    ) {
+                        Text("收到首个回复")
+                    }
+                }
 
-        if (timings.firstReplySeconds != null) {
-            item {
-                val deltaFromDispatch = timings.dispatchSeconds?.let { (timings.firstReplySeconds - it).coerceAtLeast(0.0) }
-                TimelineMilestoneRow(
-                    title = "收到首个回复",
-                    subtitle = timings.firstReplyAt.ifBlank { "模型开始返回首个输出/步骤" },
-                    elapsedLabel = formatSecondsLabel(timings.firstReplySeconds),
-                    deltaLabel = deltaFromDispatch?.let { "+${formatSecondsLabel(it)}" },
-                    dotColor = MaterialTheme.colorScheme.secondary,
-                    showConnector = timings.steps.isNotEmpty() || timings.totalSeconds != null,
-                )
+                if (timings.totalSeconds != null) {
+                    item(
+                        leadingContent = {
+                            MilestoneIconBadge(
+                                icon = HugeIcons.CheckmarkCircle02,
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        },
+                        supportingContent = {
+                            Text(
+                                text = timings.completedAt.ifBlank { "已完成持久化" },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                        trailingContent = {
+                            TimingTrailingValue(
+                                elapsedLabel = formatSecondsLabel(timings.totalSeconds),
+                                deltaLabel = null,
+                            )
+                        },
+                    ) {
+                        Text("执行结束 (${timings.status.ifBlank { "completed" }})")
+                    }
+                }
             }
         }
 
         if (timings.steps.isNotEmpty()) {
-            item {
-                Text(
-                    text = "步骤到达耗时 (${timings.steps.size})",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+            val stepsTitle = if (reportedStepCount != null && reportedStepCount > 0) {
+                "时间节点 (${timings.steps.size} · 共 $reportedStepCount 步)"
+            } else {
+                "时间节点 (${timings.steps.size})"
             }
-
-            itemsIndexed(
-                items = timings.steps,
-                key = { idx, step -> "${step.index}-$idx" },
-            ) { idx, step ->
-                val isFailed = step.status == "failed"
-                val stepTitle = buildString {
-                    append("步骤 #${step.index + 1} · ")
-                    append(
-                        when {
-                            step.label.isNotBlank() -> step.label
-                            step.type == "thought" -> "深度思考"
-                            step.type == "model_output" -> "模型输出"
-                            else -> step.type.ifBlank { "执行步骤" }
+            item {
+                CardGroup(title = stepsTitle) {
+                    timings.steps.forEachIndexed { idx, step ->
+                        val isFailed = step.status == "failed"
+                        val stepIcon = when {
+                            isFailed -> HugeIcons.AlertCircle
+                            step.type == "thought" -> HugeIcons.Brain02
+                            step.type == "model_output" -> HugeIcons.Message01
+                            step.type.contains("tool", ignoreCase = true) -> HugeIcons.Wrench01
+                            else -> HugeIcons.Clock01
                         }
-                    )
+                        val stepTitle = buildString {
+                            append("#${idx + 1} · ")
+                            append(
+                                when {
+                                    step.label.isNotBlank() -> step.label
+                                    step.type == "thought" -> "深度思考"
+                                    step.type == "model_output" -> "模型输出"
+                                    else -> step.type.ifBlank { "执行节点" }
+                                }
+                            )
+                        }
+                        item(
+                            leadingContent = {
+                                MilestoneIconBadge(
+                                    icon = stepIcon,
+                                    containerColor = if (isFailed) {
+                                        MaterialTheme.colorScheme.errorContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.secondaryContainer
+                                    },
+                                    contentColor = if (isFailed) {
+                                        MaterialTheme.colorScheme.onErrorContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSecondaryContainer
+                                    },
+                                )
+                            },
+                            supportingContent = {
+                                Text(
+                                    text = "${step.type} · ${if (isFailed) "失败" else "已完成"}",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            trailingContent = {
+                                TimingTrailingValue(
+                                    elapsedLabel = formatSecondsLabel(step.elapsedSeconds),
+                                    deltaLabel = "+${formatSecondsLabel(step.deltaSeconds)}",
+                                )
+                            },
+                        ) {
+                            Text(
+                                text = stepTitle,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
-                TimelineMilestoneRow(
-                    title = stepTitle,
-                    subtitle = "${step.type} · ${if (isFailed) "失败" else "已完成"}",
-                    elapsedLabel = formatSecondsLabel(step.elapsedSeconds),
-                    deltaLabel = "+${formatSecondsLabel(step.deltaSeconds)}",
-                    dotColor = if (isFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                    showConnector = idx < timings.steps.lastIndex || timings.totalSeconds != null,
-                )
-            }
-        }
-
-        if (timings.totalSeconds != null) {
-            item {
-                TimelineMilestoneRow(
-                    title = "执行结束 (${timings.status.ifBlank { "completed" }})",
-                    subtitle = timings.completedAt.ifBlank { "已完成持久化" },
-                    elapsedLabel = formatSecondsLabel(timings.totalSeconds),
-                    deltaLabel = null,
-                    dotColor = MaterialTheme.colorScheme.primary,
-                    showConnector = false,
-                )
             }
         }
     }
 }
 
 @Composable
-private fun TimingMetricCard(
+private fun TimingMetricCell(
     label: String,
     value: String,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = modifier,
+    Column(
+        modifier = modifier.padding(horizontal = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMediumEmphasized,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
 @Composable
-private fun TimelineMilestoneRow(
-    title: String,
-    subtitle: String,
+private fun MilestoneIconBadge(
+    icon: ImageVector,
+    containerColor: Color,
+    contentColor: Color,
+) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(containerColor),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = contentColor,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+@Composable
+private fun TimingTrailingValue(
     elapsedLabel: String,
     deltaLabel: String?,
-    dotColor: Color,
-    showConnector: Boolean,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.width(18.dp),
-        ) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(CircleShape)
-                    .background(dotColor),
+    Column(horizontalAlignment = Alignment.End) {
+        Text(
+            text = elapsedLabel,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        if (deltaLabel != null) {
+            Text(
+                text = deltaLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
             )
-            if (showConnector) {
-                Box(
-                    modifier = Modifier
-                        .width(2.dp)
-                        .height(36.dp)
-                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-                )
-            }
-        }
-
-        Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier
-                .weight(1f)
-                .padding(bottom = 4.dp),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = elapsedLabel,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    if (deltaLabel != null) {
-                        Text(
-                            text = deltaLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-            }
         }
     }
 }

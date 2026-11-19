@@ -6,11 +6,15 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,16 +24,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenuGroup
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenuPopup
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +47,7 @@ import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberBottomSheetState
@@ -81,6 +87,7 @@ import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
@@ -88,6 +95,7 @@ import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Refresh
+import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
@@ -95,6 +103,9 @@ import me.rerere.rikkahub.ui.components.ai.AgentFilesPicker
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.ChatTopBarCapsule
 import me.rerere.rikkahub.ui.components.ai.rememberChatAttachmentPickerActions
+import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
+import me.rerere.rikkahub.ui.components.ui.Tag
+import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.hooks.ChatInputState
@@ -469,34 +480,43 @@ fun AgentPage(id: Uuid) {
     }
 
     if (showAttachSheet) {
-        val sheetState = rememberBottomSheetState(initialValue = SheetValue.Expanded)
+        val sheetState = rememberBottomSheetState(
+            initialValue = SheetValue.Hidden,
+            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+        )
+        fun dismissAttachSheet() {
+            scope.launch {
+                sheetState.hide()
+                showAttachSheet = false
+            }
+        }
         ModalBottomSheet(
             sheetState = sheetState,
             onDismissRequest = { showAttachSheet = false },
         ) {
             AgentFilesPicker(
                 onTakePic = {
-                    showAttachSheet = false
+                    dismissAttachSheet()
                     attachmentPickerActions.onTakePicture()
                 },
                 onPickImage = {
-                    showAttachSheet = false
+                    dismissAttachSheet()
                     attachmentPickerActions.onPickImage()
                 },
                 onSketch = {
-                    showAttachSheet = false
+                    dismissAttachSheet()
                     attachmentPickerActions.onSketch()
                 },
                 onPickVideo = {
-                    showAttachSheet = false
+                    dismissAttachSheet()
                     attachmentPickerActions.onPickVideo()
                 },
                 onPickAudio = {
-                    showAttachSheet = false
+                    dismissAttachSheet()
                     attachmentPickerActions.onPickAudio()
                 },
                 onPickFile = {
-                    showAttachSheet = false
+                    dismissAttachSheet()
                     attachmentPickerActions.onPickFile()
                 },
             )
@@ -815,8 +835,29 @@ private fun AgentModelPickerSheet(
     onRemoveCustomModel: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val sheetState = rememberBottomSheetState(initialValue = SheetValue.Expanded)
-    var customInput by rememberSaveable { mutableStateOf("") }
+    val coroutineScope = rememberCoroutineScope()
+    val sheetState = rememberBottomSheetState(
+        initialValue = SheetValue.Hidden,
+        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+    )
+    var searchOrCustomInput by rememberSaveable { mutableStateOf("") }
+
+    fun dismiss(afterHide: () -> Unit = {}) {
+        coroutineScope.launch {
+            sheetState.hide()
+            afterHide()
+            onDismiss()
+        }
+    }
+
+    val filteredModels = remember(availableModels, searchOrCustomInput) {
+        val query = searchOrCustomInput.trim()
+        if (query.isEmpty()) availableModels
+        else availableModels.filter { it.contains(query, ignoreCase = true) }
+    }
+    val trimmedQuery = searchOrCustomInput.trim()
+    val canAddCustom = trimmedQuery.isNotEmpty() &&
+        availableModels.none { it.equals(trimmedQuery, ignoreCase = true) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -824,74 +865,158 @@ private fun AgentModelPickerSheet(
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .imePadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(8.dp)
+                .fillMaxHeight(0.8f)
+                .imePadding(),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(
-                text = "选择 Agent / Gemini 模型",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = "可选择反重力 Agent（支持工具与沙盒）或任意 Gemini 模型名，发送时将连同思考程度一起传给 GitHub Action。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = customInput,
-                    onValueChange = { customInput = it },
-                    label = { Text("手动添加 Gemini 模型名") },
-                    placeholder = { Text("例如 gemini-2.5-pro") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
-                FilledTonalButton(
-                    onClick = {
-                        val trimmed = customInput.trim()
-                        if (trimmed.isNotEmpty()) {
-                            onAddModel(trimmed)
-                        }
-                    },
-                    enabled = customInput.isNotBlank(),
-                ) {
-                    Text("添加")
-                }
-            }
-            HorizontalDivider()
-            LazyColumn(
+            Surface(
+                shape = RoundedCornerShape(50),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(320.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = 8.dp),
             ) {
-                items(availableModels, key = { it }) { modelName ->
+                OutlinedTextField(
+                    value = searchOrCustomInput,
+                    onValueChange = { searchOrCustomInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = {
+                        Text(text = "搜索或输入 Gemini 模型名添加…")
+                    },
+                    shape = RoundedCornerShape(50),
+                    colors = TextFieldDefaults.colors(
+                        unfocusedIndicatorColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                    ),
+                    leadingIcon = {
+                        Icon(HugeIcons.Search01, contentDescription = null)
+                    },
+                    trailingIcon = if (canAddCustom) {
+                        {
+                            IconButton(
+                                onClick = {
+                                    dismiss { onAddModel(trimmedQuery) }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = HugeIcons.Add01,
+                                    contentDescription = "添加模型",
+                                )
+                            }
+                        }
+                    } else null,
+                    maxLines = 1,
+                    singleLine = true,
+                )
+            }
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(8.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                if (canAddCustom) {
+                    item(key = "add_custom:$trimmedQuery") {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            ),
+                            modifier = Modifier.animateItem(),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        dismiss { onAddModel(trimmedQuery) }
+                                    }
+                                    .padding(vertical = 12.dp, horizontal = 16.dp),
+                            ) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    shape = MaterialTheme.shapes.small,
+                                ) {
+                                    AutoAIIcon(
+                                        name = trimmedQuery,
+                                        modifier = Modifier
+                                            .padding(4.dp)
+                                            .size(32.dp),
+                                    )
+                                }
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                                ) {
+                                    Text(
+                                        text = "添加并使用 \"$trimmedQuery\"",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        text = "作为自定义 Gemini 模型保存",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                                    )
+                                }
+                                Icon(
+                                    imageVector = HugeIcons.Add01,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                items(filteredModels, key = { it }) { modelName ->
                     val isSelected = modelName.equals(selectedModel, ignoreCase = true)
                     val isCustom = modelName in customModels
                     val isAntigravity = modelName.equals("antigravity", ignoreCase = true) ||
                         modelName.startsWith("antigravity-", ignoreCase = true)
-                    Surface(
-                        onClick = { onSelectModel(modelName) },
-                        shape = MaterialTheme.shapes.large,
-                        color = if (isSelected) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerLow
-                        },
-                        modifier = Modifier.fillMaxWidth(),
+
+                    Card(
+                        modifier = Modifier.animateItem(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surface
+                            },
+                            contentColor = if (isSelected) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        ),
                     ) {
                         Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                                .clickable {
+                                    dismiss { onSelectModel(modelName) }
+                                }
+                                .padding(vertical = 12.dp, horizontal = 16.dp),
                         ) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                shape = MaterialTheme.shapes.small,
+                            ) {
+                                AutoAIIcon(
+                                    name = modelName,
+                                    modifier = Modifier
+                                        .padding(4.dp)
+                                        .size(32.dp),
+                                )
+                            }
                             Column(
                                 modifier = Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -899,53 +1024,39 @@ private fun AgentModelPickerSheet(
                                 Text(
                                     text = modelName,
                                     style = MaterialTheme.typography.titleSmall,
-                                    color = if (isSelected) {
-                                        MaterialTheme.colorScheme.onPrimaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurface
-                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
-                                Text(
-                                    text = when {
-                                        isAntigravity -> "Antigravity Interactions API（远程沙盒/工具）"
-                                        isCustom -> "手动添加 · Gemini API"
-                                        else -> "预设 · Gemini API"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (isSelected) {
-                                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                            }
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                if (isSelected) {
-                                    Surface(
-                                        shape = MaterialTheme.shapes.small,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    ) {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                                ) {
+                                    Tag(type = if (isAntigravity) TagType.SUCCESS else TagType.INFO) {
                                         Text(
-                                            text = "当前",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onPrimary,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            when {
+                                                isAntigravity -> "Antigravity Agent"
+                                                isCustom -> "自定义 Gemini"
+                                                else -> "Gemini"
+                                            }
                                         )
+                                    }
+                                    if (isAntigravity) {
+                                        Tag(type = TagType.INFO) {
+                                            Text("工具与沙盒")
+                                        }
                                     }
                                 }
-                                if (isCustom) {
-                                    IconButton(
-                                        onClick = { onRemoveCustomModel(modelName) },
-                                    ) {
-                                        Icon(
-                                            imageVector = HugeIcons.Delete01,
-                                            contentDescription = "删除自定义模型",
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
+                            }
+                            if (isCustom) {
+                                IconButton(
+                                    onClick = { onRemoveCustomModel(modelName) },
+                                ) {
+                                    Icon(
+                                        imageVector = HugeIcons.Delete01,
+                                        contentDescription = "删除自定义模型",
+                                        modifier = Modifier.size(20.dp),
+                                    )
                                 }
                             }
                         }
