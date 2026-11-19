@@ -289,7 +289,7 @@ fun ExamDocsPage(
                                                 clipboard.setClipEntry(
                                                     ClipEntry(ClipData.newPlainText("md_url", mdUrl))
                                                 )
-                                                toaster.show("已复制 .md 链接", type = ToastType.SUCCESS)
+                                                toaster.show("已复制 .md 链接", type = ToastType.Success)
                                             }
                                         },
                                     ) {
