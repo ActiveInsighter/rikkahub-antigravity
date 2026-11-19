@@ -74,7 +74,7 @@ fun computeAIIconByName(name: String): String? {
 private val PATTERN_RIKKAHUB = Regex("rikka|auto")
 private val PATTERN_OPENAI = Regex("(gpt|openai|o\\d)")
 private val PATTERN_GEMINI = Regex("(gemini|nano-banana)")
-private val PATTERN_GOOGLE = Regex("google")
+private val PATTERN_GOOGLE = Regex("google|antigravity")
 private val PATTERN_ANTHROPIC = Regex("anthropic")
 private val PATTERN_CLAUDE = Regex("claude")
 private val PATTERN_DEEPSEEK = Regex("deepseek")

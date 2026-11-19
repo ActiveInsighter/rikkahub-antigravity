@@ -92,7 +92,8 @@ import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalWorkspaceId
-import me.rerere.rikkahub.ui.pages.agent.AgentMessageInsightsFooter
+import me.rerere.rikkahub.ui.pages.agent.AgentElapsedButton
+import me.rerere.rikkahub.ui.pages.agent.agentElapsedLabel
 import me.rerere.rikkahub.ui.theme.LocalChatFontFamily
 import me.rerere.rikkahub.ui.theme.rememberChatFontFamily
 import me.rerere.rikkahub.utils.JsonInstant
@@ -246,17 +247,28 @@ fun ChatMessage(
             assistant = assistant,
         )
 
+        val elapsed = if (onOpenAgentInsights != null && message.role == MessageRole.ASSISTANT && !loading) {
+            remember(message.agentTimingsJson, message.generationTimeMs, message.createdAt, message.finishedAt) {
+                message.agentElapsedLabel()
+            }
+        } else null
+
         ProvideTextStyle(textStyle) {
-            ChatMessageNerdLine(message = message)
+            if (elapsed != null && onOpenAgentInsights != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        ChatMessageNerdLine(message = message)
+                    }
+                    AgentElapsedButton(elapsed = elapsed, onClick = { onOpenAgentInsights(message) })
+                }
+            } else {
+                ChatMessageNerdLine(message = message)
+            }
         }
-
-        if (onOpenAgentInsights != null && message.role == MessageRole.ASSISTANT && !loading) {
-            AgentMessageInsightsFooter(
-                message = message,
-                onClick = { onOpenAgentInsights(message) },
-            )
-        }
-
     }
     if (showActionsSheet) {
         ChatMessageActionsSheet(

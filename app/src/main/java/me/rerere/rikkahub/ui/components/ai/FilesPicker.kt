@@ -10,6 +10,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,8 +32,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.ListItemShapes
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SegmentedListItem
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -87,31 +91,15 @@ import me.rerere.workspace.WorkspaceShellStatus
 import org.koin.compose.koinInject
 
 @Composable
-internal fun AgentFilesPicker(
-    onTakePic: () -> Unit,
-    onPickImage: () -> Unit,
-    onSketch: () -> Unit,
-    onPickVideo: () -> Unit,
-    onPickAudio: () -> Unit,
-    onPickFile: () -> Unit,
+internal fun AttachmentPickerSheet(
+    onDismiss: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 24.dp),
-    ) {
-        AttachmentGrid(
-            actions = listOf(
-                AttachmentAction(HugeIcons.Camera01, R.string.take_picture, onTakePic),
-                AttachmentAction(HugeIcons.Image02, R.string.photo, onPickImage),
-                AttachmentAction(HugeIcons.PaintBoard, R.string.sketch, onSketch),
-                AttachmentAction(HugeIcons.Video01, R.string.video, onPickVideo),
-                AttachmentAction(HugeIcons.MusicNote03, R.string.audio, onPickAudio),
-                AttachmentAction(HugeIcons.Files02, R.string.upload_file, onPickFile),
-            )
-        )
-    }
+    val sheetState = rememberBottomSheetState(
+        initialValue = SheetValue.Hidden,
+        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+    )
+    ModalBottomSheet(sheetState = sheetState, onDismissRequest = onDismiss, content = content)
 }
 
 // 顺序决定切换方向：往后是进入下一级，往前是返回
@@ -145,12 +133,7 @@ internal fun FilesPicker(
     showCompressDialog: Boolean,
     onShowCompressDialogChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
-    onTakePic: () -> Unit,
-    onPickImage: () -> Unit,
-    onPickVideo: () -> Unit,
-    onPickAudio: () -> Unit,
-    onPickFile: () -> Unit,
-    onSketch: () -> Unit,
+    attachmentActions: ChatAttachmentPickerActions,
     onStartVoiceMode: (() -> Unit)? = null,
 ) {
     val settings = LocalSettings.current
@@ -228,20 +211,10 @@ internal fun FilesPicker(
                     .padding(bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                AttachmentGrid(
-                    actions = buildList {
-                        add(AttachmentAction(HugeIcons.Camera01, R.string.take_picture, onTakePic))
-                        add(AttachmentAction(HugeIcons.Image02, R.string.photo, onPickImage))
-                        add(AttachmentAction(HugeIcons.PaintBoard, R.string.sketch, onSketch))
-                        if (provider != null && provider is ProviderSetting.Google) {
-                            add(AttachmentAction(HugeIcons.Video01, R.string.video, onPickVideo))
-                            add(AttachmentAction(HugeIcons.MusicNote03, R.string.audio, onPickAudio))
-                        }
-                        add(AttachmentAction(HugeIcons.Files02, R.string.upload_file, onPickFile))
-                        onStartVoiceMode?.let { start ->
-                            add(AttachmentAction(HugeIcons.Voice, R.string.chat_page_voice_title, start))
-                        }
-                    }
+                ChatAttachmentGrid(
+                    actions = attachmentActions,
+                    showVideoAndAudio = provider is ProviderSetting.Google,
+                    onStartVoiceMode = onStartVoiceMode,
                 )
 
                 // 分段列表：各项按显示条件依次占位，首尾项才有大圆角
@@ -535,6 +508,29 @@ private fun ExtensionPickerPage(
 
         Spacer(modifier = Modifier.height(16.dp))
     }
+}
+
+@Composable
+internal fun ChatAttachmentGrid(
+    actions: ChatAttachmentPickerActions,
+    showVideoAndAudio: Boolean,
+    modifier: Modifier = Modifier,
+    onStartVoiceMode: (() -> Unit)? = null,
+) {
+    AttachmentGrid(
+        modifier = modifier,
+        actions = buildList {
+            add(AttachmentAction(HugeIcons.Camera01, R.string.take_picture, actions.onTakePicture))
+            add(AttachmentAction(HugeIcons.Image02, R.string.photo, actions.onPickImage))
+            add(AttachmentAction(HugeIcons.PaintBoard, R.string.sketch, actions.onSketch))
+            if (showVideoAndAudio) {
+                add(AttachmentAction(HugeIcons.Video01, R.string.video, actions.onPickVideo))
+                add(AttachmentAction(HugeIcons.MusicNote03, R.string.audio, actions.onPickAudio))
+            }
+            add(AttachmentAction(HugeIcons.Files02, R.string.upload_file, actions.onPickFile))
+            onStartVoiceMode?.let { add(AttachmentAction(HugeIcons.Voice, R.string.chat_page_voice_title, it)) }
+        },
+    )
 }
 
 private class AttachmentAction(

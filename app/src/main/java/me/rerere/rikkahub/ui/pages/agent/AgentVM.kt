@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -20,7 +21,6 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
-import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.ModelSnapshot
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
@@ -74,10 +74,8 @@ class AgentVM(
     )
     val agentAssistant: StateFlow<Assistant> = _agentAssistant.asStateFlow()
 
-    private val _selectedModel = MutableStateFlow<Model?>(null)
-    val selectedModel: StateFlow<Model?> = _selectedModel.asStateFlow()
-
     private val snapshot = MutableStateFlow<AgentConversationSnapshot?>(null)
+    private val localSubmissionStartedAt = MutableStateFlow<Long?>(null)
 
     val isGenerating: StateFlow<Boolean> = combine(snapshot, repository.submittingIds) { cached, submitting ->
         cached?.isActive == true || conversationId in submitting
@@ -89,21 +87,20 @@ class AgentVM(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val activeStatusText: StateFlow<String?> = combine(isGenerating, snapshot) { generating, cached ->
-        if (!generating) {
-            null
-        } else {
-            val latestAssistant = cached?.conversation?.messageNodes?.lastOrNull()?.currentMessage
-                ?.takeIf { it.role == MessageRole.ASSISTANT }
-            val createdMs = latestAssistant?.createdAt
-                ?.toInstant(TimeZone.currentSystemDefault())
-                ?.toEpochMilliseconds()
-                ?.takeIf { it > 0L && it <= System.currentTimeMillis() }
-            createdMs ?: cached?.conversation?.updateAt?.toEpochMilli()
-                ?.takeIf { it > 0L && it <= System.currentTimeMillis() }
-                ?: System.currentTimeMillis()
+    val activeStatusText: StateFlow<String?> = combine(isGenerating, snapshot, localSubmissionStartedAt) { generating, cached, localStart ->
+        when {
+            !generating -> null
+            cached?.isActive != true -> localStart
+            else -> {
+                val latest = cached.conversation.currentMessages.lastOrNull()
+                val submitted = parseAgentTimings(latest?.agentTimingsJson)?.submittedAt
+                val created = latest?.createdAt?.toInstant(TimeZone.currentSystemDefault())?.toEpochMilliseconds()
+                sequenceOf(submitted, created, localStart, cached.conversation.updateAt.toEpochMilli())
+                    .filterNotNull()
+                    .firstOrNull { it in 1L..System.currentTimeMillis() }
+            }
         }
-    }.flatMapLatest { startMs ->
+    }.distinctUntilChanged().flatMapLatest { startMs ->
         if (startMs == null) {
             flowOf<String?>(null)
         } else {
@@ -219,13 +216,6 @@ class AgentVM(
                 customGeminiModels = updatedCustom,
             )
         }
-    }
-
-    fun updateAgentModel(model: Model) {
-        _selectedModel.value = model
-        val updated = _agentAssistant.value.copy(chatModelId = model.id)
-        _agentAssistant.value = updated
-        persistAssistant(updated)
     }
 
     fun updateAgentAssistant(assistant: Assistant) {
@@ -534,6 +524,7 @@ class AgentVM(
             )
             baseConversation.copy(messageNodes = baseConversation.messageNodes + newNode)
         }
+        localSubmissionStartedAt.value = System.currentTimeMillis()
         val task = repository.submitMessage(
             conversation = initialConv,
             prompt = prompt,

@@ -181,7 +181,8 @@ fun ModelSelector(
     )
 
     ModelSelectorButton(
-        state = state,
+        model = state.currentModel,
+        onClick = state::open,
         modifier = modifier,
         onlyIcon = onlyIcon,
         allowClear = allowClear,
@@ -196,22 +197,19 @@ fun ModelSelector(
 
 @Composable
 internal fun ModelSelectorButton(
-    state: ModelListState,
+    model: Model?,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onlyIcon: Boolean = false,
     allowClear: Boolean = false,
     onClear: () -> Unit = {},
 ) {
-    val model = state.currentModel
-
     if (!onlyIcon) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(
-                onClick = {
-                    state.open()
-                },
+                onClick = onClick,
                 modifier = modifier
             ) {
                 model?.modelId?.let {
@@ -242,9 +240,8 @@ internal fun ModelSelectorButton(
         }
     } else {
         IconButton(
-            onClick = {
-                state.open()
-            },
+            onClick = onClick,
+            modifier = modifier,
         ) {
             if (model != null) {
                 AutoAIIcon(
@@ -323,6 +320,25 @@ fun ModelListSheet(
 ) {
     if (!state.visible) return
 
+    ModelPickerSheet(onDismiss = state::close) { dismiss ->
+        ModelList(
+            currentModel = state.modelId,
+            providers = state.filteredProviders,
+            modelType = state.type,
+            onSelect = {
+                onSelect(it)
+                dismiss()
+            },
+            onDismiss = dismiss,
+        )
+    }
+}
+
+@Composable
+internal fun ModelPickerSheet(
+    onDismiss: () -> Unit,
+    content: @Composable ColumnScope.(dismiss: () -> Unit) -> Unit,
+) {
     val coroutineScope = rememberCoroutineScope()
     val sheetState = rememberBottomSheetState(
         initialValue = SheetValue.Hidden,
@@ -332,14 +348,12 @@ fun ModelListSheet(
     fun dismiss() {
         coroutineScope.launch {
             sheetState.hide()
-            state.close()
+            onDismiss()
         }
     }
 
     ModalBottomSheet(
-        onDismissRequest = {
-            state.close()
-        },
+        onDismissRequest = onDismiss,
         sheetState = sheetState,
     ) {
         Column(
@@ -347,20 +361,9 @@ fun ModelListSheet(
                 .padding(8.dp)
                 .fillMaxHeight(0.8f)
                 .imePadding(),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            ModelList(
-                currentModel = state.modelId,
-                providers = state.filteredProviders,
-                modelType = state.type,
-                onSelect = {
-                    onSelect(it)
-                    dismiss()
-                },
-                onDismiss = {
-                    dismiss()
-                }
-            )
+            content(::dismiss)
         }
     }
 }
@@ -374,6 +377,7 @@ private fun ColumnScope.ModelList(
     onDismiss: () -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val navController = LocalNavController.current
     val settingsStore = koinInject<SettingsStore>()
     val settings = settingsStore.settingsFlow
         .collectAsStateWithLifecycle()
@@ -499,34 +503,7 @@ private fun ColumnScope.ModelList(
         }.toMap()
     }
 
-    Surface(
-        shape = RoundedCornerShape(50),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp),
-    ) {
-        OutlinedTextField(
-            value = searchKeywords,
-            onValueChange = { searchKeywords = it },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = {
-                Text(
-                    text = stringResource(R.string.model_list_search_placeholder),
-                )
-            },
-            shape = RoundedCornerShape(50),
-            colors = TextFieldDefaults.colors(
-                unfocusedIndicatorColor = Color.Transparent,
-                focusedIndicatorColor = Color.Transparent,
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent,
-            ),
-            leadingIcon = {
-                Icon(HugeIcons.Search01, null)
-            },
-            maxLines = 1,
-        )
-    }
+    ModelSearchField(query = searchKeywords, onQueryChange = { searchKeywords = it })
 
     LazyColumn(
         state = lazyListState,
@@ -572,11 +549,12 @@ private fun ColumnScope.ModelList(
                         modifier = Modifier
                             .scale(if (isDragging) 0.95f else 1f)
                             .animateItem(),
-                        providerSetting = provider,
                         select = model.id == currentModel,
-                        onDismiss = {
+                        onLongClick = {
                             onDismiss()
+                            navController.navigate(Screen.SettingProviderDetail(provider.id.toString()))
                         },
+                        supportingContent = { ModelTags(model) },
                         tail = {
                             IconButton(
                                 onClick = {
@@ -668,11 +646,12 @@ private fun ColumnScope.ModelList(
                     model = model,
                     onSelect = onSelect,
                     modifier = Modifier.animateItem(),
-                    providerSetting = providerSetting,
                     select = currentModel == model.id,
-                    onDismiss = {
+                    onLongClick = {
                         onDismiss()
+                        navController.navigate(Screen.SettingProviderDetail(providerSetting.id.toString()))
                     },
+                    supportingContent = { ModelTags(model) },
                     tail = {
                         IconButton(
                             onClick = {
@@ -764,17 +743,48 @@ private fun ColumnScope.ModelList(
 }
 
 @Composable
-private fun ModelItem(
+internal fun ModelSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    placeholder: String = stringResource(R.string.model_list_search_placeholder),
+) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp),
+    ) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text(placeholder) },
+            shape = RoundedCornerShape(50),
+            colors = TextFieldDefaults.colors(
+                unfocusedIndicatorColor = Color.Transparent,
+                focusedIndicatorColor = Color.Transparent,
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
+            ),
+            leadingIcon = {
+                Icon(HugeIcons.Search01, null)
+            },
+            singleLine = true,
+        )
+    }
+}
+
+@Composable
+internal fun ModelItem(
     model: Model,
-    providerSetting: ProviderSetting,
     select: Boolean,
     onSelect: (Model) -> Unit,
-    onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    supportingContent: (@Composable () -> Unit)? = null,
     tail: @Composable RowScope.() -> Unit = {},
     dragHandle: @Composable (RowScope.() -> Unit)? = null
 ) {
-    val navController = LocalNavController.current
     val interactionSource = remember { MutableInteractionSource() }
     Card(
         modifier = modifier,
@@ -795,14 +805,7 @@ private fun ModelItem(
                     .weight(1f)
                     .combinedClickable(
                         enabled = true,
-                        onLongClick = {
-                            onDismiss()
-                            navController.navigate(
-                                Screen.SettingProviderDetail(
-                                    providerSetting.id.toString()
-                                )
-                            )
-                        },
+                        onLongClick = onLongClick,
                         onClick = { onSelect(model) },
                         interactionSource = interactionSource,
                         indication = LocalIndication.current
@@ -832,23 +835,25 @@ private fun ModelItem(
                         overflow = TextOverflow.Ellipsis,
                     )
 
-                    FlowRow(
-                        modifier = Modifier
-                            .fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        ModelTypeTag(model = model)
-
-                        ModelModalityTag(model = model)
-
-                        ModelAbilityTag(model = model)
-                    }
+                    supportingContent?.invoke()
                 }
                 tail()
             }
             dragHandle?.let { it() }
         }
+    }
+}
+
+@Composable
+private fun ModelTags(model: Model) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        ModelTypeTag(model = model)
+        ModelModalityTag(model = model)
+        ModelAbilityTag(model = model)
     }
 }
 

@@ -106,7 +106,6 @@ import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionContext
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionItem
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionList
 import me.rerere.rikkahub.ui.components.ai.completion.ChatCompletionProvider
-import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.KeepScreenOn
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionManager
 import me.rerere.rikkahub.ui.components.ui.permission.PermissionRecordAudio
@@ -132,7 +131,7 @@ fun ChatInput(
     hazeState: HazeState,
     modifier: Modifier = Modifier,
     completionProviders: List<ChatCompletionProvider> = emptyList(),
-    onUpdateChatModel: (Model) -> Unit,
+    onUpdateChatModel: ((Model) -> Unit)? = null,
     onUpdateAssistant: (Assistant) -> Unit,
     onMoreClick: () -> Unit,
     onCancelClick: () -> Unit,
@@ -149,10 +148,7 @@ fun ChatInput(
     voiceState: VoiceSessionState = VoiceSessionState(),
     onStopVoiceMode: () -> Unit = {},
     placeholderText: String? = null,
-    alwaysShowReasoningButton: Boolean = false,
-    showReasoningButton: Boolean = true,
     showAsrButton: Boolean = true,
-    overrideModelId: String? = null,
     onModelSelectorClick: (() -> Unit)? = null,
 ) {
     val toaster = LocalToaster.current
@@ -306,24 +302,14 @@ fun ChatInput(
                                 horizontalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
                                 // Model Picker
-                                if (onModelSelectorClick != null) {
-                                    IconButton(onClick = onModelSelectorClick) {
-                                        AutoAIIcon(
-                                            modifier = Modifier.size(36.dp),
-                                            name = overrideModelId?.takeIf { it.isNotBlank() } ?: "gemini",
-                                            color = Color.Transparent,
-                                        )
-                                    }
-                                } else {
-                                    ModelSelectorButton(
-                                        state = modelListState,
-                                        onlyIcon = true,
-                                        modifier = Modifier,
-                                    )
-                                }
+                                ModelSelectorButton(
+                                    model = if (onModelSelectorClick != null) chatModel else modelListState.currentModel,
+                                    onClick = onModelSelectorClick ?: modelListState::open,
+                                    onlyIcon = true,
+                                )
 
                                 // Reasoning
-                                if (showReasoningButton && (alwaysShowReasoningButton || chatModel?.abilities?.contains(ModelAbility.REASONING) == true)) {
+                                if (chatModel?.abilities?.contains(ModelAbility.REASONING) == true) {
                                     ReasoningButton(
                                         reasoningLevel = assistant.reasoningLevel,
                                         onUpdateReasoningLevel = {
@@ -399,10 +385,9 @@ fun ChatInput(
         }
     }
 
-    ModelListSheet(
-        state = modelListState,
-        onSelect = onUpdateChatModel,
-    )
+    if (onUpdateChatModel != null) {
+        ModelListSheet(state = modelListState, onSelect = onUpdateChatModel)
+    }
 }
 
 @Composable

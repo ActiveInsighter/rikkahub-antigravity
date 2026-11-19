@@ -23,19 +23,16 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.currentWindowDpSize
-import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -87,6 +84,7 @@ import me.rerere.rikkahub.service.BackgroundShellStatus
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.SessionActivity
 import me.rerere.rikkahub.ui.components.ai.BackgroundTasksSheet
+import me.rerere.rikkahub.ui.components.ai.AttachmentPickerSheet
 import me.rerere.rikkahub.ui.components.ai.ChatAttachmentPickerActions
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.ChatTopBarCapsule
@@ -582,14 +580,7 @@ private fun ChatFilesPickerSheet(
         onDismiss()
     }
 
-    val filesSheetState = rememberBottomSheetState(
-        initialValue = SheetValue.Hidden,
-        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded)
-    )
-    ModalBottomSheet(
-        sheetState = filesSheetState,
-        onDismissRequest = { dismissAll() },
-    ) {
+    AttachmentPickerSheet(onDismiss = ::dismissAll) {
         FilesPicker(
             conversation = conversation,
             state = inputState,
@@ -611,12 +602,7 @@ private fun ChatFilesPickerSheet(
             showCompressDialog = showCompressDialog,
             onShowCompressDialogChange = { showCompressDialog = it },
             onDismiss = { dismissAll() },
-            onTakePic = attachmentPickerActions.onTakePicture,
-            onPickImage = attachmentPickerActions.onPickImage,
-            onPickVideo = attachmentPickerActions.onPickVideo,
-            onPickAudio = attachmentPickerActions.onPickAudio,
-            onPickFile = attachmentPickerActions.onPickFile,
-            onSketch = attachmentPickerActions.onSketch,
+            attachmentActions = attachmentPickerActions,
             onStartVoiceMode = if (
                 setting.getSelectedASRProvider()?.supportsServerVadVoiceMode == true &&
                 voiceState.phase == VoicePhase.Off
