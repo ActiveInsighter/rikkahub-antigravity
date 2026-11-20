@@ -70,7 +70,6 @@ import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.rikkahub.data.agent.AgentSettingsStore
 import me.rerere.rikkahub.data.examdocs.DocHeading
 import me.rerere.rikkahub.data.examdocs.ExamDocNode
 import me.rerere.rikkahub.data.examdocs.ExamDocsDocument
@@ -89,7 +88,6 @@ import me.rerere.rikkahub.ui.pages.chat.topFadingEdge
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.ui.toast.ToastType
 import org.koin.androidx.compose.koinViewModel
-import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
 
 private val externalLinkSchemes = setOf("https", "http", "mailto", "tel")
@@ -103,9 +101,6 @@ fun ExamDocsPage(
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val settings = LocalSettings.current
-    val agentSettingsStore: AgentSettingsStore = koinInject()
-    val agentSettings by agentSettingsStore.settingsFlow.collectAsStateWithLifecycle()
-    val toolbarDisplaySetting = remember(agentSettings) { agentSettings.toDisplaySetting() }
     val toaster = LocalToaster.current
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
@@ -147,7 +142,7 @@ fun ExamDocsPage(
                     navigationIcon = {
                         ChatTopBarCapsule(
                             hazeState = hazeState,
-                            displaySetting = toolbarDisplaySetting,
+                            displaySetting = settings.displaySetting,
                             showBackground = listScrolledUnderTopBar,
                             modifier = Modifier.padding(start = 8.dp, end = 4.dp),
                         ) {
@@ -160,31 +155,38 @@ fun ExamDocsPage(
                         }
                     },
                     title = {
-                        Column {
-                            Text(
-                                page?.name ?: state.activeSite.name,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            if (page != null) {
-                                val subtitle = remember(state.activeSite.name, state.currentBreadcrumb) {
-                                    (listOf(state.activeSite.name) + state.currentBreadcrumb).joinToString(" / ")
-                                }
+                        Surface(
+                            onClick = { if (state.sitesReady) sheet = ReaderSheet.Directory },
+                            color = Color.Transparent,
+                            shape = RoundedCornerShape(16.dp),
+                        ) {
+                            Column(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
                                 Text(
-                                    subtitle,
+                                    page?.name ?: state.activeSite.name,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
                                 )
+                                if (page != null) {
+                                    val subtitle = remember(state.activeSite.name, state.currentBreadcrumb) {
+                                        (listOf(state.activeSite.name) + state.currentBreadcrumb).joinToString(" / ")
+                                    }
+                                    Text(
+                                        subtitle,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                                    )
+                                }
                             }
                         }
                     },
                     actions = {
                         ChatTopBarCapsule(
                             hazeState = hazeState,
-                            displaySetting = toolbarDisplaySetting,
+                            displaySetting = settings.displaySetting,
                             showBackground = listScrolledUnderTopBar,
                             modifier = Modifier.padding(start = 4.dp, end = 8.dp),
                         ) {
@@ -196,7 +198,24 @@ fun ExamDocsPage(
                             }
                             TopBarMoreMenu(
                                 listOf(
-                                    TopBarMenuItem("重新加载", HugeIcons.Refresh03, vm::reload, state.sitesReady && !state.isLoadingTree),
+                                    TopBarMenuItem(
+                                        "本页大纲",
+                                        HugeIcons.LeftToRightListBullet,
+                                        { sheet = ReaderSheet.Outline },
+                                        !document?.headings.isNullOrEmpty(),
+                                    ),
+                                    TopBarMenuItem(
+                                        "文档目录",
+                                        HugeIcons.Menu03,
+                                        { sheet = ReaderSheet.Directory },
+                                        state.sitesReady,
+                                    ),
+                                    TopBarMenuItem(
+                                        "重新加载",
+                                        HugeIcons.Refresh03,
+                                        vm::reload,
+                                        state.sitesReady && !state.isLoadingTree,
+                                    ),
                                     TopBarMenuItem(
                                         "复制 Markdown 链接",
                                         HugeIcons.Copy01,

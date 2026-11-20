@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -88,7 +89,11 @@ private val PREVIEWABLE_LANGUAGES = setOf("html", "svg")
 
 @Composable
 internal fun codeBlockBackground(): Color =
-    if (LocalDarkMode.current) Color(0xFF242424) else Color(0xFFF3F3F3)
+    if (LocalDarkMode.current) Color(0xFF1E1F22) else Color(0xFFF6F7F9)
+
+@Composable
+internal fun codeBlockBorderColor(): Color =
+    if (LocalDarkMode.current) Color(0xFF2E3035) else Color(0xFFE5E7EB)
 
 @Composable
 fun HighlightCodeBlock(
@@ -139,11 +144,13 @@ fun HighlightCodeBlock(
 
     val containerShape = RoundedCornerShape(14.dp)
     val containerColor = codeBlockBackground()
+    val borderColor = codeBlockBorderColor()
 
     Column(
         modifier = modifier
             .clip(containerShape)
-            .background(containerColor),
+            .background(containerColor)
+            .border(1.dp, borderColor, containerShape),
     ) {
         Box(
             modifier = Modifier

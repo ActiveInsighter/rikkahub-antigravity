@@ -173,4 +173,29 @@ class ExamDocsTest {
         assertEquals("""[{"answer":"\\frac{1}{2}","aliases":["0.5"]}]""", question.attrs["blanks"])
     }
 
+    @Test
+    fun normalizesHtmlImagesAndLatexDelimiters() {
+        val raw = """
+            <img src="/images/diagram.svg" alt="结构图" width="600" />
+
+            行内公式 \(a^2 + b^2 = c^2\) 与块级公式：
+
+            \[ x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a} \]
+        """.trimIndent()
+        val blocks = parseExamDocsSegments(raw).filterIsInstance<ExamDocsSegment.Markdown>()
+            .flatMap { it.document.blocks }
+        val imgPara = blocks[0] as MarkdownBlock.Paragraph
+        val image = imgPara.content.filterIsInstance<MarkdownInline.Image>().single()
+        assertEquals("/images/diagram.svg", image.url)
+        assertEquals("结构图", image.alt)
+
+        val inlinePara = blocks[1] as MarkdownBlock.Paragraph
+        assertEquals(listOf("a^2 + b^2 = c^2"), inlinePara.content.filterIsInstance<MarkdownInline.Math>().map { it.formula })
+
+        val displayPara = blocks[2] as MarkdownBlock.Paragraph
+        val displayMath = displayPara.content.filterIsInstance<MarkdownInline.Math>().single()
+        assertTrue(displayMath.display)
+        assertEquals("""x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}""", displayMath.formula)
+    }
+
 }

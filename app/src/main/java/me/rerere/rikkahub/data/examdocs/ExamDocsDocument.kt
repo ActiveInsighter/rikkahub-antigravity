@@ -43,13 +43,48 @@ private val inlineCodeOrMath = Regex(
     """(\x60+)(?!\x60).*?(?<!\x60)\1(?!\x60)|(?<![\\$])\$(?!\$)((?:\\.|[^\\$])+)\$(?![$\d])""",
 )
 private val wideMathEnvironment = Regex("""\\begin\{(?:cases|[pbBvV]?matrix|array|aligned|gathered)\}""")
+private val singleLineDisplayMath = Regex("""^([ \t]*(?:>[ \t]*)*)\$\$(.+?)\$\$[ \t]*$""")
+private val htmlImgTag = Regex("""<img\b([^>]*?)/?>""", RegexOption.IGNORE_CASE)
+private val htmlImgSrc = Regex("""\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')""", RegexOption.IGNORE_CASE)
+private val htmlImgAlt = Regex("""\balt\s*=\s*(?:"([^"]*)"|'([^']*)')""", RegexOption.IGNORE_CASE)
+private val latexBracketDisplay = Regex("""\\\[(.+?)\\\]""")
+private val latexParenInline = Regex("""\\\((.+?)\\\)""")
 
-private fun normalizeMathLine(line: String): String {
-    if ('$' !in line || line.startsWith('\t') || line.startsWith("    ")) return line
-    return inlineCodeOrMath.replace(line) { match ->
+private fun normalizeMarkdownLine(line: String): String {
+    if (line.startsWith('\t') || line.startsWith("    ")) return line
+
+    var current = line
+    if ("<img" in current.lowercase()) {
+        current = htmlImgTag.replace(current) { match ->
+            val attrs = match.groupValues[1]
+            val src = htmlImgSrc.find(attrs)?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } }?.trim()
+            if (src.isNullOrEmpty()) return@replace match.value
+            val alt = htmlImgAlt.find(attrs)?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } }?.trim().orEmpty()
+            "![$alt](<$src>)"
+        }
+    }
+
+    if ("\\[" in current) {
+        current = latexBracketDisplay.replace(current) { "\$\$" + it.groupValues[1].trim() + "\$\$" }
+    }
+    if ("\\(" in current) {
+        current = latexParenInline.replace(current) { "\$" + it.groupValues[1].trim() + "\$" }
+    }
+
+    val displayMatch = singleLineDisplayMath.matchEntire(current)
+    if (displayMatch != null) {
+        val prefix = displayMatch.groupValues[1]
+        val formula = displayMatch.groupValues[2].trim()
+        if (formula.isNotEmpty()) {
+            return "${prefix}\$\$${formula}\$\$"
+        }
+    }
+
+    if ('$' !in current) return current
+    return inlineCodeOrMath.replace(current) { match ->
         val formula = match.groups[2]?.value?.trim()
         if (formula.isNullOrEmpty()) return@replace match.value
-        val standalone = line.trim() == match.value && wideMathEnvironment.containsMatchIn(formula)
+        val standalone = current.trim() == match.value && wideMathEnvironment.containsMatchIn(formula)
         val delimiter = if (standalone) "\$\$" else "\$"
         delimiter + formula + delimiter
     }
@@ -91,10 +126,32 @@ fun prepareExamDocsDocument(raw: String, sourceUrl: String, legacy: Boolean): Ex
 }
 
 internal fun parseExamDocsSegments(markdown: String): List<ExamDocsSegment> {
-    val lines = markdown.lines().toMutableList()
+    val rawLines = markdown.lines()
+    val lines = ArrayList<String>(rawLines.size)
+    var fence: String? = null
+    for (line in rawLines) {
+        val match = codeFence.matchEntire(line)
+        val marker = match?.groupValues?.get(1)
+        val current = fence
+        when {
+            current != null -> {
+                if (marker != null && marker.first() == current.first() &&
+                    marker.length >= current.length && match?.groupValues?.get(2).isNullOrBlank()
+                ) fence = null
+                lines.add(line)
+            }
+            marker != null -> {
+                fence = marker
+                lines.add(line)
+            }
+            containerOpen.matches(line) || containerClose.matches(line) -> lines.add(line)
+            else -> lines.add(normalizeMarkdownLine(line))
+        }
+    }
+
     val matchingEnds = mutableMapOf<Int, Int>()
     val open = ArrayDeque<Int>()
-    var fence: String? = null
+    fence = null
 
     // Find balanced containers before parsing any Markdown. Incomplete containers
     // stay in the text and neither code fences nor their contents become directives.
@@ -111,7 +168,6 @@ internal fun parseExamDocsSegments(markdown: String): List<ExamDocsSegment> {
             marker != null -> fence = marker
             containerOpen.matches(line) -> open.addLast(index)
             containerClose.matches(line) && open.isNotEmpty() -> matchingEnds[open.removeLast()] = index
-            else -> lines[index] = normalizeMathLine(line)
         }
     }
 
