@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="apk_updates_title">下载与更新</string>
+  <string name="apk_updates_refresh">刷新</string>
+  <string name="apk_updates_current_version">当前版本 %1$s · %2$d</string>
+  <string name="apk_updates_build">%1$s · 构建 %2$d</string>
+  <string name="apk_updates_installed">当前已安装</string>
+  <string name="apk_updates_older">历史构建</string>
+  <string name="apk_updates_latest">最新构建</string>
+  <string name="apk_updates_delta">增量更新 · %1$s</string>
+  <string name="apk_updates_full">完整安装包 · %1$s</string>
+  <string name="apk_updates_unconfigured">此构建尚未配置更新服务器，可前往 GitHub 下载 APK。</string>
+  <string name="apk_updates_empty">更新服务器暂无构建。</string>
+  <string name="apk_updates_load_failed">无法加载或验证构建列表。</string>
+  <string name="apk_updates_open_github">GitHub 发布页</string>
+  <string name="apk_updates_downloading_delta">正在下载增量补丁…</string>
+  <string name="apk_updates_downloading_fallback">增量更新失败，正在改用完整安装包…</string>
+  <string name="apk_updates_downloading_full">正在下载完整安装包…</string>
+  <string name="apk_updates_progress">%1$s / %2$s</string>
+  <string name="apk_updates_patching">正在合成安装包…</string>
+  <string name="apk_updates_verifying">正在校验安装包…</string>
+  <string name="apk_updates_ready">安装包已准备好。</string>
+  <string name="apk_updates_install">安装更新</string>
+  <string name="apk_updates_no_space">存储空间不足，请清理后重试。</string>
+  <string name="apk_updates_download_failed">无法下载或验证更新，请从构建列表重试。</string>
+  <string name="apk_updates_install_failed">无法打开 Android 安装界面或安装权限设置。</string>
+  <string name="apk_updates_permission_title">允许从 RikkaHub 安装更新</string>
+  <string name="apk_updates_permission_message">请在 Android 设置中打开「允许来自此来源的应用」，然后返回继续安装。</string>
+  <string name="apk_updates_open_settings">打开设置</string>
+</resources>

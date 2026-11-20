@@ -78,3 +78,29 @@ git apply rikkahub-antigravity-interactions.patch
 不要在沙盒运行 `gh auth login` 或索要 Token。可先让 Agent 用 GitHub REST `/user` 确认登录账号，再读取目标仓库。修改源码后推送功能分支并核对远端提交。当前本机登录缺少 `workflow` scope，因此编辑 Actions 工作流可能被 GitHub 拒绝；普通仓库读写不因此失效。
 
 本版会省略 Interactions 的原始 logcat 请求体/事件内容，并在应用请求日志中隐藏远程网络 transform、MCP headers 和 env；HTTP 日志同时隐藏常见鉴权头。公开 APK 及构建附件不含你的私人配置。Build 6 起固定签名已显式指定并核对；旧 Build 3/4 须按前述方式迁移。已有版本支持 GitHub 配置，导入凭据本身无需重编译。
+
+## 应用内下载与增量更新
+
+GitHub 渠道的 Antigravity Debug APK 在首页右上角提供「下载与更新」。它会列出更新服务器上最近 10 次发布，按构建号降序展示。可直接选择任意比当前安装更新的构建。Android 会阻止降级安装。需要撤回某次构建时，可以用旧代码重新构建并以更高的版本号发布。旧代码对数据格式的兼容性需要按对应版本验证。
+
+客户端会按已安装 APK 的版本号和完整 SHA-256 匹配补丁，兼容通用包及单 ABI 包。合成结果经大小、SHA-256、应用包名、版本号和签名检查后，由 Android 的安装界面确认。补丁不可用时自动改用完整 APK。下载页也可以直接选择完整包。
+
+### 配置 R2 发布
+
+在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 设置以下内容。
+
+| 类型 | 名称 | 内容 |
+| --- | --- | --- |
+| Variable | `R2_UPDATE_ACCOUNT_ID` | Cloudflare Account ID |
+| Variable | `R2_UPDATE_BUCKET` | R2 桶名称 |
+| Variable | `R2_UPDATE_PUBLIC_URL` | 桶的公网 HTTPS 自定义域名，末尾包含 `/antigravity-updates`，例如 `https://downloads.example.com/antigravity-updates` |
+| Secret | `R2_UPDATE_ACCESS_KEY_ID` | 桶范围的 R2 Object Read & Write 凭据的 Access Key ID |
+| Secret | `R2_UPDATE_SECRET_ACCESS_KEY` | 同一凭据的 Secret Access Key |
+
+[R2 S3 凭据配置](https://developers.cloudflare.com/r2/api/tokens/) · [R2 自定义域名](https://developers.cloudflare.com/r2/buckets/public-buckets/)
+
+`Antigravity Debug APK` 工作流在 `main` 成功构建后写入桶的 `antigravity-updates/` 前缀。它先上传三种 ABI 的完整安装包和可节省至少 10% 的补丁，再写入签名后的 `catalog.json`，最后清理超出保留范围的对象。如果自定义域配置了缓存规则，请让 `/antigravity-updates/catalog.json` 遵循对象的 `Cache-Control: no-store`。APK 和补丁可按其内容哈希缓存。R2 凭据仅用于 Actions，客户端只读取公网索引和文件。
+
+配置完成后，从 `main` 新启动一次工作流。第一次发布会建立全量基线，随后每次发布会为留存版本生成可用的直达补丁。公网地址随 APK 构建写入。此前未配置地址的 APK，需要从 GitHub 手动覆盖安装一次支持该地址的新版。构建以 `100000 + GITHUB_RUN_NUMBER` 作为 Android 版本号。同一次运行的重试沿用原版本号，R2 保留已经发布的内容。要重发请启动新的运行。
+
+功能分支手动运行工作流时，可设置 `publish_release=false`、`updates_smoke=true`，由 Android x86_64 模拟器验证签名 APK 的差分合成。分支验证不会写入 R2。上游 `Daily Build` 工作流使用不同包名与签名，继续维护独立的分发流程。
