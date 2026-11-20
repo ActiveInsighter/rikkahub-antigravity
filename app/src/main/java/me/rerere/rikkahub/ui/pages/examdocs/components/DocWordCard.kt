@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -39,6 +40,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import me.rerere.bettertext.markdown.MarkdownBlock
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.ArrowLeft01
+import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Fullscreen
 import me.rerere.hugeicons.stroke.Search01
@@ -150,8 +153,17 @@ internal fun DocWordCards(
             }
         }
     }
-    words.getOrNull(activeWord)?.let { word ->
-        WordDetails(word, wordPalette(activeWord), onDismiss = { activeWord = -1 })
+    val activePosition = filtered.indexOf(activeWord)
+    if (activePosition >= 0) {
+        val previous = filtered.getOrNull(activePosition - 1)
+        val next = filtered.getOrNull(activePosition + 1)
+        WordDetails(
+            word = words[activeWord],
+            tone = wordPalette(activeWord),
+            onPrevious = previous?.let { { activeWord = it } },
+            onNext = next?.let { { activeWord = it } },
+            onDismiss = { activeWord = -1 },
+        )
     }
 }
 
@@ -242,13 +254,21 @@ private fun WordMeaningRow(meaning: WordMeaning, tone: WordPalette, showGrammar:
 }
 
 @Composable
-private fun WordDetails(word: WordCard, tone: WordPalette, onDismiss: () -> Unit) {
+private fun WordDetails(
+    word: WordCard,
+    tone: WordPalette,
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?,
+    onDismiss: () -> Unit,
+) {
+    val scrollState = rememberScrollState()
+    LaunchedEffect(word) { scrollState.scrollTo(0) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+            Modifier.fillMaxWidth().verticalScroll(scrollState)
                 .padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -257,6 +277,16 @@ private fun WordDetails(word: WordCard, tone: WordPalette, onDismiss: () -> Unit
                     Row(verticalAlignment = Alignment.Top) {
                         WordHeading(word, titleLarge = true, modifier = Modifier.weight(1f).padding(top = 6.dp))
                         IconButton(onClick = onDismiss) { Icon(HugeIcons.Cancel01, "关闭词卡") }
+                    }
+                    if (onPrevious != null || onNext != null) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            IconButton(onClick = { onPrevious?.invoke() }, enabled = onPrevious != null) {
+                                Icon(HugeIcons.ArrowLeft01, "上一个单词")
+                            }
+                            IconButton(onClick = { onNext?.invoke() }, enabled = onNext != null) {
+                                Icon(HugeIcons.ArrowRight01, "下一个单词")
+                            }
+                        }
                     }
                     Column(Modifier.padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         word.meanings.forEach { WordMeaningRow(it, tone, showGrammar = true) }

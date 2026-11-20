@@ -1,7 +1,10 @@
 package me.rerere.rikkahub.ui.pages.examdocs
 
+import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
@@ -43,17 +46,25 @@ class ExamDocsReaderTest {
 
             :::solution 本题解析
             :::steps
-            :::step 检查连续性
-            :::tip 对照参考条件
+            :::step
+            ### 检查连续性
+
+            :::idea 对照参考条件
             ${'$'}${'$'}
             \lim_{x\to0}F(x)=\frac12
             ${'$'}${'$'}
             :::
+
+            | 条件 | 结论 |
+            | --- | --- |
+            | 连续 | 可积 |
+
             :::
             :::
             :::
             :::
-            """.trimIndent()
+            """.trimIndent(),
+            modifier = Modifier.height(IntrinsicSize.Min),
         )
         compose.onNodeWithText("A").performClick()
         compose.onNodeWithText("核对答案").performClick()
@@ -62,6 +73,7 @@ class ExamDocsReaderTest {
         compose.onNodeWithText("本题解析").assertIsDisplayed()
         compose.onNodeWithText("检查连续性").assertIsDisplayed()
         compose.onNodeWithText("对照参考条件").assertIsDisplayed()
+        compose.onNodeWithText("可积").assertExists()
     }
 
     @Test
@@ -70,7 +82,7 @@ class ExamDocsReaderTest {
             """
             :::wordcards
             ~~~json
-            [{"word":"measure","phonetic":"/ˈmeʒə/","meanings":[{"text":"衡量"}],"senses":[{"gloss":"测量","count":2,"examples":[{"text":"Measure the distance.","translation":"测量距离。"}]}]}]
+            [{"word":"measure","phonetic":"/ˈmeʒə/","meanings":[{"text":"衡量"}],"senses":[{"gloss":"测量","count":2,"examples":[{"text":"Measure the distance.","translation":"测量距离。"}]}]},{"word":"compare","meanings":[{"text":"比较"}]}]
             ~~~
             :::
             """.trimIndent()
@@ -78,19 +90,25 @@ class ExamDocsReaderTest {
         compose.onNodeWithContentDescription("查看 measure 的详细释义和例句").performClick()
         compose.onNodeWithText("Measure the distance.").assertIsDisplayed()
         compose.onNodeWithText("测量距离。").assertIsDisplayed()
+        compose.onNodeWithContentDescription("下一个单词").performClick()
+        compose.onNodeWithText("Measure the distance.").assertDoesNotExist()
+        compose.onNodeWithContentDescription("上一个单词").performClick()
+        compose.onNodeWithText("Measure the distance.").assertIsDisplayed()
         compose.onNodeWithContentDescription("关闭词卡").performClick()
         compose.onNodeWithText("Measure the distance.").assertDoesNotExist()
     }
 
-    private fun render(markdown: String) {
+    private fun render(markdown: String, modifier: Modifier = Modifier.fillMaxSize()) {
         val document = prepareExamDocsDocument(markdown, "https://example.test/android/docs/sample.md", legacy = false)
         val registry = ExamDocsComponentRegistry()
         compose.setContent {
             MaterialTheme {
                 CompositionLocalProvider(LocalSettings provides Settings.dummy()) {
                     val renderer = rememberExamDocsRenderer(document, rememberLazyListState(), {}, { it })
-                    Column(Modifier.fillMaxSize().padding(12.dp)) {
-                        document.blocks.forEach { ExamDocsMarkdownBlock(it, registry, renderer) }
+                    SharedTransitionLayout(Modifier.fillMaxSize().padding(12.dp)) {
+                        Column(modifier) {
+                            document.blocks.forEach { ExamDocsMarkdownBlock(it, registry, renderer) }
+                        }
                     }
                 }
             }

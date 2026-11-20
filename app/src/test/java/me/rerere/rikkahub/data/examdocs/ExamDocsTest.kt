@@ -89,6 +89,8 @@ class ExamDocsTest {
     fun linksKeepSitePrefixAndResolveFragmentsAndUnicodePaths() {
         val base = "https://reader.example/study"
         assertEquals("$base/images/pic.png", resolveExamDocsUrl(base, "/docs/math/01", "/images/pic.png"))
+        assertEquals("$base/images/my%20pic.svg", resolveExamDocsUrl("$base/", "/docs/math/01", "</images/my pic.svg>"))
+        assertNull(getExamDocsLink(base, "/docs/math/01", "https://reader.example/studydocs"))
         assertEquals("$base/docs/math/fig.png", resolveExamDocsUrl(base, "/docs/math/01", "fig.png"))
         assertEquals(
             ExamDocsLink("/docs/math/01", "求解"),
@@ -160,6 +162,37 @@ class ExamDocsTest {
         val wide = (blocks[1] as MarkdownBlock.Paragraph).content.filterIsInstance<MarkdownInline.Math>().single()
         assertTrue(wide.display)
         assertEquals("${'$'} x ${'$'}", (blocks[2] as MarkdownBlock.CodeBlock).code.trim())
+    }
+
+    @Test
+    fun preservesDisplayMathAndImageComponentsWithoutTransformingCodeExamples() {
+        val raw = """
+            求 \(x^2\)。
+
+            > ${'$'}${'$'} TAT = CT - AT ${'$'}${'$'}
+
+            <Image src="/images/example.svg" alt="示意图" />
+
+            `<Image src="/literal.svg" />`
+
+            ~~~md
+            <Image src="/sample.svg" />
+            ~~~
+        """.trimIndent()
+        val blocks = parseExamDocsSegments(raw).filterIsInstance<ExamDocsSegment.Markdown>()
+            .flatMap { it.document.blocks }
+        val inline = (blocks[0] as MarkdownBlock.Paragraph).content.filterIsInstance<MarkdownInline.Math>().single()
+        assertEquals("x^2", inline.formula)
+        val quoted = (blocks[1] as MarkdownBlock.Quote).children.single() as MarkdownBlock.Paragraph
+        val display = quoted.content.filterIsInstance<MarkdownInline.Math>().single()
+        assertTrue(display.display)
+        assertEquals("TAT = CT - AT", display.formula)
+        val image = (blocks[2] as MarkdownBlock.Paragraph).content.filterIsInstance<MarkdownInline.Image>().single()
+        assertEquals("/images/example.svg", image.url)
+        assertEquals("示意图", image.alt)
+        val code = (blocks[3] as MarkdownBlock.Paragraph).content.filterIsInstance<MarkdownInline.Code>().single()
+        assertEquals("""<Image src="/literal.svg" />""", code.code)
+        assertEquals("""<Image src="/sample.svg" />""", (blocks[4] as MarkdownBlock.CodeBlock).code.trim())
     }
 
     @Test

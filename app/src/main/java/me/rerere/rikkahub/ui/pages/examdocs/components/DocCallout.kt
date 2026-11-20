@@ -1,12 +1,14 @@
 package me.rerere.rikkahub.ui.pages.examdocs.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -16,24 +18,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Alert01
 import me.rerere.hugeicons.stroke.Alert02
 import me.rerere.hugeicons.stroke.AlertCircle
 import me.rerere.hugeicons.stroke.Book02
+import me.rerere.hugeicons.stroke.CheckmarkCircle02
 import me.rerere.hugeicons.stroke.Idea
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 
 private data class CalloutStyle(
     val accent: Color,
-    val container: Color,
     val icon: ImageVector,
-    val defaultTitle: String,
 )
 
 @Composable
@@ -42,73 +45,58 @@ internal fun DocCallout(
     content: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colorScheme = MaterialTheme.colorScheme
+    val colors = MaterialTheme.colorScheme
     val style = when (block.type) {
-        "tip" -> CalloutStyle(
-            accent = colorScheme.secondary,
-            container = colorScheme.secondaryContainer.copy(alpha = 0.55f),
-            icon = HugeIcons.Idea,
-            defaultTitle = "提示",
-        )
-        "warning" -> CalloutStyle(
-            accent = colorScheme.tertiary,
-            container = colorScheme.tertiaryContainer.copy(alpha = 0.55f),
-            icon = HugeIcons.Alert02,
-            defaultTitle = "注意",
-        )
-        "danger" -> CalloutStyle(
-            accent = colorScheme.error,
-            container = colorScheme.errorContainer.copy(alpha = 0.55f),
-            icon = HugeIcons.Alert01,
-            defaultTitle = "警告",
-        )
-        "note" -> CalloutStyle(
-            accent = colorScheme.onSurfaceVariant,
-            container = colorScheme.surfaceContainerHigh.copy(alpha = 0.75f),
-            icon = HugeIcons.Book02,
-            defaultTitle = "笔记",
-        )
-        else -> CalloutStyle(
-            accent = colorScheme.primary,
-            container = colorScheme.primaryContainer.copy(alpha = 0.45f),
-            icon = HugeIcons.AlertCircle,
-            defaultTitle = "说明",
-        )
+        "tip", "idea" -> CalloutStyle(colors.primary, HugeIcons.Idea)
+        "warn", "warning", "caution" -> CalloutStyle(colors.tertiary, HugeIcons.Alert02)
+        "danger", "error" -> CalloutStyle(colors.error, HugeIcons.Alert01)
+        "success" -> CalloutStyle(colors.secondary, HugeIcons.CheckmarkCircle02)
+        "note" -> CalloutStyle(colors.onSurfaceVariant, HugeIcons.Book02)
+        else -> CalloutStyle(colors.primary, HugeIcons.AlertCircle)
     }
-
+    val title = block.title
     Surface(
-        color = style.container,
-        shape = RoundedCornerShape(16.dp),
+        color = style.accent.copy(alpha = 0.10f),
+        contentColor = colors.onSurface,
+        shape = MaterialTheme.shapes.large,
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .drawBehind {
-                    val width = 3.dp.toPx()
-                    drawRoundRect(style.accent, size = Size(width, size.height), cornerRadius = CornerRadius(width))
+                    val railWidth = 3.dp.toPx()
+                    val inset = 8.dp.toPx()
+                    val railStart = if (layoutDirection == LayoutDirection.Ltr) inset else size.width - inset - railWidth
+                    drawRoundRect(
+                        color = style.accent.copy(alpha = 0.55f),
+                        topLeft = Offset(railStart, 10.dp.toPx()),
+                        size = Size(railWidth, (size.height - 20.dp.toPx()).coerceAtLeast(0f)),
+                        cornerRadius = CornerRadius(railWidth / 2),
+                    )
                 }
-                .padding(start = 14.dp, end = 12.dp, top = 12.dp, bottom = 12.dp),
+                .padding(start = 19.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(
-                imageVector = style.icon,
-                contentDescription = null,
-                tint = style.accent,
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .size(18.dp),
-            )
+            Box(
+                modifier = Modifier.padding(top = 2.dp).size(24.dp)
+                    .background(style.accent.copy(alpha = 0.16f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = style.icon,
+                    contentDescription = null,
+                    tint = style.accent,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text(
-                    text = block.title ?: style.defaultTitle,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colorScheme.onSurface,
-                )
+                if (!title.isNullOrBlank()) {
+                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                }
                 content()
             }
         }
