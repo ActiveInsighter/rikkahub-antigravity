@@ -9,6 +9,10 @@ on:
         description: Publish the signed APKs as a downloadable release
         type: boolean
         default: true
+      reader_smoke:
+        description: Exercise document reader interactions on the Android emulator
+        type: boolean
+        default: false
 
 concurrency:
   group: antigravity-${{ github.ref }}
@@ -75,6 +79,24 @@ jobs:
           :app:assembleGithubDebug
           --no-daemon --max-workers=2
           '-Dorg.gradle.jvmargs=-Xmx5g -Dfile.encoding=UTF-8'
+      - name: Enable KVM for the reader smoke test
+        if: github.event_name == 'workflow_dispatch' && inputs.reader_smoke
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Exercise the reader on Android
+        if: github.event_name == 'workflow_dispatch' && inputs.reader_smoke
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: >-
+            ./gradlew :app:connectedGithubDebugAndroidTest
+            -Pandroid.testInstrumentationRunnerArguments.class=me.rerere.rikkahub.ui.pages.examdocs.ExamDocsReaderTest
+            --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8'
       - name: Verify APK signatures and prepare downloads
         run: |
           VERSION_NAME=$(python3 -c 'import json; print(json.load(open("app/build/outputs/apk/github/debug/output-metadata.json"))["elements"][0]["versionName"])')

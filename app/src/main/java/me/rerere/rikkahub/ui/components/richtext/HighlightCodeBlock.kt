@@ -87,6 +87,10 @@ private const val COLLAPSE_LINES = 10
 private val PREVIEWABLE_LANGUAGES = setOf("html", "svg")
 
 @Composable
+internal fun codeBlockBackground(): Color =
+    if (LocalDarkMode.current) Color(0xFF242424) else Color(0xFFF3F3F3)
+
+@Composable
 fun HighlightCodeBlock(
     code: String,
     language: String,
@@ -134,7 +138,7 @@ fun HighlightCodeBlock(
     }
 
     val containerShape = RoundedCornerShape(14.dp)
-    val containerColor = if (darkMode) Color(0xFF242424) else Color(0xFFF2F2F2)
+    val containerColor = codeBlockBackground()
 
     Column(
         modifier = modifier

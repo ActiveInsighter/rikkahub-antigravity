@@ -30,7 +30,7 @@ private const val KEY_SITES_V2_MIGRATED = "sites_v2_migrated"
 private const val KEY_ACTIVE_SITE = "active_site"
 private const val KEY_BASE_URL = "base_url"
 private const val KEY_LAST_PAGE_URL = "last_page_url"
-private const val ANDROID_MARKDOWN_VERSION = 1
+private const val ANDROID_MARKDOWN_VERSION = 2
 private const val MAX_RESPONSE_BYTES = 16L * 1024 * 1024
 
 @Serializable

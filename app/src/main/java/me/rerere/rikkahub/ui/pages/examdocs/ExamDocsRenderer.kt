@@ -2,16 +2,22 @@ package me.rerere.rikkahub.ui.pages.examdocs
 
 import android.content.Context
 import android.util.LruCache
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -30,6 +36,7 @@ import me.rerere.bettertext.text.BetterInline
 import me.rerere.rikkahub.data.examdocs.ExamDocsDocument
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 import me.rerere.rikkahub.ui.components.richtext.RichMarkdownRenderer
+import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.richtext.rememberRichMarkdownRenderer
 import me.rerere.rikkahub.ui.context.LocalSettings
 
@@ -51,8 +58,9 @@ internal fun rememberExamDocsRenderer(
             val style = LocalTextStyle.current
             LatexBlock(
                 layout,
-                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 fontSize = style.fontSize,
+                scale = 1f,
                 color = style.color.takeOrElse { LocalContentColor.current },
             )
         }
@@ -80,11 +88,27 @@ internal fun rememberExamDocsRenderer(
             }
         }
     }
+    val imageContent: @Composable (MarkdownInline.Image, String?, String) -> Unit = remember(onLinkClick) {
+        { image, link, url ->
+            Column(Modifier.fillMaxWidth()) {
+                ZoomableAsyncImage(
+                    model = url,
+                    contentDescription = image.alt,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 480.dp)
+                        .clip(MaterialTheme.shapes.medium),
+                )
+                if (link != null && link != image.url) {
+                    TextButton(onClick = { onLinkClick(link) }) { Text("打开图片链接") }
+                }
+            }
+        }
+    }
     return rememberRichMarkdownRenderer(
         onLinkClick = onLinkClick,
         imageUrlResolver = imageUrlResolver,
         displayMath = displayMath,
         inlineMath = inlineMath,
+        imageContent = imageContent,
     )
 }
 

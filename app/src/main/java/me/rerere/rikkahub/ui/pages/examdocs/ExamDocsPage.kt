@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.flow.first
@@ -84,6 +85,7 @@ import me.rerere.rikkahub.ui.components.richtext.SelectableContent
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.pages.chat.AssistantBackground
+import me.rerere.rikkahub.ui.pages.chat.topFadingEdge
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.ui.toast.ToastType
 import org.koin.androidx.compose.koinViewModel
@@ -208,6 +210,8 @@ fun ExamDocsPage(
                                         },
                                         enabled = document != null,
                                     ),
+                                ),
+                                listOf(
                                     TopBarMenuItem(
                                         "站点设置",
                                         HugeIcons.Settings03,
@@ -222,9 +226,7 @@ fun ExamDocsPage(
             },
         ) { innerPadding ->
             Box(
-                Modifier
-                    .fillMaxSize()
-                    .hazeSource(hazeState),
+                Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
                 val treeError = state.treeError
@@ -257,6 +259,7 @@ fun ExamDocsPage(
                         listState = listState,
                         baseUrl = state.activeSite.baseUrl,
                         pageUrl = page.url,
+                        hazeState = hazeState,
                         topPadding = innerPadding.calculateTopPadding(),
                         bottomPadding = innerPadding.calculateBottomPadding(),
                         previous = state.prevPage,
@@ -314,6 +317,7 @@ private fun ExamDocsArticle(
     listState: LazyListState,
     baseUrl: String,
     pageUrl: String,
+    hazeState: HazeState,
     topPadding: Dp,
     bottomPadding: Dp,
     previous: ExamDocNode.Page?,
@@ -344,7 +348,10 @@ private fun ExamDocsArticle(
     SelectableContent {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .topFadingEdge(topPadding + 24.dp)
+                .hazeSource(hazeState),
             contentPadding = PaddingValues(
                 start = 16.dp,
                 end = 16.dp,

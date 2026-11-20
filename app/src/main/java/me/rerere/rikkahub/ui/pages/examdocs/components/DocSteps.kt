@@ -5,14 +5,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -22,7 +20,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 
@@ -76,39 +77,29 @@ private fun DocTimelineStepItem(
     isLast: Boolean,
     renderChildren: @Composable (List<ExamDocsSegment>) -> Unit,
 ) {
+    val lineColor = MaterialTheme.colorScheme.outlineVariant
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(IntrinsicSize.Min),
+            .drawBehind {
+                if (!isLast) {
+                    val center = if (layoutDirection == LayoutDirection.Ltr) {
+                        13.dp.toPx()
+                    } else {
+                        size.width - 13.dp.toPx()
+                    }
+                    drawLine(lineColor, Offset(center, 26.dp.toPx()), Offset(center, size.height), 1.5.dp.toPx())
+                }
+            },
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxHeight(),
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            modifier = Modifier.size(26.dp),
         ) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(26.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = number.toString(),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                }
-            }
-            if (!isLast) {
-                Box(
-                    modifier = Modifier
-                        .width(1.5.dp)
-                        .weight(1f)
-                        .padding(vertical = 4.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-                )
+            Box(contentAlignment = Alignment.Center) {
+                Text(number.toString(), style = MaterialTheme.typography.labelMedium)
             }
         }
         Column(

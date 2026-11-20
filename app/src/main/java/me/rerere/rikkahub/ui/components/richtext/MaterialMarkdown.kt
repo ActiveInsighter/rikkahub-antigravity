@@ -198,7 +198,7 @@ object MaterialMarkdownDefaults {
         Surface(
             modifier = modifier.fillMaxWidth(),
             shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = codeBlockBackground(),
         ) {
             Column(
                 modifier = Modifier.padding(12.dp),
