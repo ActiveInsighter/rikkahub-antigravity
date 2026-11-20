@@ -905,4 +905,13 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class ExamDocs(val initialUrl: String? = null) : Screen
+
+    @Serializable
+    data object ExamDocsSettings : Screen
+
+    @Serializable
+    data object ExamDocsSiteSettings : Screen
+
+    @Serializable
+    data object ExamDocsUISettings : Screen
 }

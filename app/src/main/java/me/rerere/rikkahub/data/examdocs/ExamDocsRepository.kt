@@ -5,10 +5,14 @@ import android.util.LruCache
 import androidx.core.content.edit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import me.rerere.rikkahub.data.datastore.BackgroundEffectType
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -30,6 +34,7 @@ private const val KEY_SITES_V2_MIGRATED = "sites_v2_migrated"
 private const val KEY_ACTIVE_SITE = "active_site"
 private const val KEY_BASE_URL = "base_url"
 private const val KEY_LAST_PAGE_URL = "last_page_url"
+private const val KEY_UI_SETTINGS = "ui_settings"
 private const val ANDROID_MARKDOWN_VERSION = 2
 private const val MAX_RESPONSE_BYTES = 16L * 1024 * 1024
 
@@ -42,6 +47,13 @@ val builtInDocsSites = listOf(
 )
 
 data class ExamDocsSiteSettings(val sites: List<ExamDocsSite>, val active: ExamDocsSite)
+
+@Serializable
+data class ExamDocsUiSettings(
+    val enableBlurEffect: Boolean = true,
+    val backgroundEffectType: BackgroundEffectType = BackgroundEffectType.BLUR,
+    val fontSizeRatio: Float = 1.0f,
+)
 
 @Serializable
 data class ExamDocSourceTreeDto(
@@ -144,12 +156,62 @@ class ExamDocsRepository(
         return ExamDocsSiteSettings(sites, active)
     }
 
+    private val _siteSettingsFlow by lazy { MutableStateFlow(loadSiteSettings()) }
+    val siteSettingsFlow: StateFlow<ExamDocsSiteSettings> get() = _siteSettingsFlow.asStateFlow()
+
+    private val _uiSettingsFlow by lazy { MutableStateFlow(loadUiSettings()) }
+    val uiSettingsFlow: StateFlow<ExamDocsUiSettings> get() = _uiSettingsFlow.asStateFlow()
+
+    fun loadUiSettings(): ExamDocsUiSettings {
+        val raw = prefs.getString(KEY_UI_SETTINGS, null) ?: return ExamDocsUiSettings()
+        return runCatching { json.decodeFromString<ExamDocsUiSettings>(raw) }
+            .getOrDefault(ExamDocsUiSettings())
+    }
+
+    fun saveUiSettings(settings: ExamDocsUiSettings) {
+        val clamped = settings.copy(fontSizeRatio = settings.fontSizeRatio.coerceIn(0.5f, 2.0f))
+        prefs.edit { putString(KEY_UI_SETTINGS, json.encodeToString(clamped)) }
+        _uiSettingsFlow.value = clamped
+    }
+
     fun saveSiteSettings(sites: List<ExamDocsSite>, active: ExamDocsSite) {
         prefs.edit {
             putString(KEY_SITES, json.encodeToString(sites))
             putString(KEY_ACTIVE_SITE, active.baseUrl)
             putBoolean(KEY_SITES_V2_MIGRATED, true)
         }
+        _siteSettingsFlow.value = ExamDocsSiteSettings(sites, active)
+    }
+
+    fun switchSite(site: ExamDocsSite) {
+        val current = _siteSettingsFlow.value
+        if (site == current.active) return
+        saveSiteSettings(current.sites, site)
+    }
+
+    fun saveSite(original: ExamDocsSite?, name: String, rawUrl: String): String? {
+        val baseUrl = parseBaseUrl(rawUrl) ?: return "请输入有效的 HTTP 或 HTTPS 站点地址"
+        val current = _siteSettingsFlow.value
+        if (current.sites.any { it != original && it.baseUrl == baseUrl }) return "这个站点已经添加"
+        val site = ExamDocsSite(name.trim().ifBlank { baseUrl.toHttpUrl().host }, baseUrl)
+        val sites = if (original == null) current.sites + site else current.sites.map { if (it == original) site else it }
+        val active = if (original == null || original == current.active) site else current.active
+        saveSiteSettings(sites, active)
+        return null
+    }
+
+    fun removeSite(site: ExamDocsSite) {
+        val current = _siteSettingsFlow.value
+        if (current.sites.size <= 1) return
+        val sites = current.sites - site
+        val active = current.active.takeUnless { it == site } ?: sites.first()
+        saveSiteSettings(sites, active)
+    }
+
+    fun restoreDefaultSites() {
+        val current = _siteSettingsFlow.value
+        val merged = (current.sites + builtInDocsSites).distinctBy(ExamDocsSite::baseUrl)
+        saveSiteSettings(merged, current.active)
     }
 
     fun getLastPageUrl(site: ExamDocsSite): String? = prefs.getString(lastPageKey(site.baseUrl), null)

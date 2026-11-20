@@ -27,6 +27,8 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -87,13 +89,15 @@ import kotlin.time.Clock
 private const val COLLAPSE_LINES = 10
 private val PREVIEWABLE_LANGUAGES = setOf("html", "svg")
 
+internal val LocalCodeBlockEmbedded = compositionLocalOf { false }
+
 @Composable
 internal fun codeBlockBackground(): Color =
-    if (LocalDarkMode.current) Color(0xFF1E1F22) else Color(0xFFF6F7F8)
+    if (LocalDarkMode.current) Color(0xFF1E1F22) else Color(0xFFF1F3F5)
 
 @Composable
 internal fun codeBlockBorder(): Color =
-    if (LocalDarkMode.current) Color(0xFF2E3035) else Color(0xFFE5E7EB)
+    if (LocalDarkMode.current) Color(0xFF2E3035) else Color(0xFFE2E5E9)
 
 @Composable
 fun HighlightCodeBlock(
@@ -101,12 +105,10 @@ fun HighlightCodeBlock(
     language: String,
     modifier: Modifier = Modifier,
     completeCodeBlock: Boolean = true,
-    style: TextStyle? = TextStyle(
-        fontSize = 12.5.sp,
-        lineHeight = 18.sp,
-    ),
+    style: TextStyle? = null,
 ) {
     val darkMode = LocalDarkMode.current
+    val embedded = LocalCodeBlockEmbedded.current
     val colorPalette = if (darkMode) AtomOneDarkPalette else AtomOneLightPalette
     val scrollState = rememberScrollState()
     val clipboardManager = LocalClipboard.current
@@ -146,15 +148,19 @@ fun HighlightCodeBlock(
     val containerColor = codeBlockBackground()
 
     Column(
-        modifier = modifier
-            .clip(containerShape)
-            .background(containerColor)
-            .border(1.dp, codeBlockBorder(), containerShape),
+        modifier = if (embedded) {
+            modifier
+        } else {
+            modifier
+                .clip(containerShape)
+                .background(containerColor)
+                .border(1.dp, codeBlockBorder(), containerShape)
+        },
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 9.dp)
+                .padding(horizontal = 14.dp, vertical = if (embedded) 6.dp else 9.dp)
         ) {
             HighlightCodeActions(
                 language = language,
@@ -172,7 +178,12 @@ fun HighlightCodeBlock(
             )
         }
         Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
+            modifier = Modifier.padding(
+                start = 14.dp,
+                end = 14.dp,
+                top = if (embedded) 4.dp else 12.dp,
+                bottom = 12.dp,
+            )
         ) {
             when {
                 canInlinePreview && previewMode -> {
@@ -191,7 +202,12 @@ fun HighlightCodeBlock(
                     )
                 }
                 else -> {
-                    val textStyle = LocalTextStyle.current.merge(style)
+                    val ratio = settings.displaySetting.fontSizeRatio
+                    val resolvedStyle = style ?: TextStyle(
+                        fontSize = 14.sp * ratio,
+                        lineHeight = 20.sp * ratio,
+                    )
+                    val textStyle = LocalTextStyle.current.merge(resolvedStyle)
                     val codeLines = remember(code) { code.lines() }
                     val collapsedCode = remember(codeLines) { codeLines.take(COLLAPSE_LINES).joinToString("\n") }
                     val displayCode = if (isExpanded) code else collapsedCode

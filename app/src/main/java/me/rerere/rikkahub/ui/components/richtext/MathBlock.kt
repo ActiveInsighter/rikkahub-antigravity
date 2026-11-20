@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.takeOrElse
 import me.rerere.bettertext.latex.LatexBlock
 
@@ -22,7 +23,8 @@ fun MathBlock(
     LatexBlock(
         latex = latex,
         modifier = modifier.padding(8.dp),
-        fontSize = fontSize.takeOrElse { style.fontSize },
+        fontSize = fontSize.takeOrElse { style.fontSize.takeOrElse { 16.sp } },
+        scale = 1.15f,
         color = style.color.takeOrElse { LocalContentColor.current },
     )
 }

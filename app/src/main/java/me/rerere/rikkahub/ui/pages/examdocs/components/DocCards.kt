@@ -30,6 +30,7 @@ import me.rerere.hugeicons.stroke.CheckmarkCircle02
 import me.rerere.hugeicons.stroke.Idea
 import me.rerere.hugeicons.stroke.Link01
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
+import me.rerere.rikkahub.ui.theme.extendColors
 
 @Composable
 internal fun DocCards(
@@ -143,15 +144,19 @@ internal fun DocCard(
     }
 }
 
+import me.rerere.rikkahub.ui.theme.extendColors
+
 @Composable
 internal fun resolveToneColor(tone: String?): Color {
     val scheme = MaterialTheme.colorScheme
+    val extendColors = MaterialTheme.extendColors
     return when (tone?.lowercase()) {
-        "success" -> scheme.secondary
-        "warning" -> scheme.tertiary
-        "error", "danger" -> scheme.error
-        "idea" -> scheme.tertiary
-        "info", "primary" -> scheme.primary
+        "success" -> extendColors.green6
+        "warning", "warn", "caution" -> extendColors.orange6
+        "error", "danger" -> extendColors.red6
+        "idea" -> extendColors.orange5
+        "info" -> extendColors.blue6
+        "primary" -> scheme.primary
         else -> scheme.primary
     }
 }
