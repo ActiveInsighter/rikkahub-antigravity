@@ -40,6 +40,7 @@ internal fun ExamDocsSiteSettings(
     onSelectSite: (ExamDocsSite) -> Unit,
     onSaveSite: (ExamDocsSite?, String, String) -> String?,
     onRemoveSite: (ExamDocsSite) -> Unit,
+    onRestoreDefaults: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var showEditor by rememberSaveable { mutableStateOf(false) }
@@ -57,7 +58,6 @@ internal fun ExamDocsSiteSettings(
             Text("站点设置", style = MaterialTheme.typography.titleLarge)
             CardGroup {
                 for (site in sites) {
-                    val builtIn = site in builtInDocsSites
                     item(
                         onClick = { onSelectSite(site) },
                         leadingContent = { Icon(HugeIcons.Folder01, null) },
@@ -67,12 +67,14 @@ internal fun ExamDocsSiteSettings(
                         trailingContent = {
                             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                                 if (site == activeSite) Text("当前", Modifier.padding(top = 12.dp))
-                                if (!builtIn) {
-                                    TextButton(onClick = {
-                                        editingUrl = site.baseUrl
-                                        showEditor = true
-                                    }) { Text("编辑") }
-                                    IconButton(onClick = { onRemoveSite(site) }) { Icon(HugeIcons.Delete01, "移除 ${site.name}") }
+                                TextButton(onClick = {
+                                    editingUrl = site.baseUrl
+                                    showEditor = true
+                                }) { Text("编辑") }
+                                if (sites.size > 1) {
+                                    IconButton(onClick = { onRemoveSite(site) }) {
+                                        Icon(HugeIcons.Delete01, "移除 ${site.name}")
+                                    }
                                 }
                             }
                         },
@@ -85,6 +87,9 @@ internal fun ExamDocsSiteSettings(
                     },
                     leadingContent = { Icon(HugeIcons.Add01, null) },
                 ) { Text("添加站点") }
+                item(
+                    onClick = onRestoreDefaults,
+                ) { Text("恢复默认站点") }
             }
         }
     }

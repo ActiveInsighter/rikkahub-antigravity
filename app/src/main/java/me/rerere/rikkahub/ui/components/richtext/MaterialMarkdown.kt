@@ -279,8 +279,14 @@ object MaterialMarkdownDefaults {
             headers = headers,
             rows = rows,
             modifier = modifier,
+            cellHorizontalPadding = 12.dp,
+            cellVerticalPadding = 10.dp,
+            cellBorder = null,
+            rowDividerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+            headerCornerRadius = 10.dp,
+            headerBackground = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.055f),
             columnMinWidths = List(columnCount) { 80.dp },
-            columnMaxWidths = List(columnCount) { 200.dp },
+            columnMaxWidths = List(columnCount) { 220.dp },
             columnAlignments = List(columnCount) { index ->
                 table.alignments.getOrNull(index)?.toCellAlignment() ?: Alignment.CenterStart
             },

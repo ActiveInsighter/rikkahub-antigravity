@@ -8,7 +8,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.Clipboard
@@ -93,8 +93,8 @@ fun HighlightCodeBlock(
     modifier: Modifier = Modifier,
     completeCodeBlock: Boolean = true,
     style: TextStyle? = TextStyle(
-        fontSize = 12.sp,
-        lineHeight = 16.sp,
+        fontSize = 12.5.sp,
+        lineHeight = 18.sp,
     ),
 ) {
     val darkMode = LocalDarkMode.current
@@ -133,17 +133,18 @@ fun HighlightCodeBlock(
         }
     }
 
+    val containerShape = RoundedCornerShape(14.dp)
+    val containerColor = if (darkMode) Color(0xFF242424) else Color(0xFFF2F2F2)
+
     Column(
         modifier = modifier
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.large)
-            .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceContainer),
+            .clip(containerShape)
+            .background(containerColor),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(horizontal = 14.dp, vertical = 9.dp)
         ) {
             HighlightCodeActions(
                 language = language,
@@ -161,7 +162,7 @@ fun HighlightCodeBlock(
             )
         }
         Column(
-            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
             when {
                 canInlinePreview && previewMode -> {

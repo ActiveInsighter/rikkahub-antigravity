@@ -411,45 +411,36 @@ private fun TableCard(table: MarkdownBlock.Table) {
     }
 
     Column(
-        modifier = Modifier
-            .clip(MaterialTheme.shapes.large)
-            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceContainer)
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "表格",
-                fontSize = 12.sp,
-                lineHeight = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.weight(1f))
+            val iconSize = 15.dp
+            val iconTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.045f))
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val iconSize = 16.dp
-                val iconTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-
                 Icon(
                     imageVector = HugeIcons.Copy01,
                     contentDescription = "Copy",
                     tint = iconTint,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(RoundedCornerShape(6.dp))
                         .onClick {
                             scope.launch {
                                 clipboardManager.setClipEntry(ClipEntry(ClipData.newPlainText("table", tableText)))
                             }
                         }
-                        .padding(4.dp)
+                        .padding(5.dp)
                         .size(iconSize)
                 )
 
@@ -458,7 +449,7 @@ private fun TableCard(table: MarkdownBlock.Table) {
                     contentDescription = "Download",
                     tint = iconTint,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(RoundedCornerShape(6.dp))
                         .onClick {
                             createDocumentLauncher.launch(
                                 "table_${
@@ -466,7 +457,7 @@ private fun TableCard(table: MarkdownBlock.Table) {
                                 }.csv"
                             )
                         }
-                        .padding(4.dp)
+                        .padding(5.dp)
                         .size(iconSize)
                 )
             }
@@ -474,7 +465,7 @@ private fun TableCard(table: MarkdownBlock.Table) {
         MaterialMarkdownDefaults.Table(
             table = table,
             outerBorder = null,
-            shape = RectangleShape,
+            shape = RoundedCornerShape(10.dp),
         )
     }
 }
