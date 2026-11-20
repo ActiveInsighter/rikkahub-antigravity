@@ -15,7 +15,9 @@ class ApkPatchSmokeTest {
     fun rebuildsSignedApkByteForByteWithAndroidNativeLibrary() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val assets = instrumentation.context.assets
-        assumeTrue(assets.list("apk-update")?.contains("base.apk") == true)
+        if (InstrumentationRegistry.getArguments().getString("apkPatchFixture") != "required") {
+            assumeTrue(assets.list("apk-update")?.contains("base.apk") == true)
+        }
         val context = instrumentation.targetContext
         val workspace = kotlin.io.path.createTempDirectory(context.cacheDir.toPath(), "apk-patch-test-").toFile()
         try {

@@ -205,10 +205,10 @@ jobs:
           target: google_apis
           arch: x86_64
           disable-animations: true
-          script: >-
-            ./gradlew :app:connectedGithubDebugAndroidTest
-            -Pandroid.testInstrumentationRunnerArguments.class=me.rerere.rikkahub.data.update.ApkPatchSmokeTest
-            --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8'
+          script: |
+            adb install app/src/androidTest/assets/apk-update/base.apk
+            adb install -r "artifacts/$APK_PREFIX-x86_64-debug.apk"
+            ./gradlew :app:connectedGithubDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=me.rerere.rikkahub.data.update.ApkPatchSmokeTest -Pandroid.testInstrumentationRunnerArguments.apkPatchFixture=required --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8'
       - name: Publish APK update catalog to R2
         if: github.ref == 'refs/heads/main'
         env:

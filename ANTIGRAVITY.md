@@ -103,4 +103,4 @@ GitHub 渠道的 Antigravity Debug APK 在首页右上角提供「下载与更�
 
 配置完成后，从 `main` 新启动一次工作流。第一次发布会建立全量基线，随后每次发布会为留存版本生成可用的直达补丁。公网地址随 APK 构建写入。此前未配置地址的 APK，需要从 GitHub 手动覆盖安装一次支持该地址的新版。构建以 `100000 + GITHUB_RUN_NUMBER` 作为 Android 版本号。同一次运行的重试沿用原版本号，R2 保留已经发布的内容。要重发请启动新的运行。
 
-功能分支手动运行工作流时，可设置 `publish_release=false`、`updates_smoke=true`，由 Android x86_64 模拟器验证签名 APK 的差分合成。分支验证不会写入 R2。上游 `Daily Build` 工作流使用不同包名与签名，继续维护独立的分发流程。
+功能分支手动运行工作流时，可设置 `publish_release=false`、`updates_smoke=true`，由 Android x86_64 模拟器验证签名 APK 的差分合成。R2 发布仅由 `main` 构建触发。上游 `Daily Build` 工作流使用独立的包名、签名和分发流程。

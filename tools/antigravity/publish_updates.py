@@ -115,14 +115,29 @@ class R2Store:
         self.client.put_object(Bucket=self.bucket, Key=PREFIX + "catalog.json", Body=envelope,
                                ContentType="application/json", CacheControl="no-store", **condition)
 
-    def prune(self, oldest_version):
+    def prune(self, builds):
+        # Leave objects from a newer publisher alone, even if it is still uploading.
+        newest_version = builds[0]["versionCode"]
+        retained_keys = set()
+        for build in builds:
+            version = build["versionCode"]
+            for apk in build["apks"]:
+                retained_keys.add(PREFIX + apk_key(version, apk))
+                for patch in apk["patches"]:
+                    retained_keys.add(PREFIX + delta_key(version, apk, patch))
         prefix = PREFIX + "builds/"
         old_keys = []
         for page in self.client.get_paginator("list_objects_v2").paginate(Bucket=self.bucket, Prefix=prefix):
             for item in page.get("Contents", []):
-                version, separator, _ = item["Key"][len(prefix):].partition("/")
-                if separator and re.fullmatch("[0-9]{1,10}", version) and int(version) < oldest_version:
-                    old_keys.append({"Key": item["Key"]})
+                key = item["Key"]
+                if key in retained_keys:
+                    continue
+                match = re.fullmatch(
+                    r"([0-9]{1,10})/[a-f0-9]{64}/(?:arm64-v8a|x86_64|universal)"
+                    r"(?:\.apk|-from-[a-f0-9]{64}-[a-f0-9]{64}\.hdiff)", key[len(prefix):],
+                )
+                if match and int(match[1]) <= newest_version:
+                    old_keys.append({"Key": key})
         for start in range(0, len(old_keys), 1000):
             response = self.client.delete_objects(
                 Bucket=self.bucket, Delete={"Objects": old_keys[start:start + 1000], "Quiet": True},
@@ -169,8 +184,7 @@ def publish(store, options):
     old_builds, etag = store.read_catalog()
     if old_builds and options.version_code <= old_builds[0]["versionCode"]:
         print(f"Build {options.version_code} is already published or has been superseded")
-        if len(old_builds) == KEEP_BUILDS:
-            store.prune(old_builds[-1]["versionCode"])
+        store.prune(old_builds)
         return
     with tempfile.TemporaryDirectory(dir=options.work_dir) as temp:
         workspace = Path(temp)
@@ -192,8 +206,7 @@ def publish(store, options):
     }
     retained = [build, *old_builds][:KEEP_BUILDS]
     store.write_catalog(retained, etag)
-    if len(retained) == KEEP_BUILDS:
-        store.prune(retained[-1]["versionCode"])
+    store.prune(retained)
     print(f"Published build {options.build_number}, {len(retained)} builds indexed")
 
 
