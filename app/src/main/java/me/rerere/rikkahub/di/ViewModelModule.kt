@@ -143,4 +143,10 @@ val viewModelModule = module {
             workflowRepository = get(),
         )
     }
+    viewModel { params ->
+        me.rerere.rikkahub.ui.pages.examdocs.ExamDocsVM(
+            initialUrl = params.getOrNull(),
+            repository = get(),
+        )
+    }
 }

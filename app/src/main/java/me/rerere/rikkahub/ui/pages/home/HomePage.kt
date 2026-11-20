@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
+import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.Clock01
 import me.rerere.hugeicons.stroke.GitFork
 import me.rerere.hugeicons.stroke.MessageAdd01
@@ -133,6 +134,10 @@ fun HomePage() {
 
     fun openWorkflow() {
         navController.navigate(Screen.Workflow)
+    }
+
+    fun openExamDocs() {
+        navController.navigate(Screen.ExamDocs())
     }
 
     Scaffold(
@@ -447,6 +452,70 @@ fun HomePage() {
                             .weight(1f)
                             .fillMaxHeight(),
                     )
+                }
+            }
+
+            // 3.5 Docs Reader Card
+            AnimatedVisibility(
+                visible = visible,
+                enter = fadeIn() + slideInVertically { it / 4 },
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.65f),
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.tertiary.copy(alpha = 0.18f),
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .clickable { openExamDocs() },
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Surface(
+                            shape = MaterialShapes.Pill.toShape(),
+                            color = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.size(38.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = HugeIcons.Book02,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onTertiary,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "文档阅读器",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                            )
+                            Text(
+                                text = "Exam Docs · Study Docs",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Icon(
+                            imageVector = HugeIcons.ArrowRight01,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.75f),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
             }
 

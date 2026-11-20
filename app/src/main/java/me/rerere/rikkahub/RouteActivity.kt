@@ -654,6 +654,12 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.Workflow> {
                                 WorkflowPage()
                             }
+
+                            entry<Screen.ExamDocs> { key ->
+                                me.rerere.rikkahub.ui.pages.examdocs.ExamDocsPage(
+                                    initialUrl = key.initialUrl,
+                                )
+                            }
                         }
                     )
                     if (BuildConfig.DEBUG) {
@@ -898,4 +904,7 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Workflow : Screen
+
+    @Serializable
+    data class ExamDocs(val initialUrl: String? = null) : Screen
 }
