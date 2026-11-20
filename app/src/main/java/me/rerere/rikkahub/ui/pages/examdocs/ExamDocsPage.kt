@@ -18,23 +18,27 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuGroup
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenuPopup
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -57,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.font.FontFamily
@@ -66,22 +71,28 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Copy01
+import me.rerere.hugeicons.stroke.Delete01
+import me.rerere.hugeicons.stroke.Edit03
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Folder01
-import me.rerere.hugeicons.stroke.Menu03
+import me.rerere.hugeicons.stroke.LeftToRightListBullet
+import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.rikkahub.data.examdocs.DEFAULT_EXAM_DOCS_BASE_URL
+import me.rerere.rikkahub.data.examdocs.ExamDocFlatEntry
 import me.rerere.rikkahub.data.examdocs.ExamDocNode
+import me.rerere.rikkahub.data.examdocs.ExamDocSite
 import me.rerere.rikkahub.data.examdocs.ExamDocsRepository
 import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.components.richtext.SelectableContent
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.ui.toast.ToastType
@@ -101,11 +112,29 @@ fun ExamDocsPage(
 
     var showDirectorySheet by rememberSaveable { mutableStateOf(false) }
     var showOutlineSheet by rememberSaveable { mutableStateOf(false) }
-    var showUrlDialog by rememberSaveable { mutableStateOf(false) }
+    var showSiteDialog by rememberSaveable { mutableStateOf(false) }
 
-    val contentScrollState = rememberScrollState()
-    LaunchedEffect(state.currentPage?.url) {
-        contentScrollState.scrollTo(0)
+    val listState = rememberLazyListState()
+    LaunchedEffect(state.currentPage?.url, state.activeSite.id) {
+        listState.scrollToItem(0)
+    }
+
+    val mdUrl = remember(state.resolvedMarkdownUrl, state.baseUrl, state.currentPage?.url) {
+        state.resolvedMarkdownUrl ?: state.currentPage?.let {
+            ExamDocsRepository.buildMarkdownUrl(state.baseUrl, it.url)
+        }
+    }
+
+    val copyMdLink: () -> Unit = {
+        val target = mdUrl
+        if (target != null) {
+            scope.launch {
+                clipboard.setClipEntry(
+                    ClipEntry(ClipData.newPlainText("md_url", target))
+                )
+                toaster.show("已复制 .md 链接", type = ToastType.Success)
+            }
+        }
     }
 
     Scaffold(
@@ -118,14 +147,14 @@ fun ExamDocsPage(
                     title = {
                         Column {
                             Text(
-                                text = state.currentPage?.name ?: "Exam Docs",
+                                text = state.currentPage?.name ?: state.activeSite.name,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             val subtitle = state.currentBreadcrumb.joinToString(" / ")
-                                .ifBlank { state.baseUrl.removePrefix("https://").removePrefix("http://") }
+                                .ifBlank { state.activeSite.name }
                             Text(
                                 text = subtitle,
                                 maxLines = 1,
@@ -138,41 +167,29 @@ fun ExamDocsPage(
                     actions = {
                         IconButton(onClick = { showDirectorySheet = true }) {
                             Icon(
-                                imageVector = HugeIcons.Menu03,
-                                contentDescription = "目录",
+                                imageVector = HugeIcons.Book02,
+                                contentDescription = "文档目录",
                             )
                         }
-                        IconButton(onClick = { vm.refreshCurrentPage() }) {
+                        IconButton(
+                            onClick = { showOutlineSheet = true },
+                            enabled = state.headings.isNotEmpty(),
+                        ) {
                             Icon(
-                                imageVector = HugeIcons.Refresh03,
-                                contentDescription = "刷新",
+                                imageVector = HugeIcons.LeftToRightListBullet,
+                                contentDescription = "本页大纲",
                             )
                         }
-                        IconButton(onClick = { showUrlDialog = true }) {
-                            Icon(
-                                imageVector = HugeIcons.Settings03,
-                                contentDescription = "站点设置",
-                            )
-                        }
+                        ExamDocsMoreMenu(
+                            canCopyLink = mdUrl != null,
+                            onRefresh = { vm.refreshCurrentPage() },
+                            onCopyLink = copyMdLink,
+                            onOpenSettings = { showSiteDialog = true },
+                        )
                     },
-                )
-
-                // Web 端窄屏风格的顶部导航栏：模块切换 + 面包屑目录触发条 + 大纲按钮
-                TopDocsNavBar(
-                    modules = state.modules,
-                    selectedModuleIndex = state.selectedModuleIndex,
-                    currentPage = state.currentPage,
-                    breadcrumb = state.currentBreadcrumb,
-                    hasHeadings = state.headings.isNotEmpty(),
-                    onSelectModule = { index ->
-                        vm.selectModule(index)
-                        showDirectorySheet = true
-                    },
-                    onOpenDirectory = { showDirectorySheet = true },
-                    onOpenOutline = { showOutlineSheet = true },
                 )
                 HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
                 )
             }
         },
@@ -194,7 +211,7 @@ fun ExamDocsPage(
                         ) {
                             LoadingIndicator()
                             Text(
-                                text = "正在获取文档目录...",
+                                text = "正在获取 ${state.activeSite.name} 目录...",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -207,7 +224,7 @@ fun ExamDocsPage(
                         title = "无法获取网站结构",
                         message = state.treeError ?: "网络请求失败",
                         onRetry = { vm.loadTree(forceRefresh = true) },
-                        onEditUrl = { showUrlDialog = true },
+                        onEditUrl = { showSiteDialog = true },
                     )
                 }
 
@@ -222,7 +239,7 @@ fun ExamDocsPage(
                         ) {
                             LoadingIndicator()
                             Text(
-                                text = "正在加载 Markdown...",
+                                text = "正在加载文档...",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -240,122 +257,135 @@ fun ExamDocsPage(
                     )
                 }
 
-                state.markdownContent != null -> {
-                    val mdUrl = remember(state.baseUrl, state.currentPage?.url) {
-                        state.currentPage?.let {
-                            ExamDocsRepository.buildMarkdownUrl(state.baseUrl, it.url)
-                        }
-                    }
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(contentScrollState)
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        // 顶部文档信息条：题数 + .md 链接复制
-                        if (state.currentPage != null) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if ((state.currentPage?.questions ?: 0) > 0) {
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.primaryContainer,
+                state.parsedDoc != null -> {
+                    val parsedDoc = state.parsedDoc!!
+                    val hasMetaRow = state.currentPage != null &&
+                        ((state.currentPage?.questions ?: 0) > 0 || mdUrl != null)
+
+                    val handleLinkClick = rememberExamDocsLinkHandler(
+                        baseUrl = state.baseUrl,
+                        currentPageUrl = state.currentPage?.url,
+                        onNavigateDoc = { path -> vm.openByUrl(path) },
+                    )
+                    val imageResolver = rememberExamDocsImageResolver(
+                        baseUrl = state.baseUrl,
+                        currentPageUrl = state.currentPage?.url,
+                    )
+                    val registry = remember { ExamDocsComponentRegistry() }
+
+                    SelectableContent {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            if (hasMetaRow) {
+                                item(key = "doc_meta_header") {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        Text(
-                                            text = "${state.currentPage?.questions} 题",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                        )
-                                    }
-                                }
-                                if (mdUrl != null) {
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = CustomColors.listItemColors.containerColor,
-                                        border = BorderStroke(
-                                            1.dp,
-                                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                                        ),
-                                        onClick = {
-                                            scope.launch {
-                                                clipboard.setClipEntry(
-                                                    ClipEntry(ClipData.newPlainText("md_url", mdUrl))
+                                        if ((state.currentPage?.questions ?: 0) > 0) {
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = MaterialTheme.colorScheme.primaryContainer,
+                                            ) {
+                                                Text(
+                                                    text = "${state.currentPage?.questions} 题",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                                 )
-                                                toaster.show("已复制 .md 链接", type = ToastType.Success)
                                             }
-                                        },
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            Icon(
-                                                imageVector = HugeIcons.Copy01,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(13.dp),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                            Text(
-                                                text = state.currentPage?.url?.plus(".md") ?: "",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontFamily = FontFamily.Monospace,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                            )
+                                        }
+                                        if (mdUrl != null) {
+                                            val suffixLabel = if (state.isAndroidFormat) ".android.md" else ".md"
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = CustomColors.listItemColors.containerColor,
+                                                border = BorderStroke(
+                                                    1.dp,
+                                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                                                ),
+                                                onClick = copyMdLink,
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Icon(
+                                                        imageVector = HugeIcons.Copy01,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(13.dp),
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                    Text(
+                                                        text = "${state.currentPage?.url ?: ""}$suffixLabel",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontFamily = FontFamily.Monospace,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1,
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
 
-                        // 原生 Markdown 渲染（复用 AI 消息渲染栈 + 可扩展自定义组件）
-                        ExamDocsMarkdown(
-                            content = state.markdownContent ?: "",
-                            baseUrl = state.baseUrl,
-                            currentPageUrl = state.currentPage?.url,
-                            onNavigateDoc = { path -> vm.openByUrl(path) },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                            itemsIndexed(
+                                items = parsedDoc.segments,
+                                key = { index, segment ->
+                                    "${state.currentPage?.url}_${index}_${segment.hashCode()}"
+                                },
+                            ) { _, segment ->
+                                ExamDocsSegmentItem(
+                                    segment = segment,
+                                    onLinkClick = handleLinkClick,
+                                    imageResolver = imageResolver,
+                                    registry = registry,
+                                )
+                            }
 
-                        // 底部上一节 / 下一节导航卡片
-                        if (state.prevPage != null || state.nextPage != null) {
-                            Spacer(Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                state.prevPage?.let { prev ->
-                                    PageNavCard(
-                                        label = "上一节",
-                                        title = prev.name,
-                                        isNext = false,
-                                        onClick = { vm.openPage(prev) },
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                } ?: Spacer(Modifier.weight(1f))
+                            if (state.prevPage != null || state.nextPage != null) {
+                                item(key = "doc_footer_nav") {
+                                    Column {
+                                        Spacer(Modifier.height(6.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        ) {
+                                            state.prevPage?.let { prev ->
+                                                PageNavCard(
+                                                    label = "上一节",
+                                                    title = prev.name,
+                                                    isNext = false,
+                                                    onClick = { vm.openPage(prev) },
+                                                    modifier = Modifier.weight(1f),
+                                                )
+                                            } ?: Spacer(Modifier.weight(1f))
 
-                                state.nextPage?.let { next ->
-                                    PageNavCard(
-                                        label = "下一节",
-                                        title = next.name,
-                                        isNext = true,
-                                        onClick = { vm.openPage(next) },
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                } ?: Spacer(Modifier.weight(1f))
+                                            state.nextPage?.let { next ->
+                                                PageNavCard(
+                                                    label = "下一节",
+                                                    title = next.name,
+                                                    isNext = true,
+                                                    onClick = { vm.openPage(next) },
+                                                    modifier = Modifier.weight(1f),
+                                                )
+                                            } ?: Spacer(Modifier.weight(1f))
+                                        }
+                                        Spacer(Modifier.height(20.dp))
+                                    }
+                                }
                             }
                         }
-
-                        Spacer(Modifier.height(24.dp))
                     }
                 }
 
@@ -380,11 +410,18 @@ fun ExamDocsPage(
             sheetState = sheetState,
         ) {
             ExamDocsDirectorySheetContent(
+                sites = state.sites,
+                activeSite = state.activeSite,
                 modules = state.modules,
                 selectedModuleIndex = state.selectedModuleIndex,
                 currentPageUrl = state.currentPage?.url,
                 searchQuery = state.searchQuery,
                 searchResults = state.searchResults,
+                onSelectSite = vm::selectSite,
+                onOpenSiteManager = {
+                    showDirectorySheet = false
+                    showSiteDialog = true
+                },
                 onSelectModule = vm::selectModule,
                 onSearchQueryChange = vm::updateSearchQuery,
                 onSelectPage = { page ->
@@ -396,6 +433,10 @@ fun ExamDocsPage(
     }
 
     if (showOutlineSheet) {
+        val hasMetaRow = state.currentPage != null &&
+            ((state.currentPage?.questions ?: 0) > 0 || mdUrl != null)
+        val headerOffset = if (hasMetaRow) 1 else 0
+
         ModalBottomSheet(
             onDismissRequest = { showOutlineSheet = false },
         ) {
@@ -415,22 +456,19 @@ fun ExamDocsPage(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(320.dp),
+                        .height(340.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     items(state.headings) { heading ->
                         val indent = ((heading.level - 1).coerceAtLeast(0) * 14).dp
-                        val totalLines = (state.markdownContent?.lines()?.size ?: 1).coerceAtLeast(1)
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerLow,
                             onClick = {
                                 showOutlineSheet = false
-                                val fraction = (heading.lineIndex.toFloat() / totalLines.toFloat())
-                                    .coerceIn(0f, 1f)
-                                val targetPx = (contentScrollState.maxValue * fraction).toInt()
+                                val targetIndex = (heading.segmentIndex + headerOffset).coerceAtLeast(0)
                                 scope.launch {
-                                    contentScrollState.animateScrollTo(targetPx)
+                                    listState.animateScrollToItem(targetIndex)
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
@@ -454,191 +492,226 @@ fun ExamDocsPage(
         }
     }
 
-    if (showUrlDialog) {
-        ExamDocsBaseUrlDialog(
-            currentUrl = state.baseUrl,
-            onDismiss = { showUrlDialog = false },
-            onConfirm = { newUrl ->
-                showUrlDialog = false
-                vm.updateBaseUrl(newUrl)
+    if (showSiteDialog) {
+        ExamDocsSiteManagerDialog(
+            sites = state.sites,
+            activeSite = state.activeSite,
+            onDismiss = { showSiteDialog = false },
+            onSelectSite = { siteId ->
+                showSiteDialog = false
+                vm.selectSite(siteId)
+            },
+            onSaveSite = { id, name, baseUrl ->
+                vm.upsertSite(id, name, baseUrl)
+            },
+            onDeleteSite = { siteId ->
+                vm.deleteSite(siteId)
+            },
+            onResetDefaults = {
+                vm.resetDefaultSites()
             },
         )
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun TopDocsNavBar(
-    modules: List<ExamDocNode.Folder>,
-    selectedModuleIndex: Int,
-    currentPage: ExamDocNode.Page?,
-    breadcrumb: List<String>,
-    hasHeadings: Boolean,
-    onSelectModule: (Int) -> Unit,
-    onOpenDirectory: () -> Unit,
-    onOpenOutline: () -> Unit,
+private fun ExamDocsMoreMenu(
+    canCopyLink: Boolean,
+    onRefresh: () -> Unit,
+    onCopyLink: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+    var expanded by remember { mutableStateOf(false) }
+
+    @Composable
+    fun MenuItem(
+        text: String,
+        icon: ImageVector,
+        index: Int,
+        count: Int,
+        enabled: Boolean = true,
+        onClick: () -> Unit,
     ) {
-        if (modules.isNotEmpty()) {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                itemsIndexed(modules) { index, module ->
-                    val selected = index == selectedModuleIndex
-                    Surface(
-                        onClick = { onSelectModule(index) },
-                        shape = CircleShape,
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            CustomColors.listItemColors.containerColor
-                        },
-                        border = BorderStroke(
-                            1.dp,
-                            if (selected) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-                            } else {
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                            },
-                        ),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = module.name,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selected) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                                maxLines = 1,
-                            )
-                            if (module.questions > 0) {
-                                Text(
-                                    text = "${module.questions}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (selected) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+        DropdownMenuItem(
+            text = { Text(text) },
+            onClick = {
+                expanded = false
+                onClick()
+            },
+            shape = MenuDefaults.itemShape(index = index, count = count).shape,
+            leadingIcon = { Icon(icon, contentDescription = null) },
+            enabled = enabled,
+            colors = MenuDefaults.itemColors(),
+        )
+    }
+
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(HugeIcons.MoreVertical, contentDescription = "更多选项")
         }
-
-        // 窄屏面包屑目录栏
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        DropdownMenuPopup(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
         ) {
-            Surface(
-                onClick = onOpenDirectory,
-                shape = RoundedCornerShape(14.dp),
-                color = CustomColors.listItemColors.containerColor,
-                border = BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                ),
-                modifier = Modifier.weight(1f),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Icon(
-                        imageVector = HugeIcons.Book02,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    val pathText = if (breadcrumb.isNotEmpty() && currentPage != null) {
-                        (breadcrumb + currentPage.name).joinToString(" › ")
-                    } else {
-                        currentPage?.name ?: "选择文档目录"
-                    }
-                    Text(
-                        text = pathText,
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Icon(
-                        imageVector = HugeIcons.ArrowDown01,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            DropdownMenuGroup(shapes = MenuDefaults.groupShape(index = 0, count = 2)) {
+                MenuItem(
+                    text = "重新加载",
+                    icon = HugeIcons.Refresh03,
+                    index = 0,
+                    count = 2,
+                    onClick = onRefresh,
+                )
+                MenuItem(
+                    text = "复制 .md 链接",
+                    icon = HugeIcons.Copy01,
+                    index = 1,
+                    count = 2,
+                    enabled = canCopyLink,
+                    onClick = onCopyLink,
+                )
             }
-
-            if (hasHeadings) {
-                Surface(
-                    onClick = onOpenOutline,
-                    shape = RoundedCornerShape(14.dp),
-                    color = CustomColors.listItemColors.containerColor,
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                    ),
-                ) {
-                    Text(
-                        text = "大纲",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    )
-                }
+            Spacer(Modifier.height(MenuDefaults.GroupSpacing))
+            DropdownMenuGroup(shapes = MenuDefaults.groupShape(index = 1, count = 2)) {
+                MenuItem(
+                    text = "站点管理",
+                    icon = HugeIcons.Settings03,
+                    index = 0,
+                    count = 1,
+                    onClick = onOpenSettings,
+                )
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ExamDocsDirectorySheetContent(
+    sites: List<ExamDocSite>,
+    activeSite: ExamDocSite,
     modules: List<ExamDocNode.Folder>,
     selectedModuleIndex: Int,
     currentPageUrl: String?,
     searchQuery: String,
-    searchResults: List<me.rerere.rikkahub.data.examdocs.ExamDocFlatEntry>,
+    searchResults: List<ExamDocFlatEntry>,
+    onSelectSite: (String) -> Unit,
+    onOpenSiteManager: () -> Unit,
     onSelectModule: (Int) -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onSelectPage: (ExamDocNode.Page) -> Unit,
 ) {
     val expandedFolders = remember { mutableStateMapOf<String, Boolean>() }
+    var siteMenuExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .fillMaxHeight(0.86f)
             .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
             text = "文档目录",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
         )
+
+        // 站点选择下拉菜单（位于搜索框上方）
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Surface(
+                onClick = { siteMenuExpanded = true },
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(
+                        imageVector = HugeIcons.Book02,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = activeSite.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = activeSite.baseUrl.removePrefix("https://").removePrefix("http://"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Icon(
+                        imageVector = HugeIcons.ArrowDown01,
+                        contentDescription = "切换站点",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            DropdownMenuPopup(
+                expanded = siteMenuExpanded,
+                onDismissRequest = { siteMenuExpanded = false },
+            ) {
+                DropdownMenuGroup(shapes = MenuDefaults.groupShape(index = 0, count = 2)) {
+                    sites.forEachIndexed { index, site ->
+                        val selected = site.id == activeSite.id
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text = site.name,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                    )
+                                    Text(
+                                        text = site.baseUrl.removePrefix("https://").removePrefix("http://"),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                siteMenuExpanded = false
+                                onSelectSite(site.id)
+                            },
+                            shape = MenuDefaults.itemShape(index = index, count = sites.size).shape,
+                            colors = MenuDefaults.itemColors(),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(MenuDefaults.GroupSpacing))
+                DropdownMenuGroup(shapes = MenuDefaults.groupShape(index = 1, count = 2)) {
+                    DropdownMenuItem(
+                        text = { Text("管理站点...") },
+                        leadingIcon = { Icon(HugeIcons.Settings03, contentDescription = null) },
+                        onClick = {
+                            siteMenuExpanded = false
+                            onOpenSiteManager()
+                        },
+                        shape = MenuDefaults.itemShape(index = 0, count = 1).shape,
+                        colors = MenuDefaults.itemColors(),
+                    )
+                }
+            }
+        }
 
         OutlinedTextField(
             value = searchQuery,
@@ -754,7 +827,7 @@ private fun ExamDocsDirectorySheetContent(
                     items(activeModule.children) { node ->
                         DirectoryTreeNode(
                             node = node,
-                            pathKey = "${activeModule.name}/${node.name}",
+                            pathKey = "${activeSite.id}/${activeModule.name}/${node.name}",
                             depth = 0,
                             currentPageUrl = currentPageUrl,
                             expandedFolders = expandedFolders,
@@ -995,7 +1068,7 @@ private fun ErrorStateView(
     message: String,
     onRetry: () -> Unit,
     onEditUrl: () -> Unit,
-    secondaryLabel: String = "修改站点地址",
+    secondaryLabel: String = "站点管理",
 ) {
     Box(
         modifier = Modifier
@@ -1031,46 +1104,189 @@ private fun ErrorStateView(
 }
 
 @Composable
-private fun ExamDocsBaseUrlDialog(
-    currentUrl: String,
+private fun ExamDocsSiteManagerDialog(
+    sites: List<ExamDocSite>,
+    activeSite: ExamDocSite,
     onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
+    onSelectSite: (String) -> Unit,
+    onSaveSite: (id: String?, name: String, baseUrl: String) -> Unit,
+    onDeleteSite: (String) -> Unit,
+    onResetDefaults: () -> Unit,
 ) {
-    var text by remember(currentUrl) { mutableStateOf(currentUrl) }
+    var editingSiteId by remember { mutableStateOf<String?>(null) }
+    var showAddForm by remember { mutableStateOf(false) }
+    var nameInput by remember { mutableStateOf("") }
+    var urlInput by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Exam Docs 站点地址") },
+        title = { Text("文档站点管理") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "输入部署的 exam-docs 站点根地址（自动请求 /doc-sources.json 与 .md 文档）。",
+                    text = "可切换 Exam Docs、Study Docs 或添加自定义 Fumadocs 站点（请求 /doc-sources.json 与 .android.md / .md）。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    singleLine = true,
-                    label = { Text("Base URL") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                TextButton(
-                    onClick = { text = DEFAULT_EXAM_DOCS_BASE_URL },
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(210.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Text("恢复默认地址")
+                    items(sites, key = { it.id }) { site ->
+                        val isActive = site.id == activeSite.id
+                        Surface(
+                            onClick = { onSelectSite(site.id) },
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isActive) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerLow
+                            },
+                            border = BorderStroke(
+                                1.dp,
+                                if (isActive) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                } else {
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                },
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = site.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isActive) {
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
+                                    )
+                                    Text(
+                                        text = site.baseUrl.removePrefix("https://").removePrefix("http://"),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        editingSiteId = site.id
+                                        nameInput = site.name
+                                        urlInput = site.baseUrl
+                                        showAddForm = true
+                                    },
+                                    modifier = Modifier.size(32.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = HugeIcons.Edit03,
+                                        contentDescription = "编辑",
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                                if (!site.isBuiltIn) {
+                                    IconButton(
+                                        onClick = { onDeleteSite(site.id) },
+                                        modifier = Modifier.size(32.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = HugeIcons.Delete01,
+                                            contentDescription = "删除",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (showAddForm) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = nameInput,
+                            onValueChange = { nameInput = it },
+                            singleLine = true,
+                            label = { Text("站点名称") },
+                            placeholder = { Text("例如：Study Docs") },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = urlInput,
+                            onValueChange = { urlInput = it },
+                            singleLine = true,
+                            label = { Text("站点地址 (Base URL)") },
+                            placeholder = { Text("https://...") },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    showAddForm = false
+                                    editingSiteId = null
+                                },
+                            ) {
+                                Text("取消编辑")
+                            }
+                            Button(
+                                enabled = urlInput.isNotBlank(),
+                                onClick = {
+                                    onSaveSite(editingSiteId, nameInput, urlInput)
+                                    showAddForm = false
+                                    editingSiteId = null
+                                    nameInput = ""
+                                    urlInput = ""
+                                },
+                            ) {
+                                Text(if (editingSiteId == null) "添加并切换" else "保存")
+                            }
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        TextButton(onClick = onResetDefaults) {
+                            Text("恢复默认")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                editingSiteId = null
+                                nameInput = ""
+                                urlInput = ""
+                                showAddForm = true
+                            },
+                        ) {
+                            Icon(
+                                imageVector = HugeIcons.Add01,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.size(6.dp))
+                            Text("添加站点")
+                        }
+                    }
                 }
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(text) }) {
-                Text("保存并加载")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
+            Button(onClick = onDismiss) {
+                Text("完成")
             }
         },
     )

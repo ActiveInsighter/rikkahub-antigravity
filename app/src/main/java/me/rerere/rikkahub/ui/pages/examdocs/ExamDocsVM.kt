@@ -3,18 +3,24 @@ package me.rerere.rikkahub.ui.pages.examdocs
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.examdocs.ExamDocFlatEntry
 import me.rerere.rikkahub.data.examdocs.ExamDocNode
+import me.rerere.rikkahub.data.examdocs.ExamDocSite
 import me.rerere.rikkahub.data.examdocs.ExamDocsRepository
+import java.util.concurrent.ConcurrentHashMap
 
 @Immutable
 data class ExamDocsUiState(
-    val baseUrl: String = "",
+    val sites: List<ExamDocSite> = emptyList(),
+    val activeSite: ExamDocSite = ExamDocsRepository.defaultSites().first(),
+    val baseUrl: String = activeSite.baseUrl,
     val isLoadingTree: Boolean = true,
     val treeError: String? = null,
     val modules: List<ExamDocNode.Folder> = emptyList(),
@@ -23,7 +29,9 @@ data class ExamDocsUiState(
     val currentBreadcrumb: List<String> = emptyList(),
     val isLoadingContent: Boolean = false,
     val contentError: String? = null,
-    val markdownContent: String? = null,
+    val parsedDoc: ParsedExamDocsContent? = null,
+    val resolvedMarkdownUrl: String? = null,
+    val isAndroidFormat: Boolean = false,
     val headings: List<DocHeading> = emptyList(),
     val prevPage: ExamDocNode.Page? = null,
     val nextPage: ExamDocNode.Page? = null,
@@ -36,13 +44,22 @@ class ExamDocsVM(
     private val repository: ExamDocsRepository,
 ) : ViewModel() {
 
+    private val initialSites = repository.getSites()
+    private val initialActiveSite = repository.getActiveSite()
+
     private val _uiState = MutableStateFlow(
-        ExamDocsUiState(baseUrl = repository.getSavedBaseUrl())
+        ExamDocsUiState(
+            sites = initialSites,
+            activeSite = initialActiveSite,
+            baseUrl = initialActiveSite.baseUrl,
+        )
     )
     val uiState = _uiState.asStateFlow()
 
     private var flatEntries: List<ExamDocFlatEntry> = emptyList()
     private var loadContentJob: Job? = null
+    private var loadTreeJob: Job? = null
+    private val parsedCache = ConcurrentHashMap<String, ParsedExamDocsContent>()
 
     init {
         loadTree(forceRefresh = false, targetUrl = initialUrl)
@@ -52,20 +69,25 @@ class ExamDocsVM(
         forceRefresh: Boolean = false,
         targetUrl: String? = null,
     ) {
-        val baseUrl = _uiState.value.baseUrl
-        viewModelScope.launch {
+        loadTreeJob?.cancel()
+        val site = _uiState.value.activeSite
+        val baseUrl = site.baseUrl
+        loadTreeJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoadingTree = true, treeError = null) }
             repository.fetchSourceTree(baseUrl = baseUrl, forceRefresh = forceRefresh)
                 .onSuccess { modules ->
-                    flatEntries = ExamDocsRepository.flattenPages(modules)
+                    val flattened = withContext(Dispatchers.Default) {
+                        ExamDocsRepository.flattenPages(modules)
+                    }
+                    flatEntries = flattened
                     val desiredUrl = targetUrl
                         ?: _uiState.value.currentPage?.url
-                        ?: repository.getLastPageUrl()
+                        ?: repository.getLastPageUrl(site.id)
 
                     val matchedEntry = desiredUrl?.let { raw ->
                         val normalized = ExamDocsRepository.normalizeDocPath(raw)
-                        flatEntries.firstOrNull { it.page.url == normalized }
-                    } ?: flatEntries.firstOrNull()
+                        flattened.firstOrNull { it.page.url == normalized }
+                    } ?: flattened.firstOrNull()
 
                     _uiState.update { state ->
                         state.copy(
@@ -135,21 +157,59 @@ class ExamDocsVM(
         updateSearchResults(query)
     }
 
-    fun updateBaseUrl(newBaseUrl: String) {
-        val saved = repository.saveBaseUrl(newBaseUrl)
+    fun selectSite(siteId: String) {
+        val currentId = _uiState.value.activeSite.id
+        if (currentId == siteId) return
+        val selected = repository.selectSite(siteId)
+        switchToSite(selected, forceRefresh = false)
+    }
+
+    fun upsertSite(id: String?, name: String, baseUrl: String) {
+        val saved = repository.upsertSite(id = id, name = name, baseUrl = baseUrl)
+        switchToSite(saved, forceRefresh = true)
+    }
+
+    fun deleteSite(siteId: String) {
+        val wasActive = _uiState.value.activeSite.id == siteId
+        val updatedSites = repository.deleteSite(siteId)
+        val active = repository.getActiveSite()
+        _uiState.update { it.copy(sites = updatedSites) }
+        if (wasActive) {
+            switchToSite(active, forceRefresh = false)
+        }
+    }
+
+    fun resetDefaultSites() {
+        val defaults = repository.resetDefaultSites()
+        val active = defaults.first()
+        _uiState.update { it.copy(sites = defaults) }
+        switchToSite(active, forceRefresh = true)
+    }
+
+    private fun switchToSite(site: ExamDocSite, forceRefresh: Boolean) {
+        loadContentJob?.cancel()
+        flatEntries = emptyList()
         _uiState.update {
             it.copy(
-                baseUrl = saved,
+                sites = repository.getSites(),
+                activeSite = site,
+                baseUrl = site.baseUrl,
                 modules = emptyList(),
+                selectedModuleIndex = 0,
                 currentPage = null,
                 currentBreadcrumb = emptyList(),
-                markdownContent = null,
+                parsedDoc = null,
+                resolvedMarkdownUrl = null,
+                isAndroidFormat = false,
                 headings = emptyList(),
                 prevPage = null,
                 nextPage = null,
+                searchQuery = "",
+                searchResults = emptyList(),
+                contentError = null,
             )
         }
-        loadTree(forceRefresh = true)
+        loadTree(forceRefresh = forceRefresh, targetUrl = null)
     }
 
     private fun updateSearchResults(query: String) {
@@ -170,10 +230,12 @@ class ExamDocsVM(
         val index = flatEntries.indexOf(entry)
         val prev = if (index > 0) flatEntries[index - 1].page else null
         val next = if (index >= 0 && index + 1 < flatEntries.size) flatEntries[index + 1].page else null
+        val siteId = _uiState.value.activeSite.id
 
-        repository.saveLastPageUrl(entry.page.url)
+        repository.saveLastPageUrl(entry.page.url, siteId = siteId)
         _uiState.update {
             it.copy(
+                sites = repository.getSites(),
                 selectedModuleIndex = entry.moduleIndex,
                 currentPage = entry.page,
                 currentBreadcrumb = entry.breadcrumb,
@@ -197,9 +259,11 @@ class ExamDocsVM(
             name = titleFallback ?: normalized.substringAfterLast('/').ifBlank { "文档" },
             url = normalized,
         )
-        repository.saveLastPageUrl(normalized)
+        val siteId = _uiState.value.activeSite.id
+        repository.saveLastPageUrl(normalized, siteId = siteId)
         _uiState.update {
             it.copy(
+                sites = repository.getSites(),
                 currentPage = page,
                 currentBreadcrumb = emptyList(),
                 prevPage = null,
@@ -216,15 +280,24 @@ class ExamDocsVM(
         val baseUrl = _uiState.value.baseUrl
         loadContentJob = viewModelScope.launch {
             repository.fetchMarkdown(baseUrl = baseUrl, pageUrl = pageUrl, forceRefresh = forceRefresh)
-                .onSuccess { rawMarkdown ->
-                    val processed = preprocessExamDocsMarkdown(rawMarkdown)
-                    val headings = extractDocHeadings(processed)
+                .onSuccess { fetchResult ->
+                    val cacheKey = fetchResult.resolvedUrl
+                    val parsed = if (!forceRefresh) {
+                        parsedCache[cacheKey]
+                    } else {
+                        null
+                    } ?: withContext(Dispatchers.Default) {
+                        parseExamDocsDocument(fetchResult.content)
+                    }.also { parsedCache[cacheKey] = it }
+
                     _uiState.update {
                         it.copy(
                             isLoadingContent = false,
                             contentError = null,
-                            markdownContent = rawMarkdown,
-                            headings = headings,
+                            parsedDoc = parsed,
+                            resolvedMarkdownUrl = fetchResult.resolvedUrl,
+                            isAndroidFormat = fetchResult.isAndroidFormat,
+                            headings = parsed.headings,
                         )
                     }
                 }

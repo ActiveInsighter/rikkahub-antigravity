@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.examdocs
 
 import me.rerere.rikkahub.ui.pages.examdocs.ExamDocsSegment
 import me.rerere.rikkahub.ui.pages.examdocs.extractDocHeadings
+import me.rerere.rikkahub.ui.pages.examdocs.parseExamDocsDocument
 import me.rerere.rikkahub.ui.pages.examdocs.parseExamDocsSegments
 import me.rerere.rikkahub.ui.pages.examdocs.preprocessExamDocsMarkdown
 import me.rerere.rikkahub.ui.pages.examdocs.resolveExamDocsUrl
@@ -101,5 +102,54 @@ class ExamDocsTest {
             "$base/docs/math/fig.png",
             resolveExamDocsUrl(base, "/docs/math/01", "fig.png"),
         )
+    }
+
+    @Test
+    fun buildAndroidMarkdownUrl_andDefaultSites_workAsExpected() {
+        assertEquals(
+            "https://exam-docs.2212148739lbw.workers.dev/docs/math.android.md",
+            ExamDocsRepository.buildAndroidMarkdownUrl(
+                "https://exam-docs.2212148739lbw.workers.dev/",
+                "/docs/math/",
+            ),
+        )
+        val defaults = ExamDocsRepository.defaultSites()
+        assertEquals(2, defaults.size)
+        assertEquals("Exam Docs", defaults[0].name)
+        assertEquals("Study Docs", defaults[1].name)
+        assertEquals(DEFAULT_STUDY_DOCS_BASE_URL, defaults[1].baseUrl)
+    }
+
+    @Test
+    fun parseExamDocsDocument_chunksHeadingsAndQuestionSolutionBlocks() {
+        val raw = """
+            # 第一章
+
+            正文段落。
+
+            ## 题目练习
+
+            :::question 题目 1 · 单选题
+            题干内容
+            :::
+
+            :::solution 答案：A
+            解析内容
+            :::
+        """.trimIndent()
+
+        val parsed = parseExamDocsDocument(raw)
+        assertEquals(2, parsed.headings.size)
+        assertEquals("第一章", parsed.headings[0].title)
+        assertEquals(0, parsed.headings[0].segmentIndex)
+        assertEquals("题目练习", parsed.headings[1].title)
+        assertEquals(1, parsed.headings[1].segmentIndex)
+
+        assertEquals(4, parsed.segments.size)
+        val q = parsed.segments[2] as ExamDocsSegment.CustomBlock
+        assertEquals("question", q.type)
+        val s = parsed.segments[3] as ExamDocsSegment.CustomBlock
+        assertEquals("solution", s.type)
+        assertEquals("答案：A", s.title)
     }
 }
