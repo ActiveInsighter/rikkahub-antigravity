@@ -53,11 +53,12 @@ private fun parseDirectiveHeader(rawRest: String?): Pair<Map<String, String>, St
 
 fun prepareExamDocsDocument(raw: String, sourceUrl: String, legacy: Boolean): ExamDocsDocument {
     val normalized = raw.replace("\r\n", "\n").replace('\r', '\n').removePrefix("\uFEFF")
-    val markdown = if (legacy && legacyHeader.matches(normalized.substringBefore('\n'))) {
+    val stripped = if (legacy && legacyHeader.matches(normalized.substringBefore('\n'))) {
         normalized.substringAfter('\n', "").trimStart('\n')
     } else {
         normalized
     }
+    val markdown = normalizeExamDocsMarkdown(stripped)
     val blocks = parseExamDocsSegments(markdown)
     val anchors = mutableSetOf<String>()
     val headings = blocks.mapIndexedNotNull { index, segment ->
@@ -143,10 +144,87 @@ fun getExamDocsLink(baseUrl: String, currentPageUrl: String, rawUrl: String): Ex
 }
 
 fun resolveExamDocsUrl(baseUrl: String, currentPageUrl: String, rawUrl: String): String {
-    val link = rawUrl.trim()
-    val base = "$baseUrl$currentPageUrl".toHttpUrl()
+    val link = rawUrl.trim().removePrefix("<").removeSuffix(">").trim()
+    val cleanBase = baseUrl.trimEnd('/')
+    val base = "$cleanBase$currentPageUrl".toHttpUrl()
     if (link.startsWith('/') && !link.startsWith("//")) {
-        return base.resolve("$baseUrl$link")?.toString() ?: link
+        return base.resolve("$cleanBase$link")?.toString() ?: link
     }
     return base.resolve(link)?.toString() ?: link
+}
+
+private val htmlImgTagRegex = Regex("""<(?:img|Image)\b([^>]*?)/?>""", RegexOption.IGNORE_CASE)
+private val htmlAttrSrcRegex = Regex("""\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')""", RegexOption.IGNORE_CASE)
+private val htmlAttrAltRegex = Regex("""\balt\s*=\s*(?:"([^"]*)"|'([^']*)')""", RegexOption.IGNORE_CASE)
+private val displayBracketMathRegex = Regex("""\\\[([\s\S]*?)\\\]""")
+private val inlineParenMathRegex = Regex("""\\\(([\s\S]*?)\\\)""")
+
+internal fun normalizeExamDocsMarkdown(markdown: String): String {
+    val lines = markdown.lines()
+    val out = StringBuilder(markdown.length + 32)
+    var fence: String? = null
+    lines.forEachIndexed { idx, line ->
+        val match = codeFence.matchEntire(line)
+        val marker = match?.groupValues?.get(1)
+        val current = fence
+        val transformed = when {
+            current != null -> {
+                if (marker != null && marker.first() == current.first() &&
+                    marker.length >= current.length && match?.groupValues?.get(2).isNullOrBlank()
+                ) {
+                    fence = null
+                }
+                line
+            }
+            marker != null -> {
+                fence = marker
+                line
+            }
+            else -> normalizeOutsideInlineCode(line)
+        }
+        if (idx > 0) out.append('\n')
+        out.append(transformed)
+    }
+    return out.toString()
+}
+
+private fun normalizeOutsideInlineCode(line: String): String {
+    if (!line.contains('<') && !line.contains('\\')) return line
+    val result = StringBuilder(line.length)
+    var i = 0
+    while (i < line.length) {
+        if (line[i] == '`') {
+            var ticks = 0
+            while (i + ticks < line.length && line[i + ticks] == '`') ticks++
+            val closeIdx = line.indexOf("`".repeat(ticks), i + ticks)
+            if (closeIdx >= 0) {
+                result.append(line, i, closeIdx + ticks)
+                i = closeIdx + ticks
+                continue
+            }
+        }
+        val nextTick = line.indexOf('`', i).let { if (it < 0) line.length else it }
+        var chunk = line.substring(i, nextTick)
+        if (chunk.contains('<')) {
+            chunk = htmlImgTagRegex.replace(chunk) { m ->
+                val attrs = m.groupValues[1]
+                val srcMatch = htmlAttrSrcRegex.find(attrs)
+                val src = srcMatch?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } }?.trim()
+                if (src.isNullOrEmpty()) {
+                    m.value
+                } else {
+                    val altMatch = htmlAttrAltRegex.find(attrs)
+                    val alt = altMatch?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } }?.trim().orEmpty()
+                    "![$alt](<$src>)"
+                }
+            }
+        }
+        if (chunk.contains("\\(") || chunk.contains("\\[")) {
+            chunk = displayBracketMathRegex.replace(chunk) { "\n$$\n${it.groupValues[1].trim()}\n$$\n" }
+            chunk = inlineParenMathRegex.replace(chunk) { "$${it.groupValues[1].trim()}$" }
+        }
+        result.append(chunk)
+        i = nextTick
+    }
+    return result.toString()
 }

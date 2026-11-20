@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -134,12 +135,14 @@ fun HighlightCodeBlock(
     }
 
     val containerShape = RoundedCornerShape(14.dp)
-    val containerColor = if (darkMode) Color(0xFF242424) else Color(0xFFF2F2F2)
+    val containerColor = if (darkMode) Color(0xFF1E1F22) else Color(0xFFF6F7F8)
+    val borderColor = if (darkMode) Color(0xFF2C2E33) else Color(0xFFE6E8EB)
 
     Column(
         modifier = modifier
             .clip(containerShape)
-            .background(containerColor),
+            .background(containerColor)
+            .border(0.6.dp, borderColor, containerShape),
     ) {
         Box(
             modifier = Modifier

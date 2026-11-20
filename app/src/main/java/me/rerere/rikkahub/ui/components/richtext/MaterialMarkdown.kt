@@ -195,10 +195,15 @@ object MaterialMarkdownDefaults {
     /** 不带语法高亮的代码块 */
     @Composable
     fun CodeBlock(block: MarkdownBlock.CodeBlock, modifier: Modifier = Modifier) {
+        val darkMode = me.rerere.rikkahub.ui.theme.LocalDarkMode.current
         Surface(
             modifier = modifier.fillMaxWidth(),
             shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = if (darkMode) androidx.compose.ui.graphics.Color(0xFF1E1F22) else androidx.compose.ui.graphics.Color(0xFFF6F7F8),
+            border = BorderStroke(
+                0.6.dp,
+                if (darkMode) androidx.compose.ui.graphics.Color(0xFF2C2E33) else androidx.compose.ui.graphics.Color(0xFFE6E8EB),
+            ),
         ) {
             Column(
                 modifier = Modifier.padding(12.dp),

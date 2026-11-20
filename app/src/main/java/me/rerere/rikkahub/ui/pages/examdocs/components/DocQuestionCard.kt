@@ -1,6 +1,11 @@
 package me.rerere.rikkahub.ui.pages.examdocs.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,13 +23,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,8 +44,11 @@ import androidx.compose.ui.unit.dp
 import me.rerere.bettertext.markdown.MarkdownBlock
 import me.rerere.bettertext.markdown.plainText
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.AlertCircle
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.CheckmarkCircle02
+import me.rerere.hugeicons.stroke.Idea
+import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 
@@ -79,7 +87,7 @@ internal fun DocQuestionCard(
             it is ExamDocsSegment.CustomBlock && (it.type == "option" || it.type == "solution")
         }
     }
-    val blankCount = remember(stemBlocks) {
+    val blankCount = remember(stemBlocks, questionType) {
         if (questionType != "blank") 0
         else stemBlocks.sumOf { countBlankPlaceholders(it) }.coerceAtLeast(1)
     }
@@ -88,6 +96,7 @@ internal fun DocQuestionCard(
     var selectedOptions by rememberSaveable(stateKey) { mutableStateOf(emptySet<String>()) }
     var selectedBoolean by rememberSaveable(stateKey) { mutableStateOf<Boolean?>(null) }
     var blankInputs by rememberSaveable(stateKey) { mutableStateOf(List(blankCount) { "" }) }
+    var essayDraft by rememberSaveable(stateKey) { mutableStateOf("") }
     var submitted by rememberSaveable(stateKey) { mutableStateOf(false) }
     var showSolution by rememberSaveable(stateKey) { mutableStateOf(false) }
 
@@ -98,74 +107,74 @@ internal fun DocQuestionCard(
         }.toSet()
     }
 
+    val scheme = MaterialTheme.colorScheme
+
     Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+        shape = RoundedCornerShape(22.dp),
+        color = scheme.surfaceContainerLow,
+        border = BorderStroke(0.8.dp, scheme.outlineVariant.copy(alpha = 0.45f)),
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            // Header: Question badge, type, points, tags
+            // Header: Question number, type, points, tags
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(999.dp),
+                    color = scheme.primaryContainer,
                 ) {
                     Text(
-                        text = buildString {
-                            append("题目")
-                            if (!number.isNullOrBlank()) append(" $number")
-                        },
+                        text = if (!number.isNullOrBlank()) "题目 $number" else "巩固练习",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        color = scheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                     )
                 }
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(999.dp),
+                    color = scheme.secondaryContainer,
                 ) {
                     Text(
                         text = QUESTION_TYPE_LABELS[questionType] ?: questionType,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        color = scheme.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                     )
                 }
                 if (!points.isNullOrBlank()) {
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        shape = RoundedCornerShape(999.dp),
+                        color = scheme.tertiaryContainer,
                     ) {
                         Text(
                             text = "${points}分",
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            fontWeight = FontWeight.Medium,
+                            color = scheme.onTertiaryContainer,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         )
                     }
                 }
                 tags.forEach { tag ->
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(999.dp),
+                        color = scheme.surfaceContainerHigh,
                     ) {
                         Text(
                             text = tag,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            color = scheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
                         )
                     }
                 }
@@ -173,10 +182,12 @@ internal fun DocQuestionCard(
 
             // Stem
             if (stemBlocks.isNotEmpty()) {
-                renderChildren(stemBlocks)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    renderChildren(stemBlocks)
+                }
             }
 
-            // Interactive body by question type
+            // Interactive Body
             when {
                 (questionType == "single" || questionType == "multiple") && options.isNotEmpty() -> {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -186,6 +197,7 @@ internal fun DocQuestionCard(
                             val isCorrect = label in correctLabels
                             QuestionOptionItem(
                                 label = label,
+                                isMultiple = questionType == "multiple",
                                 isSelected = isSelected,
                                 isCorrect = isCorrect,
                                 submitted = submitted,
@@ -203,6 +215,7 @@ internal fun DocQuestionCard(
                         }
                     }
                 }
+
                 questionType == "boolean" -> {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -211,150 +224,202 @@ internal fun DocQuestionCard(
                         listOf(true to "正确", false to "错误").forEach { (value, label) ->
                             val isSelected = selectedBoolean == value
                             val isCorrectChoice = booleanAnswer == value
-                            val containerColor = when {
-                                submitted && isCorrectChoice -> MaterialTheme.colorScheme.primaryContainer
-                                submitted && isSelected && !isCorrectChoice -> MaterialTheme.colorScheme.errorContainer
-                                isSelected -> MaterialTheme.colorScheme.secondaryContainer
-                                else -> MaterialTheme.colorScheme.surfaceContainerHigh
+                            val targetContainer = when {
+                                submitted && isCorrectChoice -> scheme.primaryContainer
+                                submitted && isSelected && !isCorrectChoice -> scheme.errorContainer
+                                isSelected -> scheme.secondaryContainer
+                                else -> scheme.surface
                             }
+                            val targetBorder = when {
+                                submitted && isCorrectChoice -> scheme.primary
+                                submitted && isSelected && !isCorrectChoice -> scheme.error
+                                isSelected -> scheme.primary
+                                else -> scheme.outlineVariant.copy(alpha = 0.5f)
+                            }
+                            val containerColor by animateColorAsState(targetContainer, label = "boolBg")
+                            val borderColor by animateColorAsState(targetBorder, label = "boolBorder")
+
                             Surface(
                                 onClick = {
                                     if (!submitted) {
                                         selectedBoolean = value
-                                        submitted = true
                                     }
                                 },
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 color = containerColor,
-                                border = if (isSelected) {
-                                    BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
-                                } else {
-                                    BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                                },
+                                border = BorderStroke(
+                                    if (isSelected || (submitted && isCorrectChoice)) 1.5.dp else 0.8.dp,
+                                    borderColor,
+                                ),
                                 modifier = Modifier.weight(1f),
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(vertical = 10.dp),
+                                    modifier = Modifier.padding(vertical = 12.dp),
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Icon(
                                         imageVector = if (value) HugeIcons.Tick01 else HugeIcons.Cancel01,
                                         contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
+                                        tint = when {
+                                            submitted && isCorrectChoice -> scheme.primary
+                                            submitted && isSelected && !isCorrectChoice -> scheme.error
+                                            isSelected -> scheme.primary
+                                            else -> scheme.onSurfaceVariant
+                                        },
+                                        modifier = Modifier.size(18.dp),
                                     )
                                     Spacer(Modifier.size(6.dp))
-                                    Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = when {
+                                            submitted && isCorrectChoice -> scheme.onPrimaryContainer
+                                            submitted && isSelected && !isCorrectChoice -> scheme.onErrorContainer
+                                            isSelected -> scheme.onSecondaryContainer
+                                            else -> scheme.onSurface
+                                        },
+                                    )
                                 }
                             }
                         }
                     }
                 }
+
                 questionType == "blank" -> {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         blankInputs.forEachIndexed { idx, value ->
                             OutlinedTextField(
                                 value = value,
                                 onValueChange = { updated ->
-                                    blankInputs = blankInputs.toMutableList().also { it[idx] = updated }
+                                    if (!submitted) {
+                                        blankInputs = blankInputs.toMutableList().also { it[idx] = updated }
+                                    }
                                 },
+                                readOnly = submitted,
                                 label = { Text("第 ${idx + 1} 空") },
                                 singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
                     }
                 }
+
+                questionType == "essay" -> {
+                    OutlinedTextField(
+                        value = essayDraft,
+                        onValueChange = { essayDraft = it },
+                        label = { Text("我的作答 / 解题思路（可选）") },
+                        placeholder = { Text("先独立思考或记录要点，再对照参考解析自评。") },
+                        minLines = 3,
+                        maxLines = 6,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
 
-            // Action bar
+            // Action Bar
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (questionType == "single" || questionType == "multiple" || questionType == "blank") {
-                    if (!submitted) {
-                        Button(
-                            onClick = {
-                                submitted = true
-                                showSolution = true
-                            },
-                            enabled = when (questionType) {
-                                "single", "multiple" -> selectedOptions.isNotEmpty()
-                                "blank" -> blankInputs.any { it.isNotBlank() }
-                                else -> true
-                            },
-                        ) {
-                            Text("核对答案")
-                        }
-                    } else {
-                        OutlinedButton(onClick = {
+                val canSubmit = when (questionType) {
+                    "single", "multiple" -> selectedOptions.isNotEmpty()
+                    "boolean" -> selectedBoolean != null
+                    "blank" -> blankInputs.any { it.isNotBlank() }
+                    else -> true
+                }
+                if (!submitted) {
+                    Button(
+                        onClick = {
+                            submitted = true
+                            showSolution = true
+                        },
+                        enabled = canSubmit,
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text(if (questionType == "essay") "查看参考解析" else "提交答案")
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = {
                             submitted = false
+                            showSolution = false
                             selectedOptions = emptySet()
                             selectedBoolean = null
-                        }) {
-                            Text("重做")
-                        }
-                    }
-                } else if (questionType == "boolean" && submitted) {
-                    OutlinedButton(onClick = {
-                        submitted = false
-                        selectedBoolean = null
-                    }) {
-                        Text("重做")
+                            blankInputs = List(blankCount) { "" }
+                            essayDraft = ""
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(HugeIcons.Refresh03, null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.size(6.dp))
+                        Text("重新作答")
                     }
                 }
 
                 Spacer(Modifier.weight(1f))
 
                 if (solutionBlock != null) {
-                    FilledTonalButton(onClick = { showSolution = !showSolution }) {
+                    FilledTonalButton(
+                        onClick = { showSolution = !showSolution },
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
                         Text(if (showSolution) "收起解析" else "查看解析")
                     }
                 }
             }
 
-            if (submitted && (questionType == "single" || questionType == "multiple") && correctLabels.isNotEmpty()) {
-                val isExact = selectedOptions == correctLabels
-                val isPartial = !isExact && selectedOptions.isNotEmpty() && selectedOptions.all { it in correctLabels }
-                val statusText = when {
-                    isExact -> "回答正确"
-                    isPartial -> "漏选（正确答案：${correctLabels.sorted().joinToString("")}）"
-                    else -> "回答有误（正确答案：${correctLabels.sorted().joinToString("")}）"
-                }
-                val statusColor = if (isExact) {
-                    MaterialTheme.colorScheme.primary
-                } else if (isPartial) {
-                    MaterialTheme.colorScheme.tertiary
-                } else {
-                    MaterialTheme.colorScheme.error
-                }
-                Text(
-                    text = statusText,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = statusColor,
+            // Verdict Banner
+            if (submitted) {
+                QuestionVerdictBanner(
+                    questionType = questionType,
+                    selectedOptions = selectedOptions,
+                    correctLabels = correctLabels,
+                    selectedBoolean = selectedBoolean,
+                    booleanAnswer = booleanAnswer,
                 )
             }
 
-            AnimatedVisibility(visible = showSolution && solutionBlock != null) {
+            // Solution Panel
+            AnimatedVisibility(
+                visible = showSolution && solutionBlock != null,
+                enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
+                exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top),
+            ) {
                 solutionBlock?.let { sol ->
                     Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f),
+                        shape = RoundedCornerShape(16.dp),
+                        color = scheme.surfaceContainer,
+                        border = BorderStroke(0.6.dp, scheme.outlineVariant.copy(alpha = 0.4f)),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Text(
-                                text = sol.title ?: "参考答案与解析",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = HugeIcons.Idea,
+                                    contentDescription = null,
+                                    tint = scheme.primary,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Text(
+                                    text = sol.title ?: "参考答案与解析",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = scheme.primary,
+                                )
+                            }
+                            HorizontalDivider(color = scheme.outlineVariant.copy(alpha = 0.35f))
                             renderChildren(sol.blocks)
                         }
                     }
@@ -365,8 +430,93 @@ internal fun DocQuestionCard(
 }
 
 @Composable
+private fun QuestionVerdictBanner(
+    questionType: String,
+    selectedOptions: Set<String>,
+    correctLabels: Set<String>,
+    selectedBoolean: Boolean?,
+    booleanAnswer: Boolean?,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val (bg, fg, icon, text) = when {
+        (questionType == "single" || questionType == "multiple") && correctLabels.isNotEmpty() -> {
+            val isExact = selectedOptions == correctLabels
+            val isPartial = !isExact && selectedOptions.isNotEmpty() && selectedOptions.all { it in correctLabels }
+            when {
+                isExact -> Quadruple(
+                    scheme.primaryContainer.copy(alpha = 0.7f),
+                    scheme.onPrimaryContainer,
+                    HugeIcons.CheckmarkCircle02,
+                    "回答正确 · 答案：${correctLabels.sorted().joinToString("")}",
+                )
+                isPartial -> Quadruple(
+                    scheme.tertiaryContainer.copy(alpha = 0.7f),
+                    scheme.onTertiaryContainer,
+                    HugeIcons.AlertCircle,
+                    "漏选 · 正确答案：${correctLabels.sorted().joinToString("")}",
+                )
+                else -> Quadruple(
+                    scheme.errorContainer.copy(alpha = 0.7f),
+                    scheme.onErrorContainer,
+                    HugeIcons.Cancel01,
+                    "回答有误 · 正确答案：${correctLabels.sorted().joinToString("")}",
+                )
+            }
+        }
+        questionType == "boolean" && booleanAnswer != null -> {
+            val isCorrect = selectedBoolean == booleanAnswer
+            val answerText = if (booleanAnswer) "正确" else "错误"
+            if (isCorrect) {
+                Quadruple(
+                    scheme.primaryContainer.copy(alpha = 0.7f),
+                    scheme.onPrimaryContainer,
+                    HugeIcons.CheckmarkCircle02,
+                    "回答正确 · 答案：$answerText",
+                )
+            } else {
+                Quadruple(
+                    scheme.errorContainer.copy(alpha = 0.7f),
+                    scheme.onErrorContainer,
+                    HugeIcons.Cancel01,
+                    "回答有误 · 正确答案：$answerText",
+                )
+            }
+        }
+        else -> Quadruple(
+            scheme.secondaryContainer.copy(alpha = 0.6f),
+            scheme.onSecondaryContainer,
+            HugeIcons.Idea,
+            "已显示参考解析，请对照自评。",
+        )
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = bg,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(17.dp))
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = fg,
+            )
+        }
+    }
+}
+
+private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+
+@Composable
 private fun QuestionOptionItem(
     label: String,
+    isMultiple: Boolean,
     isSelected: Boolean,
     isCorrect: Boolean,
     submitted: Boolean,
@@ -374,46 +524,49 @@ private fun QuestionOptionItem(
     content: @Composable () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val containerColor = when {
+    val targetContainer = when {
         submitted && isCorrect -> scheme.primaryContainer.copy(alpha = 0.65f)
         submitted && isSelected && !isCorrect -> scheme.errorContainer.copy(alpha = 0.65f)
-        isSelected -> scheme.secondaryContainer.copy(alpha = 0.7f)
+        isSelected -> scheme.secondaryContainer.copy(alpha = 0.75f)
         else -> scheme.surface
     }
-    val borderColor = when {
+    val targetBorder = when {
         submitted && isCorrect -> scheme.primary
         submitted && isSelected && !isCorrect -> scheme.error
         isSelected -> scheme.primary
         else -> scheme.outlineVariant.copy(alpha = 0.45f)
     }
+    val containerColor by animateColorAsState(targetContainer, label = "optionBg")
+    val borderColor by animateColorAsState(targetBorder, label = "optionBorder")
+    val badgeShape = if (isMultiple) RoundedCornerShape(8.dp) else CircleShape
 
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         color = containerColor,
-        border = BorderStroke(if (isSelected || (submitted && isCorrect)) 1.4.dp else 0.8.dp, borderColor),
+        border = BorderStroke(if (isSelected || (submitted && isCorrect)) 1.5.dp else 0.8.dp, borderColor),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(horizontal = 12.dp, vertical = 11.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.Top,
         ) {
             Box(
                 modifier = Modifier
-                    .size(24.dp)
-                    .clip(CircleShape)
+                    .size(26.dp)
+                    .clip(badgeShape)
                     .background(
                         when {
                             submitted && isCorrect -> scheme.primary
                             submitted && isSelected && !isCorrect -> scheme.error
                             isSelected -> scheme.primary
                             else -> scheme.surfaceContainerHigh
-                        }
+                        },
                     ),
                 contentAlignment = Alignment.Center,
             ) {
@@ -436,6 +589,13 @@ private fun QuestionOptionItem(
                     imageVector = HugeIcons.CheckmarkCircle02,
                     contentDescription = "正确",
                     tint = scheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+            } else if (submitted && isSelected && !isCorrect) {
+                Icon(
+                    imageVector = HugeIcons.Cancel01,
+                    contentDescription = "错误",
+                    tint = scheme.error,
                     modifier = Modifier.size(18.dp),
                 )
             }

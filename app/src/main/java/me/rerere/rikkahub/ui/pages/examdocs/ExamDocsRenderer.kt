@@ -88,6 +88,27 @@ internal fun rememberExamDocsRenderer(
     )
 }
 
+private val lineBreakSpacingRegex = Regex("""\\\\\s*\[\s*[^]]+\s*]""")
+private val emptyAlignedAssignRegex = Regex("""=\{\}""")
+
+private fun normalizeLatexFormula(raw: String): String {
+    var s = raw.trim()
+    if (s.isEmpty()) return s
+    s = s
+        .replace("\\lvert", "|")
+        .replace("\\rvert", "|")
+        .replace("\\lVert", "\\|")
+        .replace("\\rVert", "\\|")
+        .replace("\\dfrac", "\\frac")
+        .replace("\\tfrac", "\\frac")
+        .replace("\\cfrac", "\\frac")
+        .replace("\\displaystyle", "")
+        .replace("\\boldsymbol", "\\mathbf")
+    s = lineBreakSpacingRegex.replace(s, "\\\\")
+    s = emptyAlignedAssignRegex.replace(s, "=")
+    return s
+}
+
 private class DocMathLayouts(private val context: Context) {
     private val inline = LruCache<String, LatexLayout>(192)
     private val blocks = LruCache<String, LatexLayout>(64)
@@ -96,11 +117,12 @@ private class DocMathLayouts(private val context: Context) {
 
     fun get(formula: String, display: Boolean): LatexLayout {
         val cache = if (display) blocks else inline
-        return cache.get(formula) ?: LatexLayout.create(
-            formula,
+        val normalized = normalizeLatexFormula(formula)
+        return cache.get(normalized) ?: LatexLayout.create(
+            normalized,
             if (display) blockSettings else inlineSettings,
             context,
-        ).also { cache.put(formula, it) }
+        ).also { cache.put(normalized, it) }
     }
 
     fun prefetch(parts: List<MarkdownInline>) {
