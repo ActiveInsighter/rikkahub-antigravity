@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -34,6 +35,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -65,9 +67,9 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ArrowRight01
+import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
-import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.data.examdocs.DocHeading
@@ -101,6 +103,12 @@ fun ExamDocsPage(
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val settings = LocalSettings.current
+    val readerDisplaySetting = remember(settings.displaySetting, state.uiSettings) {
+        state.uiSettings.toDisplaySetting(settings.displaySetting)
+    }
+    val readerSettings = remember(settings, readerDisplaySetting) {
+        settings.copy(displaySetting = readerDisplaySetting)
+    }
     val toaster = LocalToaster.current
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
@@ -129,165 +137,173 @@ fun ExamDocsPage(
         }
     }
 
-    Surface(
-        color = MaterialTheme.colorScheme.background,
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        AssistantBackground(setting = settings, modifier = Modifier.hazeSource(hazeState))
-        Scaffold(
-            containerColor = Color.Transparent,
-            topBar = {
-                TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                    navigationIcon = {
-                        ChatTopBarCapsule(
-                            hazeState = hazeState,
-                            displaySetting = settings.displaySetting,
-                            showBackground = listScrolledUnderTopBar,
-                            modifier = Modifier.padding(start = 8.dp, end = 4.dp),
-                        ) {
-                            IconButton(
-                                onClick = { sheet = ReaderSheet.Directory },
-                                enabled = state.sitesReady,
+    CompositionLocalProvider(LocalSettings provides readerSettings) {
+        Surface(
+            color = MaterialTheme.colorScheme.background,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            AssistantBackground(setting = readerSettings, modifier = Modifier.hazeSource(hazeState))
+            Scaffold(
+                containerColor = Color.Transparent,
+                topBar = {
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                        navigationIcon = {
+                            ChatTopBarCapsule(
+                                hazeState = hazeState,
+                                displaySetting = readerDisplaySetting,
+                                showBackground = listScrolledUnderTopBar,
+                                modifier = Modifier.padding(start = 8.dp, end = 4.dp),
                             ) {
-                                Icon(HugeIcons.Menu03, "文档目录")
+                                IconButton(
+                                    onClick = { sheet = ReaderSheet.Directory },
+                                    enabled = state.sitesReady,
+                                ) {
+                                    Icon(HugeIcons.LeftToRightListBullet, "文档目录")
+                                }
                             }
-                        }
-                    },
-                    title = {
-                        Surface(
-                            onClick = { if (state.sitesReady) sheet = ReaderSheet.Directory },
-                            color = Color.Transparent,
-                            shape = RoundedCornerShape(16.dp),
-                        ) {
-                            Column(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
-                                Text(
-                                    page?.name ?: state.activeSite.name,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium,
-                                )
-                                if (page != null) {
-                                    val subtitle = remember(state.activeSite.name, state.currentBreadcrumb) {
-                                        (listOf(state.activeSite.name) + state.currentBreadcrumb).joinToString(" / ")
-                                    }
+                        },
+                        title = {
+                            Surface(
+                                onClick = { if (state.sitesReady) sheet = ReaderSheet.Directory },
+                                color = Color.Transparent,
+                                shape = RoundedCornerShape(16.dp),
+                            ) {
+                                Column(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
                                     Text(
-                                        subtitle,
+                                        page?.name ?: state.activeSite.name,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                    if (page != null) {
+                                        val subtitle = remember(state.activeSite.name, state.currentBreadcrumb) {
+                                            (listOf(state.activeSite.name) + state.currentBreadcrumb).joinToString(" / ")
+                                        }
+                                        Text(
+                                            subtitle,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        actions = {
+                            ChatTopBarCapsule(
+                                hazeState = hazeState,
+                                displaySetting = readerDisplaySetting,
+                                showBackground = listScrolledUnderTopBar,
+                                modifier = Modifier.padding(start = 4.dp, end = 8.dp),
+                            ) {
+                                IconButton(
+                                    onClick = { sheet = ReaderSheet.Outline },
+                                    enabled = !document?.headings.isNullOrEmpty(),
+                                ) {
+                                    Icon(HugeIcons.Book02, "本页大纲")
+                                }
+                                TopBarMoreMenu(
+                                    listOf(
+                                        TopBarMenuItem(
+                                            "重新加载",
+                                            HugeIcons.Refresh03,
+                                            vm::reload,
+                                            state.sitesReady && !state.isLoadingTree,
+                                        ),
+                                        TopBarMenuItem(
+                                            "复制链接",
+                                            HugeIcons.Copy01,
+                                            onClick = {
+                                                document?.sourceUrl?.let { url ->
+                                                    scope.launch {
+                                                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Link", url)))
+                                                        toaster.show("已复制链接", type = ToastType.Success)
+                                                    }
+                                                }
+                                            },
+                                            enabled = document != null,
+                                        ),
+                                    ),
+                                    listOf(
+                                        TopBarMenuItem(
+                                            "设置",
+                                            HugeIcons.Settings03,
+                                            { sheet = ReaderSheet.Settings },
+                                            state.sitesReady,
+                                        ),
+                                    ),
+                                    hazeState = hazeState,
+                                    displaySetting = readerDisplaySetting,
+                                )
+                            }
+                        },
+                    )
+                },
+            ) { innerPadding ->
+                Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val treeError = state.treeError
+                    val contentError = state.contentError
+                    when {
+                        state.isLoadingTree && (page == null || document == null) ->
+                            Box(Modifier.padding(innerPadding)) { ReaderLoading("正在获取文档目录…") }
+                        treeError != null -> Box(Modifier.padding(innerPadding)) {
+                            ErrorStateView(
+                                title = "无法获取文档目录",
+                                message = treeError,
+                                onRetry = vm::reload,
+                                onSecondaryAction = { sheet = ReaderSheet.Settings },
+                                secondaryLabel = "设置",
+                            )
+                        }
+                        state.isLoadingContent || (document != null && !canRenderDocument) ->
+                            Box(Modifier.padding(innerPadding)) { ReaderLoading("正在加载文档…") }
+                        contentError != null -> Box(Modifier.padding(innerPadding)) {
+                            ErrorStateView(
+                                title = "文档加载失败",
+                                message = contentError,
+                                onRetry = vm::reload,
+                                onSecondaryAction = { sheet = ReaderSheet.Directory },
+                                secondaryLabel = "打开目录",
+                            )
+                        }
+                        document != null && page != null -> {
+                            val baseTextStyle = LocalTextStyle.current
+                            val fontRatio = state.uiSettings.fontSizeRatio
+                            val scaledTextStyle = remember(baseTextStyle, fontRatio) {
+                                if (fontRatio == 1.0f) {
+                                    baseTextStyle
+                                } else {
+                                    baseTextStyle.copy(
+                                        fontSize = baseTextStyle.fontSize * fontRatio,
+                                        lineHeight = baseTextStyle.lineHeight * fontRatio,
                                     )
                                 }
                             }
-                        }
-                    },
-                    actions = {
-                        ChatTopBarCapsule(
-                            hazeState = hazeState,
-                            displaySetting = settings.displaySetting,
-                            showBackground = listScrolledUnderTopBar,
-                            modifier = Modifier.padding(start = 4.dp, end = 8.dp),
-                        ) {
-                            IconButton(
-                                onClick = { sheet = ReaderSheet.Outline },
-                                enabled = !document?.headings.isNullOrEmpty(),
-                            ) {
-                                Icon(HugeIcons.LeftToRightListBullet, "本页大纲")
+                            CompositionLocalProvider(LocalTextStyle provides scaledTextStyle) {
+                                ExamDocsArticle(
+                                    document = document,
+                                    listState = listState,
+                                    baseUrl = state.activeSite.baseUrl,
+                                    pageUrl = page.url,
+                                    hazeState = hazeState,
+                                    topPadding = innerPadding.calculateTopPadding(),
+                                    bottomPadding = innerPadding.calculateBottomPadding(),
+                                    previous = state.prevPage,
+                                    next = state.nextPage,
+                                    onPage = vm::openPage,
+                                    onLink = vm::openLink,
+                                )
                             }
-                            TopBarMoreMenu(
-                                listOf(
-                                    TopBarMenuItem(
-                                        "本页大纲",
-                                        HugeIcons.LeftToRightListBullet,
-                                        { sheet = ReaderSheet.Outline },
-                                        !document?.headings.isNullOrEmpty(),
-                                    ),
-                                    TopBarMenuItem(
-                                        "文档目录",
-                                        HugeIcons.Menu03,
-                                        { sheet = ReaderSheet.Directory },
-                                        state.sitesReady,
-                                    ),
-                                    TopBarMenuItem(
-                                        "重新加载",
-                                        HugeIcons.Refresh03,
-                                        vm::reload,
-                                        state.sitesReady && !state.isLoadingTree,
-                                    ),
-                                    TopBarMenuItem(
-                                        "复制 Markdown 链接",
-                                        HugeIcons.Copy01,
-                                        onClick = {
-                                            document?.sourceUrl?.let { url ->
-                                                scope.launch {
-                                                    clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Markdown", url)))
-                                                    toaster.show("已复制 Markdown 链接", type = ToastType.Success)
-                                                }
-                                            }
-                                        },
-                                        enabled = document != null,
-                                    ),
-                                ),
-                                listOf(
-                                    TopBarMenuItem(
-                                        "站点设置",
-                                        HugeIcons.Settings03,
-                                        { sheet = ReaderSheet.Settings },
-                                        state.sitesReady,
-                                    ),
-                                ),
-                            )
                         }
-                    },
-                )
-            },
-        ) { innerPadding ->
-            Box(
-                Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                val treeError = state.treeError
-                val contentError = state.contentError
-                when {
-                    state.isLoadingTree && (page == null || document == null) ->
-                        Box(Modifier.padding(innerPadding)) { ReaderLoading("正在获取文档目录…") }
-                    treeError != null -> Box(Modifier.padding(innerPadding)) {
-                        ErrorStateView(
-                            title = "无法获取文档目录",
-                            message = treeError,
-                            onRetry = vm::reload,
-                            onSecondaryAction = { sheet = ReaderSheet.Settings },
-                            secondaryLabel = "站点设置",
-                        )
-                    }
-                    state.isLoadingContent || (document != null && !canRenderDocument) ->
-                        Box(Modifier.padding(innerPadding)) { ReaderLoading("正在加载文档…") }
-                    contentError != null -> Box(Modifier.padding(innerPadding)) {
-                        ErrorStateView(
-                            title = "文档加载失败",
-                            message = contentError,
-                            onRetry = vm::reload,
-                            onSecondaryAction = { sheet = ReaderSheet.Directory },
-                            secondaryLabel = "打开目录",
-                        )
-                    }
-                    document != null && page != null -> ExamDocsArticle(
-                        document = document,
-                        listState = listState,
-                        baseUrl = state.activeSite.baseUrl,
-                        pageUrl = page.url,
-                        hazeState = hazeState,
-                        topPadding = innerPadding.calculateTopPadding(),
-                        bottomPadding = innerPadding.calculateBottomPadding(),
-                        previous = state.prevPage,
-                        next = state.nextPage,
-                        onPage = vm::openPage,
-                        onLink = vm::openLink,
-                    )
-                    else -> Box(Modifier.padding(innerPadding)) {
-                        Button(onClick = { sheet = ReaderSheet.Directory }) { Text("浏览文档目录") }
+                        else -> Box(Modifier.padding(innerPadding)) {
+                            Button(onClick = { sheet = ReaderSheet.Directory }) { Text("浏览文档目录") }
+                        }
                     }
                 }
             }
@@ -311,8 +327,14 @@ fun ExamDocsPage(
                 },
             )
         }
-        ReaderSheet.Outline -> ModalBottomSheet(onDismissRequest = { sheet = null }) {
-            ExamDocsOutlineSheet(document?.headings.orEmpty()) { heading ->
+        ReaderSheet.Outline -> ModalBottomSheet(
+            onDismissRequest = { sheet = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
+            ExamDocsOutlineSheet(
+                headings = document?.headings.orEmpty(),
+                currentBlockIndex = listState.firstVisibleItemIndex,
+            ) { heading ->
                 sheet = null
                 scope.launch { listState.scrollToItem(heading.blockIndex) }
             }
@@ -320,10 +342,12 @@ fun ExamDocsPage(
         ReaderSheet.Settings -> ExamDocsSiteSettings(
             sites = state.sites,
             activeSite = state.activeSite,
+            uiSettings = state.uiSettings,
             onSelectSite = vm::switchSite,
             onSaveSite = vm::saveSite,
             onRemoveSite = vm::removeSite,
             onRestoreDefaults = vm::restoreDefaultSites,
+            onUpdateUiSettings = vm::updateUiSettings,
             onDismiss = { sheet = null },
         )
         null -> Unit
@@ -404,36 +428,99 @@ private fun ExamDocsArticle(
 }
 
 @Composable
-private fun ExamDocsOutlineSheet(headings: List<DocHeading>, onSelect: (DocHeading) -> Unit) {
+private fun ExamDocsOutlineSheet(
+    headings: List<DocHeading>,
+    currentBlockIndex: Int,
+    onSelect: (DocHeading) -> Unit,
+) {
+    val activeBlockIndex = remember(headings, currentBlockIndex) {
+        headings.lastOrNull { it.blockIndex <= currentBlockIndex }?.blockIndex
+            ?: headings.firstOrNull()?.blockIndex
+    }
+    val colors = MaterialTheme.colorScheme
     Column(
-        Modifier.fillMaxWidth().fillMaxHeight(0.6f).padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.65f)
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("本页大纲", style = MaterialTheme.typography.titleLarge)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("本页大纲", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = colors.surfaceContainerHigh,
+            ) {
+                Text(
+                    "${headings.size} 节",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                )
+            }
+        }
         LazyColumn(
             modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             itemsIndexed(headings, key = { _, heading -> heading.blockIndex }) { _, heading ->
+                val active = heading.blockIndex == activeBlockIndex
+                val indent = ((heading.level - 1).coerceIn(0, 3) * 14).dp
                 Surface(
-                    shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (active) colors.primary.copy(alpha = 0.10f) else Color.Transparent,
                     onClick = { onSelect(heading) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(
-                        heading.title,
-                        style = if (heading.level <= 2) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodySmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                    Row(
                         modifier = Modifier.padding(
-                            start = 12.dp + ((heading.level - 1) * 12).dp,
+                            start = 12.dp + indent,
                             end = 12.dp,
                             top = 10.dp,
                             bottom = 10.dp,
                         ),
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = when {
+                                active -> colors.primary
+                                heading.level <= 2 -> colors.onSurfaceVariant.copy(alpha = 0.45f)
+                                else -> colors.outlineVariant
+                            },
+                            modifier = Modifier.size(if (heading.level <= 2) 6.dp else 4.dp),
+                            content = {},
+                        )
+                        Text(
+                            heading.title,
+                            style = if (heading.level <= 2) {
+                                MaterialTheme.typography.titleSmall
+                            } else {
+                                MaterialTheme.typography.bodyMedium
+                            },
+                            fontWeight = when {
+                                active -> FontWeight.SemiBold
+                                heading.level <= 2 -> FontWeight.Medium
+                                else -> FontWeight.Normal
+                            },
+                            color = when {
+                                active -> colors.primary
+                                heading.level <= 2 -> colors.onSurface
+                                else -> colors.onSurfaceVariant
+                            },
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
         }

@@ -30,6 +30,8 @@ import me.rerere.hugeicons.stroke.CheckmarkCircle02
 import me.rerere.hugeicons.stroke.Idea
 import me.rerere.hugeicons.stroke.Link01
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
+import me.rerere.rikkahub.ui.theme.extendColors
 
 @Composable
 internal fun DocCards(

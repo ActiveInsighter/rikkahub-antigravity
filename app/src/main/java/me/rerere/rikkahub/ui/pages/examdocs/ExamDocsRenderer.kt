@@ -62,7 +62,7 @@ internal fun rememberExamDocsRenderer(
             LatexBlock(
                 layout,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                fontSize = style.fontSize.takeOrElse { MaterialTheme.typography.bodyLarge.fontSize },
+                fontSize = style.fontSize.takeOrElse { MaterialTheme.typography.bodyLarge.fontSize } * 1.15f,
                 scale = 1f,
                 color = style.color.takeOrElse { LocalContentColor.current },
             )

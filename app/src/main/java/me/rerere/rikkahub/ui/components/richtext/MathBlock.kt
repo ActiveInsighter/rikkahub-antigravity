@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.components.richtext
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.takeOrElse
@@ -19,10 +20,13 @@ fun MathBlock(
     fontSize: TextUnit = TextUnit.Unspecified
 ) {
     val style = LocalTextStyle.current
+    val baseFontSize = fontSize.takeOrElse {
+        style.fontSize.takeOrElse { MaterialTheme.typography.bodyLarge.fontSize }
+    }
     LatexBlock(
         latex = latex,
         modifier = modifier.padding(8.dp),
-        fontSize = fontSize.takeOrElse { style.fontSize },
+        fontSize = baseFontSize * 1.15f,
         color = style.color.takeOrElse { LocalContentColor.current },
     )
 }

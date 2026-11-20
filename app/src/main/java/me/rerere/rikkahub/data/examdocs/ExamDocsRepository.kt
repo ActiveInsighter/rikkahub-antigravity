@@ -17,6 +17,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
+import me.rerere.rikkahub.data.datastore.BackgroundEffectType
+import me.rerere.rikkahub.data.datastore.DisplaySetting
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -30,11 +32,25 @@ private const val KEY_SITES_V2_MIGRATED = "sites_v2_migrated"
 private const val KEY_ACTIVE_SITE = "active_site"
 private const val KEY_BASE_URL = "base_url"
 private const val KEY_LAST_PAGE_URL = "last_page_url"
+private const val KEY_UI_SETTINGS = "ui_settings"
 private const val ANDROID_MARKDOWN_VERSION = 2
 private const val MAX_RESPONSE_BYTES = 16L * 1024 * 1024
 
 @Serializable
 data class ExamDocsSite(val name: String, val baseUrl: String)
+
+@Serializable
+data class ExamDocsUiSettings(
+    val enableBlurEffect: Boolean = true,
+    val backgroundEffectType: BackgroundEffectType = BackgroundEffectType.BLUR,
+    val fontSizeRatio: Float = 1.0f,
+) {
+    fun toDisplaySetting(base: DisplaySetting = DisplaySetting()): DisplaySetting = base.copy(
+        enableBlurEffect = enableBlurEffect,
+        backgroundEffectType = backgroundEffectType,
+        fontSizeRatio = fontSizeRatio,
+    )
+}
 
 val builtInDocsSites = listOf(
     ExamDocsSite("Exam Docs", DEFAULT_EXAM_DOCS_BASE_URL),
@@ -150,6 +166,15 @@ class ExamDocsRepository(
             putString(KEY_ACTIVE_SITE, active.baseUrl)
             putBoolean(KEY_SITES_V2_MIGRATED, true)
         }
+    }
+
+    fun loadUiSettings(): ExamDocsUiSettings {
+        val raw = prefs.getString(KEY_UI_SETTINGS, null) ?: return ExamDocsUiSettings()
+        return runCatching { json.decodeFromString<ExamDocsUiSettings>(raw) }.getOrDefault(ExamDocsUiSettings())
+    }
+
+    fun saveUiSettings(settings: ExamDocsUiSettings) {
+        prefs.edit { putString(KEY_UI_SETTINGS, json.encodeToString(settings)) }
     }
 
     fun getLastPageUrl(site: ExamDocsSite): String? = prefs.getString(lastPageKey(site.baseUrl), null)

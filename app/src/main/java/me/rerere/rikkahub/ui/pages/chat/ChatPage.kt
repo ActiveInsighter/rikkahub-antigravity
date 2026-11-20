@@ -723,6 +723,8 @@ private fun TopBar(
                     onShowOverview = onShowOverview,
                     onExport = onExport,
                     onDelete = onDelete,
+                    hazeState = hazeState,
+                    displaySetting = settings.displaySetting,
                 )
             }
         },
@@ -772,6 +774,8 @@ private fun ChatPageMenu(
     onShowOverview: () -> Unit,
     onExport: () -> Unit,
     onDelete: () -> Unit,
+    hazeState: HazeState,
+    displaySetting: me.rerere.rikkahub.data.datastore.DisplaySetting,
 ) {
     TopBarMoreMenu(
         listOf(
@@ -779,5 +783,7 @@ private fun ChatPageMenu(
             TopBarMenuItem(stringResource(R.string.export_title), HugeIcons.Share04, onExport, enabled),
         ),
         listOf(TopBarMenuItem(stringResource(R.string.delete), HugeIcons.Delete01, onDelete, enabled, destructive = true)),
+        hazeState = hazeState,
+        displaySetting = displaySetting,
     )
 }

@@ -18,6 +18,7 @@ import me.rerere.rikkahub.data.examdocs.ExamDocsDocument
 import me.rerere.rikkahub.data.examdocs.ExamDocsLink
 import me.rerere.rikkahub.data.examdocs.ExamDocsRepository
 import me.rerere.rikkahub.data.examdocs.ExamDocsSite
+import me.rerere.rikkahub.data.examdocs.ExamDocsUiSettings
 import me.rerere.rikkahub.data.examdocs.builtInDocsSites
 import me.rerere.rikkahub.data.examdocs.getExamDocsLink
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -27,6 +28,7 @@ data class ExamDocsUiState(
     val sites: List<ExamDocsSite> = builtInDocsSites,
     val activeSite: ExamDocsSite = builtInDocsSites.first(),
     val sitesReady: Boolean = false,
+    val uiSettings: ExamDocsUiSettings = ExamDocsUiSettings(),
     val isLoadingTree: Boolean = true,
     val treeError: String? = null,
     val modules: List<ExamDocNode.Folder> = emptyList(),
@@ -57,11 +59,23 @@ class ExamDocsVM(
 
     init {
         viewModelScope.launch {
-            val settings = withContext(Dispatchers.IO) { repository.loadSiteSettings() }
+            val (settings, uiSettings) = withContext(Dispatchers.IO) {
+                repository.loadSiteSettings() to repository.loadUiSettings()
+            }
             val target = initialUrl?.let { getExamDocsLink(settings.active.baseUrl, "/docs", it) }
-            _uiState.value = ExamDocsUiState(sites = settings.sites, activeSite = settings.active, sitesReady = true)
+            _uiState.value = ExamDocsUiState(
+                sites = settings.sites,
+                activeSite = settings.active,
+                sitesReady = true,
+                uiSettings = uiSettings,
+            )
             loadTree(target = target)
         }
+    }
+
+    fun updateUiSettings(settings: ExamDocsUiSettings) {
+        _uiState.update { it.copy(uiSettings = settings) }
+        repository.saveUiSettings(settings)
     }
 
     fun reload() {

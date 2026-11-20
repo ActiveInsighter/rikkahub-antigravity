@@ -33,6 +33,8 @@ import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.CheckmarkCircle02
 import me.rerere.hugeicons.stroke.Idea
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
+import me.rerere.rikkahub.ui.theme.extendColors
 
 private data class CalloutStyle(
     val accent: Color,
@@ -46,17 +48,20 @@ internal fun DocCallout(
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
+    val extendColors = MaterialTheme.extendColors
+    val darkMode = LocalDarkMode.current
+    val warningYellow = if (darkMode) Color(0xFFFACC15) else Color(0xFFD97706)
     val style = when (block.type) {
-        "tip", "idea" -> CalloutStyle(colors.primary, HugeIcons.Idea)
-        "warn", "warning", "caution" -> CalloutStyle(colors.tertiary, HugeIcons.Alert02)
-        "danger", "error" -> CalloutStyle(colors.error, HugeIcons.Alert01)
-        "success" -> CalloutStyle(colors.secondary, HugeIcons.CheckmarkCircle02)
-        "note" -> CalloutStyle(colors.onSurfaceVariant, HugeIcons.Book02)
-        else -> CalloutStyle(colors.primary, HugeIcons.AlertCircle)
+        "tip", "idea" -> CalloutStyle(extendColors.blue6, HugeIcons.Idea)
+        "warn", "warning", "caution" -> CalloutStyle(warningYellow, HugeIcons.Alert02)
+        "danger", "error" -> CalloutStyle(extendColors.red6, HugeIcons.Alert01)
+        "success" -> CalloutStyle(extendColors.green6, HugeIcons.CheckmarkCircle02)
+        "note" -> CalloutStyle(extendColors.gray6, HugeIcons.Book02)
+        else -> CalloutStyle(extendColors.blue6, HugeIcons.AlertCircle)
     }
     val title = block.title
     Surface(
-        color = style.accent.copy(alpha = 0.10f),
+        color = style.accent.copy(alpha = if (darkMode) 0.14f else 0.09f),
         contentColor = colors.onSurface,
         shape = MaterialTheme.shapes.large,
         modifier = modifier.fillMaxWidth(),
@@ -69,7 +74,7 @@ internal fun DocCallout(
                     val inset = 8.dp.toPx()
                     val railStart = if (layoutDirection == LayoutDirection.Ltr) inset else size.width - inset - railWidth
                     drawRoundRect(
-                        color = style.accent.copy(alpha = 0.55f),
+                        color = style.accent.copy(alpha = 0.65f),
                         topLeft = Offset(railStart, 10.dp.toPx()),
                         size = Size(railWidth, (size.height - 20.dp.toPx()).coerceAtLeast(0f)),
                         cornerRadius = CornerRadius(railWidth / 2),
@@ -80,7 +85,7 @@ internal fun DocCallout(
         ) {
             Box(
                 modifier = Modifier.padding(top = 2.dp).size(24.dp)
-                    .background(style.accent.copy(alpha = 0.16f), CircleShape),
+                    .background(style.accent.copy(alpha = if (darkMode) 0.22f else 0.15f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(

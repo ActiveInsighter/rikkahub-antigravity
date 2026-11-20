@@ -89,11 +89,11 @@ private val PREVIEWABLE_LANGUAGES = setOf("html", "svg")
 
 @Composable
 internal fun codeBlockBackground(): Color =
-    if (LocalDarkMode.current) Color(0xFF1E1F22) else Color(0xFFF6F7F8)
+    if (LocalDarkMode.current) Color(0xFF1E1F22) else Color(0xFFF1F2F5)
 
 @Composable
 internal fun codeBlockBorder(): Color =
-    if (LocalDarkMode.current) Color(0xFF2E3035) else Color(0xFFE5E7EB)
+    if (LocalDarkMode.current) Color(0xFF2E3035) else Color(0xFFE2E4E9)
 
 @Composable
 fun HighlightCodeBlock(
@@ -101,10 +101,8 @@ fun HighlightCodeBlock(
     language: String,
     modifier: Modifier = Modifier,
     completeCodeBlock: Boolean = true,
-    style: TextStyle? = TextStyle(
-        fontSize = 12.5.sp,
-        lineHeight = 18.sp,
-    ),
+    style: TextStyle? = null,
+    embedded: Boolean = false,
 ) {
     val darkMode = LocalDarkMode.current
     val colorPalette = if (darkMode) AtomOneDarkPalette else AtomOneLightPalette
@@ -144,12 +142,17 @@ fun HighlightCodeBlock(
 
     val containerShape = RoundedCornerShape(14.dp)
     val containerColor = codeBlockBackground()
+    val borderColor = codeBlockBorder()
 
     Column(
-        modifier = modifier
-            .clip(containerShape)
-            .background(containerColor)
-            .border(1.dp, codeBlockBorder(), containerShape),
+        modifier = if (embedded) {
+            modifier
+        } else {
+            modifier
+                .clip(containerShape)
+                .background(containerColor)
+                .border(1.dp, borderColor, containerShape)
+        },
     ) {
         Box(
             modifier = Modifier
@@ -169,6 +172,14 @@ fun HighlightCodeBlock(
                 onTogglePreviewMode = {
                     previewMode = !previewMode
                 },
+            )
+        }
+        if (!embedded) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(0.8.dp)
+                    .background(borderColor.copy(alpha = 0.7f)),
             )
         }
         Column(
@@ -191,7 +202,13 @@ fun HighlightCodeBlock(
                     )
                 }
                 else -> {
-                    val textStyle = LocalTextStyle.current.merge(style)
+                    val baseStyle = LocalTextStyle.current
+                    val defaultCodeFontSize = if (baseStyle.fontSize.isSp) baseStyle.fontSize * 0.88f else 14.sp
+                    val defaultCodeLineHeight = defaultCodeFontSize * 1.45f
+                    val textStyle = baseStyle.copy(
+                        fontSize = defaultCodeFontSize,
+                        lineHeight = defaultCodeLineHeight,
+                    ).let { if (style != null) it.merge(style) else it }
                     val codeLines = remember(code) { code.lines() }
                     val collapsedCode = remember(codeLines) { codeLines.take(COLLAPSE_LINES).joinToString("\n") }
                     val displayCode = if (isExpanded) code else collapsedCode
