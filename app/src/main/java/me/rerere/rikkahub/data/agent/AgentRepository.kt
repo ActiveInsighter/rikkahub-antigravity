@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.agent
 
+import android.os.SystemClock
 import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -7,6 +8,8 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -499,15 +502,19 @@ class AgentRepository(
     }
 
     suspend fun deleteConversation(id: Uuid) {
+        localGenerationJobs[id]?.cancelAndJoin()
         val existing = conversationDao.getById(id.toString())
         val remoteJobId = existing?.remoteJobId
         if (!remoteJobId.isNullOrBlank() && cloudClient.hasSession()) {
             runCatching { cloudClient.deleteThread(remoteJobId) }
         }
-        conversationDao.deleteById(id.toString())
+        conversationLock(id).withLock { conversationDao.deleteById(id.toString()) }
     }
 
     suspend fun deleteAllConversations() {
+        val jobs = localGenerationJobs.values.toList()
+        jobs.forEach { it.cancel() }
+        jobs.forEach { it.join() }
         conversationDao.deleteAll()
     }
 
@@ -863,8 +870,23 @@ class AgentRepository(
     // ---- Background-safe Local Gateway Execution (Chat / Decision / Agent Dispatch) ----
 
     fun cancelLocalGeneration(conversationId: Uuid) {
-        localGenerationJobs.remove(conversationId)?.cancel()
-        _localGenerations.update { it - conversationId }
+        localGenerationJobs[conversationId]?.cancel()
+    }
+
+    private fun launchLocalGeneration(conversation: Conversation, generate: suspend (Long) -> Unit) {
+        val id = conversation.id
+        val startedAt = System.currentTimeMillis()
+        val job = appScope.launch(start = CoroutineStart.LAZY) { generate(startedAt) }
+        if (localGenerationJobs.putIfAbsent(id, job) != null) {
+            job.cancel()
+            return
+        }
+        _localGenerations.update { it + (id to LocalGenerationState(conversation, startedAt)) }
+        job.invokeOnCompletion {
+            _localGenerations.update { it - id }
+            localGenerationJobs.remove(id, job)
+        }
+        job.start()
     }
 
     fun startLocalChat(
@@ -910,45 +932,37 @@ class AgentRepository(
             )
         )
 
-        localGenerationJobs.remove(convId)?.cancel()
-        val startedAt = System.currentTimeMillis()
-        _localGenerations.update { it + (convId to LocalGenerationState(initialConv, startedAt)) }
-
-        lateinit var job: Job
-        job = appScope.launch {
+        launchLocalGeneration(initialConv) { startedAt ->
             var workingMessages = historyMessages + placeholderMsg
             var workingConv = initialConv
-            var lastDbFlushAt = 0L
+            var lastDbFlushAt = SystemClock.elapsedRealtime()
             try {
-                // Persist user message + placeholder asynchronously without blocking TTFT
-                appScope.launch {
-                    runCatching { saveConversation(initialConv) }
-                }
-                gatewayClient.streamChat(
-                    modelEntity = modelEntity,
-                    messages = historyMessages,
-                    systemPrompt = systemPrompt,
-                    reasoningLevel = reasoningLevel,
-                    temperature = temperature,
-                    fallbackBaseUrl = fallbackBaseUrl,
-                    fallbackApiKey = fallbackApiKey,
-                ).collect { chunk ->
-                    workingMessages = handler.handle(workingMessages, chunk)
-                    val updatedAssistant = workingMessages.last().copy(
-                        modelSnapshot = ModelSnapshot(
-                            displayName = displayName,
-                            modelId = modelEntity.modelId,
-                        ),
-                    )
-                    workingConv = workingConv.upsertMessage(nodeId, updatedAssistant)
-                    _localGenerations.update { map ->
-                        if (convId in map) map + (convId to LocalGenerationState(workingConv, startedAt)) else map
+                coroutineScope {
+                    // The initial write can overlap network setup, but must precede all later snapshots.
+                    val initialWrite = async { saveConversation(initialConv) }
+                    gatewayClient.streamChat(
+                        modelEntity = modelEntity,
+                        messages = historyMessages,
+                        systemPrompt = systemPrompt,
+                        reasoningLevel = reasoningLevel,
+                        temperature = temperature,
+                        fallbackBaseUrl = fallbackBaseUrl,
+                        fallbackApiKey = fallbackApiKey,
+                    ).collect { chunk ->
+                        workingMessages = handler.handle(workingMessages, chunk)
+                        val updatedAssistant = workingMessages.last().copy(
+                            modelSnapshot = placeholderMsg.modelSnapshot,
+                        )
+                        workingConv = workingConv.upsertMessage(nodeId, updatedAssistant)
+                        _localGenerations.update { it + (convId to LocalGenerationState(workingConv, startedAt)) }
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastDbFlushAt >= 2_000L) {
+                            initialWrite.await()
+                            saveConversation(workingConv)
+                            lastDbFlushAt = now
+                        }
                     }
-                    val now = System.currentTimeMillis()
-                    if (now - lastDbFlushAt >= 2_000L) {
-                        lastDbFlushAt = now
-                        saveConversation(workingConv)
-                    }
+                    initialWrite.await()
                 }
                 withContext(NonCancellable) {
                     saveConversation(workingConv)
@@ -980,14 +994,8 @@ class AgentRepository(
                         appEventBus.tryEmit(AppEvent.AgentJobFinished(convId, failedConv.title.ifBlank { "Chat" }, false, msg.take(60)))
                     }
                 }
-            } finally {
-                if (localGenerationJobs[convId] === job) {
-                    localGenerationJobs.remove(convId)
-                }
-                _localGenerations.update { it - convId }
             }
         }
-        localGenerationJobs[convId] = job
     }
 
     fun startLocalDecision(
@@ -1028,12 +1036,7 @@ class AgentRepository(
             )
         }
 
-        localGenerationJobs.remove(convId)?.cancel()
-        val startedAt = System.currentTimeMillis()
-        _localGenerations.update { it + (convId to LocalGenerationState(initialConv, startedAt)) }
-
-        lateinit var job: Job
-        job = appScope.launch {
+        launchLocalGeneration(initialConv) {
             try {
                 saveConversation(initialConv)
                 val result = gatewayClient.callDecision(
@@ -1062,6 +1065,7 @@ class AgentRepository(
                         }
                     }
                 }.onFailure { err ->
+                    if (err is CancellationException) throw err
                     val msg = err.message ?: "Decision 请求失败"
                     onError?.invoke(msg)
                     val errMsg = placeholderMsg.copy(
@@ -1072,14 +1076,12 @@ class AgentRepository(
                         saveConversation(failedConv)
                     }
                 }
-            } finally {
-                if (localGenerationJobs[convId] === job) {
-                    localGenerationJobs.remove(convId)
-                }
-                _localGenerations.update { it - convId }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onError?.invoke(error.message ?: "无法保存网关会话")
             }
         }
-        localGenerationJobs[convId] = job
     }
 
     fun startGatewayAgentDispatch(
@@ -1116,12 +1118,7 @@ class AgentRepository(
             )
         }
 
-        localGenerationJobs.remove(convId)?.cancel()
-        val startedAt = System.currentTimeMillis()
-        _localGenerations.update { it + (convId to LocalGenerationState(initialConv, startedAt)) }
-
-        lateinit var job: Job
-        job = appScope.launch {
+        launchLocalGeneration(initialConv) {
             try {
                 saveConversation(initialConv)
                 val result = gatewayClient.dispatchAgent(
@@ -1146,6 +1143,7 @@ class AgentRepository(
                         saveConversation(doneConv)
                     }
                 }.onFailure { err ->
+                    if (err is CancellationException) throw err
                     val msg = err.message ?: "派发 Agent Action 失败"
                     onError?.invoke(msg)
                     val errMsg = placeholderMsg.copy(
@@ -1156,13 +1154,11 @@ class AgentRepository(
                         saveConversation(failedConv)
                     }
                 }
-            } finally {
-                if (localGenerationJobs[convId] === job) {
-                    localGenerationJobs.remove(convId)
-                }
-                _localGenerations.update { it - convId }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onError?.invoke(error.message ?: "无法保存网关会话")
             }
         }
-        localGenerationJobs[convId] = job
     }
 }

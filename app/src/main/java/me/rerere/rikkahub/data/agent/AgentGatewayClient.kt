@@ -139,7 +139,8 @@ class AgentGatewayClient(
                     put("temperature", temperature)
                 }
                 val thinking = when (reasoningLevel) {
-                    ReasoningLevel.OFF, ReasoningLevel.AUTO -> ""
+                    ReasoningLevel.OFF -> "off"
+                    ReasoningLevel.AUTO -> ""
                     ReasoningLevel.LOW -> "low"
                     ReasoningLevel.MEDIUM -> "medium"
                     ReasoningLevel.HIGH, ReasoningLevel.XHIGH, ReasoningLevel.MAX -> "high"
@@ -149,7 +150,7 @@ class AgentGatewayClient(
                 }
                 if (!schemaJson.isNullOrBlank()) {
                     val parsedSchema = runCatching {
-                        JsonInstant.parseToJsonElement(schemaJson)
+                        JsonInstant.parseToJsonElement(schemaJson).jsonObject
                     }.getOrElse { err ->
                         error("Decision Schema JSON 格式无效: ${err.message}")
                     }

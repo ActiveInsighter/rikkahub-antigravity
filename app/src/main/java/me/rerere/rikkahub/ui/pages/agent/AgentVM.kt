@@ -246,7 +246,7 @@ class AgentVM(
     private var submission: Deferred<Result<Unit>>? = null
     private val isBusy: Boolean
         get() = snapshot.value?.isActive == true || conversationId in repository.submittingIds.value ||
-            localGeneration.value != null || _isInitialLoading.value ||
+            repository.localGenerations.value[conversationId] != null || _isInitialLoading.value ||
             (session.value != null && snapshot.value?.waitingForMessages == true)
 
     init {
@@ -593,7 +593,7 @@ class AgentVM(
     }
 
     fun stopGeneration() {
-        if (localGeneration.value != null) {
+        if (repository.localGenerations.value[conversationId] != null) {
             repository.cancelLocalGeneration(conversationId)
             return
         }

@@ -13,7 +13,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import me.rerere.bettertext.markdown.MarkdownBlock.Details
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
-import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
+import me.rerere.rikkahub.ui.components.richtext.RichMarkdownRenderer
 import me.rerere.rikkahub.ui.components.richtext.MaterialMarkdownDefaults
 
 typealias ExamDocsCustomBlockRenderer = @Composable (
@@ -31,11 +31,12 @@ class ExamDocsComponentRegistry(
 
     private companion object {
         val callout: ExamDocsCustomBlockRenderer = { block, content -> ExamDocsCalloutCard(block, content) }
-        val solution: ExamDocsCustomBlockRenderer = { block, content ->
+        val collapsible: ExamDocsCustomBlockRenderer = { block, content ->
             MaterialMarkdownDefaults.Details(
                 block = Details(summary = emptyList(), children = emptyList()),
                 summary = {
-                    Text(block.title ?: "参考答案与解析", style = MaterialTheme.typography.titleSmall)
+                    val label = if (block.type == "solution") "参考答案与解析" else "展开详情"
+                    Text(block.title ?: label, style = MaterialTheme.typography.titleSmall)
                 },
                 content = content,
             )
@@ -47,7 +48,10 @@ class ExamDocsComponentRegistry(
             "warning" to callout,
             "danger" to callout,
             "callout" to callout,
-            "solution" to solution,
+            "solution" to collapsible,
+            "accordion" to collapsible,
+            "details" to collapsible,
+            "question" to callout,
         )
     }
 }
@@ -56,21 +60,15 @@ class ExamDocsComponentRegistry(
 internal fun ExamDocsMarkdownBlock(
     block: ExamDocsSegment,
     registry: ExamDocsComponentRegistry,
-    onLinkClick: (String) -> Unit,
-    imageUrlResolver: (String) -> String,
+    renderMarkdown: RichMarkdownRenderer,
 ) {
     when (block) {
-        is ExamDocsSegment.Markdown -> MarkdownBlock(
-            document = block.document,
-            modifier = Modifier.fillMaxWidth(),
-            onLinkClick = onLinkClick,
-            imageUrlResolver = imageUrlResolver,
-        )
+        is ExamDocsSegment.Markdown -> renderMarkdown(block.document, Modifier.fillMaxWidth())
         is ExamDocsSegment.CustomBlock -> {
             val content: @Composable () -> Unit = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     block.blocks.forEach {
-                        ExamDocsMarkdownBlock(it, registry, onLinkClick, imageUrlResolver)
+                        ExamDocsMarkdownBlock(it, registry, renderMarkdown)
                     }
                 }
             }
@@ -95,6 +93,7 @@ private fun ExamDocsCalloutCard(block: ExamDocsSegment.CustomBlock, content: @Co
         "warning" -> colorScheme.tertiaryContainer to "注意"
         "danger" -> colorScheme.errorContainer to "警告"
         "note" -> colorScheme.surfaceContainerHigh to "笔记"
+        "question" -> colorScheme.surfaceContainerHigh to "题目"
         else -> colorScheme.primaryContainer to "说明"
     }
     Surface(

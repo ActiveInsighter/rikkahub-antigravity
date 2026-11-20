@@ -73,6 +73,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import kotlinx.serialization.json.jsonObject
 import me.rerere.rikkahub.utils.JsonInstant
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
@@ -996,12 +997,12 @@ private fun DecisionSchemaBar(
                             onUpdateSchema("")
                             showEditor = false
                         } else {
-                            val parsed = runCatching { JsonInstant.parseToJsonElement(trimmed) }
+                            val parsed = runCatching { JsonInstant.parseToJsonElement(trimmed).jsonObject }
                             if (parsed.isSuccess) {
                                 onUpdateSchema(trimmed)
                                 showEditor = false
                             } else {
-                                schemaError = "Schema 不是有效的 JSON"
+                                schemaError = "请输入有效的 JSON 对象"
                             }
                         }
                     },
