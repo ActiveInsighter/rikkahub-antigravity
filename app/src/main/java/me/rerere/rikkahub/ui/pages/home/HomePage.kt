@@ -280,9 +280,7 @@ fun HomePage() {
                             recentItems.forEach { conv ->
                                 val isActive = conv.id in activeAgentIds
                                 val hasUnread = agentStatusMap[conv.id]?.hasUnread == true
-                                val timeText = remember(conv.updateAt) {
-                                    conv.updateAt.toLocalDateTime()
-                                }
+                                val timeText = conv.updateAt.toLocalDateTime()
                                 item(
                                     onClick = { openAgent(conv.id) },
                                     leadingContent = {
