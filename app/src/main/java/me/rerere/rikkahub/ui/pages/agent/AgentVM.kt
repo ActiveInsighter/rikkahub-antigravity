@@ -563,6 +563,10 @@ class AgentVM(
             }
             AgentModelCategory.AGENT -> {
                 if (session.value != null) {
+                    if (hasLocalOnlyImages(parts)) {
+                        _errorMessage.value = "图片尚未上传到云端，请点击重试或删除后重新选择"
+                        return false
+                    }
                     submitRemote(
                         baseConversation = updatedWithUser,
                         prompt = prompt,
@@ -655,6 +659,10 @@ class AgentVM(
             }
             AgentModelCategory.AGENT -> {
                 if (session.value != null) {
+                    if (hasLocalOnlyImages(userMsg.parts)) {
+                        _errorMessage.value = "图片尚未上传到云端，请点击重试或删除后重新选择"
+                        return
+                    }
                     submitRemote(
                         baseConversation = current,
                         prompt = prompt,
@@ -855,10 +863,22 @@ class AgentVM(
         return if (hasImages) "请查看并处理图片" else ""
     }
 
+    private fun isRemoteOrDataImageUrl(url: String): Boolean {
+        val trimmed = url.trim()
+        return trimmed.startsWith("https://", ignoreCase = true) ||
+            trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("data:image/", ignoreCase = true)
+    }
+
+    private fun hasLocalOnlyImages(parts: List<UIMessagePart>): Boolean {
+        return parts.filterIsInstance<UIMessagePart.Image>()
+            .any { it.url.isNotBlank() && !isRemoteOrDataImageUrl(it.url) }
+    }
+
     private fun extractImagesFromParts(parts: List<UIMessagePart>): List<String> {
         return parts.filterIsInstance<UIMessagePart.Image>()
             .map { it.url.trim() }
-            .filter { it.isNotBlank() }
+            .filter { it.isNotBlank() && isRemoteOrDataImageUrl(it) }
             .distinct()
     }
 
