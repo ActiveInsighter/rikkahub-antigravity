@@ -329,17 +329,15 @@ class RouteActivity : ComponentActivity() {
 
         val navigator = remember(backStack) { Navigator(backStack) }
         val agentRealtime = koinInject<AgentRealtimeSync>()
-        if (backStack.lastOrNull() is Screen.Agent) {
-            LaunchedEffect(agentRealtime, backStack) {
-                agentRealtime.keepSynced(
-                    combine(
-                        lifecycle.currentStateFlow,
-                        snapshotFlow { (backStack.lastOrNull() as? Screen.Agent)?.id },
-                    ) { state, id ->
-                        id?.takeIf { state.isAtLeast(Lifecycle.State.STARTED) }?.let { Uuid.parse(it) }
-                    }
-                )
-            }
+        LaunchedEffect(agentRealtime, backStack) {
+            agentRealtime.keepSynced(
+                combine(
+                    lifecycle.currentStateFlow,
+                    snapshotFlow { (backStack.lastOrNull() as? Screen.Agent)?.id },
+                ) { state, id ->
+                    id?.takeIf { state.isAtLeast(Lifecycle.State.STARTED) }?.let { Uuid.parse(it) }
+                }
+            )
         }
 
         SharedTransitionLayout {
