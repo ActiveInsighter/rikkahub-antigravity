@@ -69,6 +69,7 @@ import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Settings03
+import me.rerere.rikkahub.data.agent.AgentSettingsStore
 import me.rerere.rikkahub.data.examdocs.DocHeading
 import me.rerere.rikkahub.data.examdocs.ExamDocNode
 import me.rerere.rikkahub.data.examdocs.ExamDocsDocument
@@ -86,6 +87,7 @@ import me.rerere.rikkahub.ui.pages.chat.AssistantBackground
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.ui.toast.ToastType
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
 
 private val externalLinkSchemes = setOf("https", "http", "mailto", "tel")
@@ -99,6 +101,9 @@ fun ExamDocsPage(
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val settings = LocalSettings.current
+    val agentSettingsStore: AgentSettingsStore = koinInject()
+    val agentSettings by agentSettingsStore.settingsFlow.collectAsStateWithLifecycle()
+    val toolbarDisplaySetting = remember(agentSettings) { agentSettings.toDisplaySetting() }
     val toaster = LocalToaster.current
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
@@ -140,7 +145,7 @@ fun ExamDocsPage(
                     navigationIcon = {
                         ChatTopBarCapsule(
                             hazeState = hazeState,
-                            displaySetting = settings.displaySetting,
+                            displaySetting = toolbarDisplaySetting,
                             showBackground = listScrolledUnderTopBar,
                             modifier = Modifier.padding(start = 8.dp, end = 4.dp),
                         ) {
@@ -177,7 +182,7 @@ fun ExamDocsPage(
                     actions = {
                         ChatTopBarCapsule(
                             hazeState = hazeState,
-                            displaySetting = settings.displaySetting,
+                            displaySetting = toolbarDisplaySetting,
                             showBackground = listScrolledUnderTopBar,
                             modifier = Modifier.padding(start = 4.dp, end = 8.dp),
                         ) {
