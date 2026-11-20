@@ -131,7 +131,7 @@ internal class ApkUpdates(
 
     fun download(choice: ApkUpdateChoice, fullOnly: Boolean = false) {
         if (!usesAntigravityUpdates || !configured || choice.build.versionCode <= installedVersion ||
-            transferJob?.isActive == true
+            transferJob?.isCompleted == false
         ) return
         val previousReady = _transfer.value as? ApkTransfer.Ready
         transferJob = appScope.launch {
@@ -164,8 +164,11 @@ internal class ApkUpdates(
     }
 
     fun installIntent(ready: ApkTransfer.Ready): Intent {
-        check(usesAntigravityUpdates && ready == _transfer.value && ready.file.isFile)
-        check(ready.build.versionCode > installedVersion)
+        check(usesAntigravityUpdates && ready == _transfer.value && ready.build.versionCode > installedVersion)
+        if (!ready.file.isFile) {
+            _transfer.value = ApkTransfer.Failed(ready.build, lowStorage = false)
+            throw IOException("The prepared APK is no longer in the cache")
+        }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", ready.file)
         return Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, "application/vnd.android.package-archive")

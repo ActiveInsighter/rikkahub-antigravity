@@ -7,7 +7,7 @@
   <string name="apk_updates_installed">Installed</string>
   <string name="apk_updates_older">Older build</string>
   <string name="apk_updates_latest">Latest build</string>
-  <string name="apk_updates_delta">Incremental update · %1$s</string>
+  <string name="apk_updates_delta">Incremental · %1$s (save %2$d%%)</string>
   <string name="apk_updates_full">Full APK · %1$s</string>
   <string name="apk_updates_unconfigured">This build has no update server configured. APKs are available on GitHub.</string>
   <string name="apk_updates_empty">No builds have been published yet.</string>

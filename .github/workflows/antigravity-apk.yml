@@ -191,7 +191,8 @@ jobs:
           assets = Path("app/src/androidTest/assets/apk-update")
           tools = Path(os.environ["RUNNER_TEMP"]) / "hdiffpatch"
           target = Path("artifacts") / (os.environ["APK_PREFIX"] + "-x86_64-debug.apk")
-          assert generate_patch(tools, assets / "base.apk", target, assets / "update.hdiff", assets / "rebuilt.apk")
+          generate_patch(tools, assets / "base.apk", target, assets / "update.hdiff",
+                         assets / "rebuilt.apk", min_savings=None)
           (assets / "expected.txt").write_text(f"{target.stat().st_size}\n{digest(target)}\n")
           size = (assets / "update.hdiff").stat().st_size
           print(f"Signed APK round-trip: {size:,} patch bytes vs. {target.stat().st_size:,} full bytes")

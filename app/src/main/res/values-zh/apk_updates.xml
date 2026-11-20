@@ -7,7 +7,7 @@
   <string name="apk_updates_installed">当前已安装</string>
   <string name="apk_updates_older">历史构建</string>
   <string name="apk_updates_latest">最新构建</string>
-  <string name="apk_updates_delta">增量更新 · %1$s</string>
+  <string name="apk_updates_delta">增量更新 · %1$s（省 %2$d%%）</string>
   <string name="apk_updates_full">完整安装包 · %1$s</string>
   <string name="apk_updates_unconfigured">此构建尚未配置更新服务器，可前往 GitHub 下载 APK。</string>
   <string name="apk_updates_empty">更新服务器暂无构建。</string>

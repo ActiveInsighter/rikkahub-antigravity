@@ -33,7 +33,7 @@ def json_bytes(value):
 
 
 def sign(payload):
-    result = subprocess.run(["java", str(SIGNATURE_TOOL), "sign"], input=payload, capture_output=True, check=True)
+    result = subprocess.run(["java", str(SIGNATURE_TOOL), "sign"], input=payload, stdout=subprocess.PIPE, check=True)
     return json_bytes({
         "payload": base64.b64encode(payload).decode(),
         "signature": base64.b64encode(result.stdout).decode(),
@@ -62,13 +62,12 @@ def delta_key(version, apk, patch):
     return f"builds/{version}/{apk['sha256']}/{apk['abi']}-from-{patch['baseSha256']}-{patch['sha256']}.hdiff"
 
 
-def generate_patch(tools, base, target, patch, rebuilt):
+def generate_patch(tools, base, target, patch, rebuilt, *, min_savings=10):
     subprocess.run(
         [str(tools / "hdiffz"), "-s-64", "-p-1", "-c-zlib-6", "-d", str(base), str(target), str(patch)],
         check=True, stdout=subprocess.DEVNULL, timeout=300,
     )
-    # Skip deltas that would save less than 10% on the chosen APK.
-    if patch.stat().st_size * 10 >= target.stat().st_size * 9:
+    if min_savings is not None and patch.stat().st_size * 100 > target.stat().st_size * (100 - min_savings):
         patch.unlink()
         return False
     subprocess.run([str(tools / "hpatchz"), str(base), str(patch), str(rebuilt)],

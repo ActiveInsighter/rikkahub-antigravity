@@ -233,8 +233,14 @@ private fun BuildCard(
                     val patch = choice.patch
                     if (patch != null) {
                         Button(onClick = { onDownload(false) }, enabled = enabled) {
-                            Text(stringResource(R.string.apk_updates_delta,
-                                Formatter.formatShortFileSize(context, patch.size)))
+                            val savings = ((choice.full.size - patch.size) * 100 / choice.full.size).toInt()
+                            Text(
+                                stringResource(
+                                    R.string.apk_updates_delta,
+                                    Formatter.formatShortFileSize(context, patch.size),
+                                    savings,
+                                )
+                            )
                         }
                     }
                     FilledTonalButton(onClick = { onDownload(true) }, enabled = enabled) {
