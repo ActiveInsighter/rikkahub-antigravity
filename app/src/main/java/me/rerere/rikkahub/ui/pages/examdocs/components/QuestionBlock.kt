@@ -498,9 +498,10 @@ private fun extractBlanks(segments: List<ExamDocsSegment>): List<QuestionBlankSp
             when (b) {
                 is MarkdownBlock.Paragraph -> walkInlines(b.content)
                 is MarkdownBlock.Heading -> walkInlines(b.content)
-                is MarkdownBlock.BlockQuote -> walkBlocks(b.children)
-                is MarkdownBlock.BulletList -> b.items.forEach { walkBlocks(it.children) }
-                is MarkdownBlock.OrderedList -> b.items.forEach { walkBlocks(it.children) }
+                is MarkdownBlock.Quote -> walkBlocks(b.children)
+                is MarkdownBlock.ListBlock -> b.items.forEach { walkBlocks(it.children) }
+                is MarkdownBlock.Details -> walkBlocks(b.children)
+                is MarkdownBlock.Container -> walkBlocks(b.children)
                 else -> Unit
             }
         }
@@ -536,9 +537,10 @@ private fun replaceBlankTokensInSegments(segments: List<ExamDocsSegment>): List<
         when (b) {
             is MarkdownBlock.Paragraph -> b.copy(content = transformInlines(b.content))
             is MarkdownBlock.Heading -> b.copy(content = transformInlines(b.content))
-            is MarkdownBlock.BlockQuote -> b.copy(children = transformBlocks(b.children))
-            is MarkdownBlock.BulletList -> b.copy(items = b.items.map { it.copy(children = transformBlocks(it.children)) })
-            is MarkdownBlock.OrderedList -> b.copy(items = b.items.map { it.copy(children = transformBlocks(it.children)) })
+            is MarkdownBlock.Quote -> b.copy(children = transformBlocks(b.children))
+            is MarkdownBlock.ListBlock -> b.copy(items = b.items.map { it.copy(children = transformBlocks(it.children)) })
+            is MarkdownBlock.Details -> b.copy(children = transformBlocks(b.children))
+            is MarkdownBlock.Container -> b.copy(children = transformBlocks(b.children))
             else -> b
         }
     }
