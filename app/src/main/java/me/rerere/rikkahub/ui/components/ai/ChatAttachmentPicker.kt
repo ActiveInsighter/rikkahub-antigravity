@@ -52,6 +52,7 @@ internal fun rememberChatAttachmentPickerActions(
     val resources = LocalResources.current
     val toaster = LocalToaster.current
     val filesManager: FilesManager = koinInject()
+    val addAndUploadImages = rememberR2ImageUploader(inputState)
     val cameraPermission = rememberPermissionState(PermissionCamera)
     PermissionManager(permissionState = cameraPermission)
 
@@ -59,7 +60,7 @@ internal fun rememberChatAttachmentPickerActions(
     var cameraOutputFile by remember { mutableStateOf<File?>(null) }
     val launchCameraCrop = useCropLauncher(
         onCroppedImageReady = { croppedUri ->
-            inputState.addImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
+            addAndUploadImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
             onAttachmentAdded()
         },
         onCleanup = {
@@ -71,7 +72,7 @@ internal fun rememberChatAttachmentPickerActions(
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captureSuccessful ->
         if (captureSuccessful && cameraOutputUri != null) {
             if (setting.displaySetting.skipCropImage) {
-                inputState.addImages(filesManager.createChatFilesByContents(listOf(cameraOutputUri!!)))
+                addAndUploadImages(filesManager.createChatFilesByContents(listOf(cameraOutputUri!!)))
                 cameraOutputFile?.delete()
                 cameraOutputFile = null
                 cameraOutputUri = null
@@ -101,7 +102,7 @@ internal fun rememberChatAttachmentPickerActions(
 
     val launchImageCrop = useCropLauncher(
         onCroppedImageReady = { croppedUri ->
-            inputState.addImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
+            addAndUploadImages(filesManager.createChatFilesByContents(listOf(croppedUri)))
             onAttachmentAdded()
         },
     )
@@ -112,7 +113,7 @@ internal fun rememberChatAttachmentPickerActions(
                 if (!setting.displaySetting.skipCropImage && selectedUris.size == 1) {
                     launchImageCrop(selectedUris.first())
                 } else {
-                    inputState.addImages(filesManager.createChatFilesByContents(selectedUris))
+                    addAndUploadImages(filesManager.createChatFilesByContents(selectedUris))
                     onAttachmentAdded()
                 }
             } else {
@@ -175,7 +176,7 @@ internal fun rememberChatAttachmentPickerActions(
             onConfirm = { result ->
                 showSketch = false
                 scope.launch {
-                    inputState.addImages(listOfNotNull(filesManager.createChatFileBySketch(result)))
+                    addAndUploadImages(listOfNotNull(filesManager.createChatFileBySketch(result)))
                     onAttachmentAdded()
                 }
             },

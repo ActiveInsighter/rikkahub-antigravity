@@ -35,7 +35,7 @@
 
 ## Actions 构建
 
-`Antigravity Debug APK` 工作流在推送 `main` 或手动运行时执行，测试 `InteractionsApiTest`、构建 `:app:assembleGithubDebug`、验证 APK 签名、上传构建附件并创建含 APK 和 SHA-256 清单的预发布 Release。
+`Antigravity Debug APK` 工作流在推送 `main` 或从任一包含该工作流的分支手动运行时执行。构建成功后，在该次运行的 **Summary → Artifacts** 直接下载对应的 `arm64-v8a`、`x86_64` 或 `universal` APK。运行摘要提供 SHA-256 校验值，预发布 Release 也提供 APK 和校验清单。
 
 环境：JDK 21、上游 Gradle Wrapper、Android SDK 37.2、CMake 3.22.1、Node 22、pnpm 11。库模块的 compileSdk 显式与 app 对齐到 37.2，避免 SDK 仓库不存在 android-37 包名的问题。Gradle 按上游配置安装所需 NDK 等依赖。
 

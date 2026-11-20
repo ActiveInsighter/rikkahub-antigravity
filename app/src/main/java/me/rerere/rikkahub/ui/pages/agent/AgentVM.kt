@@ -526,6 +526,7 @@ class AgentVM(
         )
         val prompt = buildPromptFromParts(parts)
         val sources = extractSourcesFromParts(parts)
+        val images = extractImagesFromParts(parts)
 
         when (category) {
             AgentModelCategory.CHAT -> {
@@ -549,6 +550,7 @@ class AgentVM(
                         baseConversation = updatedWithUser,
                         prompt = prompt,
                         sources = sources,
+                        images = images,
                         parentMessageId = snapshot.value?.lastRemoteMessageId,
                         replacesMessageId = null,
                         title = if (current.title.isBlank()) nextTitle else "",
@@ -599,6 +601,7 @@ class AgentVM(
         val modelEntity = currentOrFallbackModelEntity()
         val prompt = buildPromptFromParts(userMsg.parts)
         val sources = extractSourcesFromParts(userMsg.parts)
+        val images = extractImagesFromParts(userMsg.parts)
 
         when (modelEntity.modelCategory) {
             AgentModelCategory.CHAT -> {
@@ -623,6 +626,7 @@ class AgentVM(
                         baseConversation = current,
                         prompt = prompt,
                         sources = sources,
+                        images = images,
                         parentMessageId = null,
                         replacesMessageId = snapshot.value?.lastRemoteMessageId,
                         title = "",
@@ -968,6 +972,7 @@ class AgentVM(
         baseConversation: Conversation,
         prompt: String,
         sources: List<RemoteAgentSourceInput>,
+        images: List<String> = emptyList(),
         parentMessageId: String?,
         replacesMessageId: String?,
         title: String,
@@ -1003,6 +1008,7 @@ class AgentVM(
             conversation = initialConv,
             prompt = prompt,
             sources = sources,
+            images = images,
             parentMessageId = parentMessageId,
             replacesMessageId = replacesMessageId,
             title = title,
@@ -1028,11 +1034,18 @@ class AgentVM(
             .trim()
         if (text.isNotEmpty()) return text
         val docNames = parts.filterIsInstance<UIMessagePart.Document>().map { it.fileName }
-        return if (docNames.isNotEmpty()) {
-            "请处理附件文件：${docNames.joinToString(", ")}"
-        } else {
-            ""
+        if (docNames.isNotEmpty()) {
+            return "请处理附件文件：${docNames.joinToString(", ")}"
         }
+        val hasImages = parts.any { it is UIMessagePart.Image }
+        return if (hasImages) "请查看并处理图片" else ""
+    }
+
+    private fun extractImagesFromParts(parts: List<UIMessagePart>): List<String> {
+        return parts.filterIsInstance<UIMessagePart.Image>()
+            .map { it.url.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
     }
 
     private fun extractSourcesFromParts(parts: List<UIMessagePart>): List<RemoteAgentSourceInput> {

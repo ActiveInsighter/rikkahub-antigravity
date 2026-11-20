@@ -642,3 +642,17 @@ enum class LibraryFileSort(val label: String) {
     SIZE_DESC("大小从大到小"),
 }
 
+data class LibraryImage(
+    val id: String,
+    val fileName: String,
+    val mimeType: String,
+    val size: Long,
+    val createdAt: String,
+    val sourceUrl: String,
+)
+
+data class LibraryImagePage(
+    val items: List<LibraryImage>,
+    val cursor: String,
+)
+

@@ -125,11 +125,13 @@ import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.hooks.ChatInputState
 import me.rerere.rikkahub.ui.pages.chat.AssistantBackground
 import me.rerere.rikkahub.ui.pages.chat.ChatList
 import me.rerere.rikkahub.ui.pages.chat.ChatSelectionState
 import me.rerere.ui.components.RikkaConfirmDialog
+import me.rerere.ui.toast.ToastType
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 import kotlin.uuid.Uuid
@@ -260,6 +262,8 @@ fun AgentPage(id: Uuid) {
 
     var showRenameDialog by remember { mutableStateOf(false) }
     var showModelPickerSheet by remember { mutableStateOf(false) }
+    var showImageLibrarySheet by remember { mutableStateOf(false) }
+    val toaster = LocalToaster.current
     var renameText by remember { mutableStateOf("") }
     var showClearConfirm by remember { mutableStateOf(false) }
     var editingMessage by remember { mutableStateOf<UIMessage?>(null) }
@@ -289,6 +293,9 @@ fun AgentPage(id: Uuid) {
                     },
                     onCloseDrawer = {
                         scope.launch { drawerState.close() }
+                    },
+                    onOpenImageLibrary = {
+                        showImageLibrarySheet = true
                     },
                 )
             },
@@ -582,6 +589,17 @@ fun AgentPage(id: Uuid) {
                 vm.deleteLocalModel(id)
             },
             onDismiss = { showModelPickerSheet = false },
+        )
+    }
+
+    if (showImageLibrarySheet) {
+        AgentImageLibrarySheet(
+            onReuseImage = { url ->
+                inputState.addRemoteImage(url)
+                showImageLibrarySheet = false
+                toaster.show(message = "已添加到当前输入框", type = ToastType.Success)
+            },
+            onDismiss = { showImageLibrarySheet = false },
         )
     }
 
