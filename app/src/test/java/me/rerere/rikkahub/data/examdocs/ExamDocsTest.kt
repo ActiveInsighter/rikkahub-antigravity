@@ -102,4 +102,49 @@ class ExamDocsTest {
             resolveExamDocsUrl(base, "/docs/math/01", "fig.png"),
         )
     }
+
+    @Test
+    fun buildAndroidMarkdownUrl_andDefaultSites_areConfigured() {
+        assertEquals(
+            "https://exam-docs.2212148739lbw.workers.dev/docs/math.android.md",
+            ExamDocsRepository.buildAndroidMarkdownUrl(
+                "https://exam-docs.2212148739lbw.workers.dev/",
+                "/docs/math/",
+            ),
+        )
+        assertEquals(
+            "https://study-docs.any1.tech/docs/408/intro.android.md",
+            ExamDocsRepository.buildAndroidMarkdownUrl(
+                DEFAULT_STUDY_DOCS_BASE_URL,
+                "/docs/408/intro",
+            ),
+        )
+        val sites = ExamDocsRepository.defaultSites()
+        assertEquals(2, sites.size)
+        assertEquals("exam-docs", sites[0].id)
+        assertEquals("study-docs", sites[1].id)
+    }
+
+    @Test
+    fun buildExamDocsRenderPlan_chunksLargeMarkdownAndMapsHeadingIndices() {
+        val sb = StringBuilder()
+        sb.append("# 第一章\n\n")
+        repeat(35) { i ->
+            sb.append("第 $i 行内容。\n\n")
+        }
+        sb.append("## 第二节\n\n")
+        sb.append(":::question 题目 1 | 单选题 | 4分\n题干\n:::\n\n")
+        sb.append(":::solution 答案：A\n解析\n:::\n")
+
+        val (items, headings) = me.rerere.rikkahub.ui.pages.examdocs.buildExamDocsRenderPlan(
+            processedMarkdown = sb.toString(),
+            maxChunkLines = 20,
+        )
+        assertTrue(items.size >= 4)
+        assertEquals(2, headings.size)
+        assertEquals(0, headings[0].renderItemIndex)
+        assertTrue(headings[1].renderItemIndex > 0)
+        assertTrue(items.any { it is me.rerere.rikkahub.ui.pages.examdocs.ExamDocsRenderItem.CustomBlock && it.block.type == "question" })
+        assertTrue(items.any { it is me.rerere.rikkahub.ui.pages.examdocs.ExamDocsRenderItem.CustomBlock && it.block.type == "solution" })
+    }
 }
