@@ -15,14 +15,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.DropdownMenuGroup
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.DropdownMenuPopup
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
@@ -51,7 +47,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -73,7 +68,6 @@ import me.rerere.hugeicons.stroke.Delete01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.MessageAdd01
-import me.rerere.hugeicons.stroke.MoreVertical
 import me.rerere.hugeicons.stroke.Share04
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.Settings
@@ -86,6 +80,8 @@ import me.rerere.rikkahub.data.repository.WorkspaceRepository
 import me.rerere.rikkahub.service.BackgroundShellStatus
 import me.rerere.rikkahub.service.ChatError
 import me.rerere.rikkahub.service.SessionActivity
+import me.rerere.rikkahub.ui.components.nav.TopBarMenuItem
+import me.rerere.rikkahub.ui.components.nav.TopBarMoreMenu
 import me.rerere.rikkahub.ui.components.ai.BackgroundTasksSheet
 import me.rerere.rikkahub.ui.components.ai.ChatAttachmentPickerActions
 import me.rerere.rikkahub.ui.components.ai.ChatInput
@@ -769,7 +765,7 @@ private fun TopBar(
     }
 }
 
-// 顶栏右侧的会话菜单；空对话没有内容可概览、导出或删除，菜单项全部置灰
+// 空对话没有内容可概览、导出或删除。
 @Composable
 private fun ChatPageMenu(
     enabled: Boolean,
@@ -777,70 +773,11 @@ private fun ChatPageMenu(
     onExport: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-
-    @Composable
-    fun MenuItem(
-        text: String,
-        icon: ImageVector,
-        index: Int,
-        count: Int,
-        destructive: Boolean = false,
-        onClick: () -> Unit,
-    ) {
-        DropdownMenuItem(
-            text = { Text(text) },
-            onClick = {
-                expanded = false
-                onClick()
-            },
-            shape = MenuDefaults.itemShape(index = index, count = count).shape,
-            leadingIcon = { Icon(icon, contentDescription = null) },
-            enabled = enabled,
-            colors = if (destructive) {
-                val errorColor = MaterialTheme.colorScheme.error
-                MenuDefaults.itemColors(textColor = errorColor, leadingIconColor = errorColor)
-            } else {
-                MenuDefaults.itemColors()
-            },
-        )
-    }
-
-    Box {
-        IconButton(onClick = { expanded = true }) {
-            Icon(HugeIcons.MoreVertical, stringResource(R.string.more_options))
-        }
-        DropdownMenuPopup(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            DropdownMenuGroup(shapes = MenuDefaults.groupShape(index = 0, count = 2)) {
-                MenuItem(
-                    text = stringResource(R.string.chat_page_conversation_map),
-                    icon = HugeIcons.LeftToRightListBullet,
-                    index = 0,
-                    count = 2,
-                    onClick = onShowOverview,
-                )
-                MenuItem(
-                    text = stringResource(R.string.export_title),
-                    icon = HugeIcons.Share04,
-                    index = 1,
-                    count = 2,
-                    onClick = onExport,
-                )
-            }
-            Spacer(Modifier.height(MenuDefaults.GroupSpacing))
-            DropdownMenuGroup(shapes = MenuDefaults.groupShape(index = 1, count = 2)) {
-                MenuItem(
-                    text = stringResource(R.string.delete),
-                    icon = HugeIcons.Delete01,
-                    index = 0,
-                    count = 1,
-                    destructive = true,
-                    onClick = onDelete,
-                )
-            }
-        }
-    }
+    TopBarMoreMenu(
+        listOf(
+            TopBarMenuItem(stringResource(R.string.chat_page_conversation_map), HugeIcons.LeftToRightListBullet, onShowOverview, enabled),
+            TopBarMenuItem(stringResource(R.string.export_title), HugeIcons.Share04, onExport, enabled),
+        ),
+        listOf(TopBarMenuItem(stringResource(R.string.delete), HugeIcons.Delete01, onDelete, enabled, destructive = true)),
+    )
 }

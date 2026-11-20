@@ -1,0 +1,136 @@
+package me.rerere.rikkahub.data.examdocs
+
+import androidx.compose.runtime.Immutable
+import me.rerere.bettertext.markdown.MarkdownBlock
+import me.rerere.bettertext.markdown.MarkdownDocument
+import me.rerere.bettertext.markdown.parseMarkdown
+import me.rerere.bettertext.markdown.plainText
+import okhttp3.HttpUrl.Companion.toHttpUrl
+
+@Immutable
+data class ExamDocsDocument(
+    val blocks: List<ExamDocsSegment>,
+    val headings: List<DocHeading>,
+    val sourceUrl: String,
+    val sourceBytes: Int,
+)
+
+@Immutable
+data class DocHeading(val level: Int, val title: String, val blockIndex: Int, val anchor: String)
+
+@Immutable
+sealed interface ExamDocsSegment {
+    data class Markdown(val document: MarkdownDocument) : ExamDocsSegment
+    data class CustomBlock(
+        val type: String,
+        val title: String?,
+        val blocks: List<ExamDocsSegment>,
+    ) : ExamDocsSegment
+}
+
+private val legacyHeader = Regex("""^#\s+.+?\s+\(/docs[^)]*\)\s*$""")
+private val containerOpen = Regex("""^ {0,3}:::[ \t]*([A-Za-z0-9_-]+)(?:[ \t]+(.*))?$""")
+private val containerClose = Regex("""^ {0,3}:::[ \t]*$""")
+private val codeFence = Regex("""^ {0,3}(`{3,}|~{3,})(.*)$""")
+private val anchorPunctuation = Regex("""[^\p{L}\p{M}\p{N}_\s-]""")
+private val anchorWhitespace = Regex("""\s+""")
+
+fun prepareExamDocsDocument(raw: String, sourceUrl: String, legacy: Boolean): ExamDocsDocument {
+    val normalized = raw.replace("\r\n", "\n").replace('\r', '\n').removePrefix("\uFEFF")
+    val markdown = if (legacy && legacyHeader.matches(normalized.substringBefore('\n'))) {
+        normalized.substringAfter('\n', "").trimStart('\n')
+    } else {
+        normalized
+    }
+    val blocks = parseExamDocsSegments(markdown)
+    val anchors = mutableSetOf<String>()
+    val headings = blocks.mapIndexedNotNull { index, segment ->
+        val heading = (segment as? ExamDocsSegment.Markdown)?.document?.blocks?.singleOrNull() as? MarkdownBlock.Heading
+            ?: return@mapIndexedNotNull null
+        val title = heading.content.plainText().trim().ifEmpty { return@mapIndexedNotNull null }
+        val base = title.lowercase().replace(anchorPunctuation, "").replace(anchorWhitespace, "-")
+        var anchor = base
+        var suffix = 1
+        while (!anchors.add(anchor)) anchor = "$base-${suffix++}"
+        DocHeading(heading.level, title, index, anchor)
+    }
+    return ExamDocsDocument(blocks, headings, sourceUrl, (raw.length * 2).coerceAtLeast(1))
+}
+
+internal fun parseExamDocsSegments(markdown: String): List<ExamDocsSegment> {
+    val lines = markdown.lines()
+    val matchingEnds = mutableMapOf<Int, Int>()
+    val open = ArrayDeque<Int>()
+    var fence: String? = null
+
+    // Find balanced containers before parsing any Markdown. Incomplete containers
+    // stay in the text and neither code fences nor their contents become directives.
+    lines.forEachIndexed { index, line ->
+        val match = codeFence.matchEntire(line)
+        val marker = match?.groupValues?.get(1)
+        val current = fence
+        when {
+            current != null -> {
+                if (marker != null && marker.first() == current.first() &&
+                    marker.length >= current.length && match?.groupValues?.get(2).isNullOrBlank()
+                ) fence = null
+            }
+            marker != null -> fence = marker
+            containerOpen.matches(line) -> open.addLast(index)
+            containerClose.matches(line) && open.isNotEmpty() -> matchingEnds[open.removeLast()] = index
+        }
+    }
+
+    fun parseRange(start: Int, end: Int, depth: Int): List<ExamDocsSegment> = buildList {
+        fun addMarkdown(from: Int, until: Int) {
+            if (from >= until) return
+            val text = lines.subList(from, until).joinToString("\n")
+            if (text.isBlank()) return
+            for (block in parseMarkdown(text).blocks) {
+                add(ExamDocsSegment.Markdown(MarkdownDocument("", listOf(block))))
+            }
+        }
+
+        var from = start
+        var index = start
+        while (index < end && depth < 16) {
+            val close = matchingEnds[index]
+            if (close == null || close >= end) {
+                index++
+                continue
+            }
+            val directive = requireNotNull(containerOpen.matchEntire(lines[index]))
+            val type = directive.groupValues[1].lowercase()
+            val title = directive.groupValues[2].trim().ifEmpty { null }
+            val children = parseRange(index + 1, close, depth + 1)
+            addMarkdown(from, index)
+            add(ExamDocsSegment.CustomBlock(type, title, children))
+            index = close + 1
+            from = index
+        }
+        addMarkdown(from, end)
+    }
+
+    return parseRange(0, lines.size, 0)
+}
+
+data class ExamDocsLink(val path: String, val fragment: String?)
+
+fun getExamDocsLink(baseUrl: String, currentPageUrl: String, rawUrl: String): ExamDocsLink? {
+    val base = baseUrl.toHttpUrl()
+    val target = base.resolve(resolveExamDocsUrl(baseUrl, currentPageUrl, rawUrl)) ?: return null
+    if (target.scheme != base.scheme || target.host != base.host || target.port != base.port) return null
+    val path = target.encodedPath.removePrefix(base.encodedPath.trimEnd('/'))
+    val normalized = ExamDocsRepository.normalizeDocPath(path)
+    if (normalized != "/docs" && !normalized.startsWith("/docs/")) return null
+    return ExamDocsLink(normalized, target.fragment?.takeIf(String::isNotBlank))
+}
+
+fun resolveExamDocsUrl(baseUrl: String, currentPageUrl: String, rawUrl: String): String {
+    val link = rawUrl.trim()
+    val base = "$baseUrl$currentPageUrl".toHttpUrl()
+    if (link.startsWith('/') && !link.startsWith("//")) {
+        return base.resolve("$baseUrl$link")?.toString() ?: link
+    }
+    return base.resolve(link)?.toString() ?: link
+}

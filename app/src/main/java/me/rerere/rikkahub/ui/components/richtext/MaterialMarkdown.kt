@@ -43,10 +43,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import me.rerere.bettertext.markdown.MarkdownBlock
 import me.rerere.bettertext.markdown.MarkdownComponents
+import me.rerere.bettertext.markdown.MarkdownDocument
 import me.rerere.bettertext.markdown.MarkdownInline
 import me.rerere.bettertext.markdown.MarkdownInlineContent
 import me.rerere.bettertext.markdown.MarkdownTheme
 import me.rerere.bettertext.markdown.TableCell
+import me.rerere.bettertext.markdown.rememberMarkdownDocument
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Image02
@@ -76,18 +78,35 @@ fun MaterialMarkdown(
     streaming: Boolean = false,
     onLinkClick: ((url: String) -> Unit)? = null,
 ) {
+    MaterialMarkdown(
+        document = rememberMarkdownDocument(content, softBreakAsLineBreak, streaming),
+        modifier = modifier,
+        style = style,
+        theme = theme,
+        components = components,
+        onLinkClick = onLinkClick,
+    )
+}
+
+@Composable
+internal fun MaterialMarkdown(
+    document: MarkdownDocument,
+    modifier: Modifier,
+    style: TextStyle,
+    theme: MarkdownTheme,
+    components: MarkdownComponents,
+    onLinkClick: ((url: String) -> Unit)?,
+) {
     val merged = LocalTextStyle.current.merge(style)
     val resolved = merged.copy(color = merged.color.takeOrElse { LocalContentColor.current })
     // 插槽里的组件（代码块、表格工具栏等）用 Material 的 Text，让它们也拿到正文样式
     ProvideTextStyle(resolved) {
         BetterMarkdown(
-            content = content,
+            document = document,
             modifier = modifier,
             style = resolved,
             theme = theme,
             components = components,
-            softBreakAsLineBreak = softBreakAsLineBreak,
-            streaming = streaming,
             onLinkClick = onLinkClick,
         )
     }

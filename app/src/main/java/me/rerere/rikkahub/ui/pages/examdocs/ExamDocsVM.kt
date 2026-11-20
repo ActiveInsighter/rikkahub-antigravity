@@ -3,18 +3,30 @@ package me.rerere.rikkahub.ui.pages.examdocs
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.data.examdocs.ExamDocFlatEntry
 import me.rerere.rikkahub.data.examdocs.ExamDocNode
+import me.rerere.rikkahub.data.examdocs.ExamDocsDirectory
+import me.rerere.rikkahub.data.examdocs.ExamDocsDocument
+import me.rerere.rikkahub.data.examdocs.ExamDocsLink
 import me.rerere.rikkahub.data.examdocs.ExamDocsRepository
+import me.rerere.rikkahub.data.examdocs.ExamDocsSite
+import me.rerere.rikkahub.data.examdocs.builtInDocsSites
+import me.rerere.rikkahub.data.examdocs.getExamDocsLink
+import okhttp3.HttpUrl.Companion.toHttpUrl
 
 @Immutable
 data class ExamDocsUiState(
-    val baseUrl: String = "",
+    val sites: List<ExamDocsSite> = builtInDocsSites,
+    val activeSite: ExamDocsSite = builtInDocsSites.first(),
+    val sitesReady: Boolean = false,
     val isLoadingTree: Boolean = true,
     val treeError: String? = null,
     val modules: List<ExamDocNode.Folder> = emptyList(),
@@ -23,8 +35,8 @@ data class ExamDocsUiState(
     val currentBreadcrumb: List<String> = emptyList(),
     val isLoadingContent: Boolean = false,
     val contentError: String? = null,
-    val markdownContent: String? = null,
-    val headings: List<DocHeading> = emptyList(),
+    val document: ExamDocsDocument? = null,
+    val pendingAnchor: String? = null,
     val prevPage: ExamDocNode.Page? = null,
     val nextPage: ExamDocNode.Page? = null,
     val searchQuery: String = "",
@@ -35,207 +47,173 @@ class ExamDocsVM(
     private val initialUrl: String?,
     private val repository: ExamDocsRepository,
 ) : ViewModel() {
-
-    private val _uiState = MutableStateFlow(
-        ExamDocsUiState(baseUrl = repository.getSavedBaseUrl())
-    )
+    private val _uiState = MutableStateFlow(ExamDocsUiState())
     val uiState = _uiState.asStateFlow()
 
-    private var flatEntries: List<ExamDocFlatEntry> = emptyList()
-    private var loadContentJob: Job? = null
+    private var directory: ExamDocsDirectory? = null
+    private var directoryJob: Job? = null
+    private var documentJob: Job? = null
+    private var searchJob: Job? = null
 
     init {
-        loadTree(forceRefresh = false, targetUrl = initialUrl)
+        viewModelScope.launch {
+            val settings = withContext(Dispatchers.IO) { repository.loadSiteSettings() }
+            val target = initialUrl?.let { getExamDocsLink(settings.active.baseUrl, "/docs", it) }
+            _uiState.value = ExamDocsUiState(sites = settings.sites, activeSite = settings.active, sitesReady = true)
+            loadTree(target = target)
+        }
     }
 
-    fun loadTree(
-        forceRefresh: Boolean = false,
-        targetUrl: String? = null,
-    ) {
-        val baseUrl = _uiState.value.baseUrl
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoadingTree = true, treeError = null) }
-            repository.fetchSourceTree(baseUrl = baseUrl, forceRefresh = forceRefresh)
-                .onSuccess { modules ->
-                    flatEntries = ExamDocsRepository.flattenPages(modules)
-                    val desiredUrl = targetUrl
-                        ?: _uiState.value.currentPage?.url
-                        ?: repository.getLastPageUrl()
+    fun reload() {
+        val current = _uiState.value.currentPage
+        val target = current?.let { ExamDocsLink(it.url, _uiState.value.pendingAnchor) }
+        loadTree(refresh = true, target = target)
+    }
 
-                    val matchedEntry = desiredUrl?.let { raw ->
-                        val normalized = ExamDocsRepository.normalizeDocPath(raw)
-                        flatEntries.firstOrNull { it.page.url == normalized }
-                    } ?: flatEntries.firstOrNull()
-
-                    _uiState.update { state ->
-                        state.copy(
-                            isLoadingTree = false,
-                            treeError = null,
-                            modules = modules,
-                            selectedModuleIndex = matchedEntry?.moduleIndex
-                                ?: state.selectedModuleIndex.coerceIn(0, (modules.size - 1).coerceAtLeast(0)),
-                        )
-                    }
-                    updateSearchResults(_uiState.value.searchQuery)
-
-                    if (matchedEntry != null) {
-                        openPageInternal(matchedEntry, forceRefresh = forceRefresh)
-                    } else if (desiredUrl != null) {
-                        openRawPath(desiredUrl, forceRefresh = forceRefresh)
-                    }
+    private fun loadTree(refresh: Boolean = false, target: ExamDocsLink? = null) {
+        val site = _uiState.value.activeSite
+        directoryJob?.cancel()
+        documentJob?.cancel()
+        directoryJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingTree = true, treeError = null, isLoadingContent = false, document = null) }
+            try {
+                val index = repository.fetchSourceTree(site, refresh)
+                val preferred = target?.path ?: withContext(Dispatchers.IO) { repository.getLastPageUrl(site) }
+                directory = index
+                val entry = preferred?.let(index.pageIndexes::get)?.let(index.entries::get) ?: index.entries.firstOrNull()
+                val page = if (target != null && target.path !in index.pageIndexes) {
+                    ExamDocNode.Page(documentTitle(target.path), target.path)
+                } else {
+                    entry?.page
                 }
-                .onFailure { error ->
-                    _uiState.update {
-                        it.copy(
-                            isLoadingTree = false,
-                            treeError = error.message ?: "无法加载文档目录",
-                        )
-                    }
+                _uiState.update {
+                    it.copy(isLoadingTree = false, modules = index.modules)
                 }
+                updateSearchQuery(_uiState.value.searchQuery)
+                if (page != null) openPage(page, refresh, target?.fragment)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _uiState.update { it.copy(isLoadingTree = false, treeError = error.message ?: "无法加载文档目录") }
+            }
         }
+    }
+
+    fun switchSite(site: ExamDocsSite) {
+        val state = _uiState.value
+        if (site == state.activeSite) return
+        applySiteSettings(state.sites, site)
+    }
+
+    fun saveSite(original: ExamDocsSite?, name: String, rawUrl: String): String? {
+        val baseUrl = ExamDocsRepository.parseBaseUrl(rawUrl) ?: return "请输入有效的 HTTP 或 HTTPS 站点地址"
+        val state = _uiState.value
+        if (state.sites.any { it != original && it.baseUrl == baseUrl }) return "这个站点已经添加"
+        val site = ExamDocsSite(name.trim().ifBlank { baseUrl.toHttpUrl().host }, baseUrl)
+        val sites = if (original == null) state.sites + site else state.sites.map { if (it == original) site else it }
+        applySiteSettings(sites, if (original == null || original == state.activeSite) site else state.activeSite)
+        return null
+    }
+
+    fun removeSite(site: ExamDocsSite) {
+        val state = _uiState.value
+        if (site in builtInDocsSites) return
+        val sites = state.sites - site
+        applySiteSettings(sites, state.activeSite.takeUnless { it == site } ?: sites.first())
+    }
+
+    private fun applySiteSettings(sites: List<ExamDocsSite>, active: ExamDocsSite) {
+        val state = _uiState.value
+        repository.saveSiteSettings(sites, active)
+        if (state.activeSite.baseUrl == active.baseUrl) {
+            _uiState.update { it.copy(sites = sites, activeSite = active) }
+            return
+        }
+        searchJob?.cancel()
+        directory = null
+        _uiState.value = ExamDocsUiState(
+            sites = sites,
+            activeSite = active,
+            sitesReady = true,
+            searchQuery = state.searchQuery,
+        )
+        loadTree()
     }
 
     fun selectModule(index: Int) {
-        val modules = _uiState.value.modules
-        if (index in modules.indices) {
-            _uiState.update { it.copy(selectedModuleIndex = index) }
-        }
-    }
-
-    fun openPage(page: ExamDocNode.Page, forceRefresh: Boolean = false) {
-        val entryIndex = flatEntries.indexOfFirst { it.page.url == page.url }
-        if (entryIndex >= 0) {
-            openPageInternal(flatEntries[entryIndex], forceRefresh = forceRefresh)
-        } else {
-            openRawPath(page.url, titleFallback = page.name, forceRefresh = forceRefresh)
-        }
-    }
-
-    fun openByUrl(url: String) {
-        val normalized = ExamDocsRepository.normalizeDocPath(url)
-        val entry = flatEntries.firstOrNull { it.page.url == normalized }
-        if (entry != null) {
-            openPageInternal(entry, forceRefresh = false)
-        } else {
-            openRawPath(normalized, forceRefresh = false)
-        }
-    }
-
-    fun refreshCurrentPage() {
-        val page = _uiState.value.currentPage
-        if (page != null) {
-            openPage(page, forceRefresh = true)
-        } else {
-            loadTree(forceRefresh = true)
-        }
+        _uiState.update { if (index in it.modules.indices) it.copy(selectedModuleIndex = index) else it }
     }
 
     fun updateSearchQuery(query: String) {
-        _uiState.update { it.copy(searchQuery = query) }
-        updateSearchResults(query)
-    }
-
-    fun updateBaseUrl(newBaseUrl: String) {
-        val saved = repository.saveBaseUrl(newBaseUrl)
-        _uiState.update {
-            it.copy(
-                baseUrl = saved,
-                modules = emptyList(),
-                currentPage = null,
-                currentBreadcrumb = emptyList(),
-                markdownContent = null,
-                headings = emptyList(),
-                prevPage = null,
-                nextPage = null,
-            )
-        }
-        loadTree(forceRefresh = true)
-    }
-
-    private fun updateSearchResults(query: String) {
+        searchJob?.cancel()
+        _uiState.update { it.copy(searchQuery = query, searchResults = emptyList()) }
         val trimmed = query.trim()
-        val results = if (trimmed.isEmpty()) {
-            emptyList()
-        } else {
-            flatEntries.filter { entry ->
-                entry.page.name.contains(trimmed, ignoreCase = true) ||
-                    entry.breadcrumb.any { it.contains(trimmed, ignoreCase = true) } ||
-                    entry.page.url.contains(trimmed, ignoreCase = true)
-            }.take(60)
+        val entries = directory?.entries ?: return
+        if (trimmed.isEmpty()) return
+        searchJob = viewModelScope.launch {
+            val matches = withContext(Dispatchers.Default) {
+                entries.asSequence().filter { entry ->
+                    entry.page.name.contains(trimmed, ignoreCase = true) ||
+                        entry.breadcrumb.any { it.contains(trimmed, ignoreCase = true) } ||
+                        documentTitle(entry.page.url).contains(trimmed, ignoreCase = true) ||
+                        entry.page.url.contains(trimmed, ignoreCase = true)
+                }.take(60).toList()
+            }
+            _uiState.update { it.copy(searchResults = matches) }
         }
-        _uiState.update { it.copy(searchResults = results) }
     }
 
-    private fun openPageInternal(entry: ExamDocFlatEntry, forceRefresh: Boolean) {
-        val index = flatEntries.indexOf(entry)
-        val prev = if (index > 0) flatEntries[index - 1].page else null
-        val next = if (index >= 0 && index + 1 < flatEntries.size) flatEntries[index + 1].page else null
-
-        repository.saveLastPageUrl(entry.page.url)
-        _uiState.update {
-            it.copy(
-                selectedModuleIndex = entry.moduleIndex,
-                currentPage = entry.page,
-                currentBreadcrumb = entry.breadcrumb,
-                prevPage = prev,
-                nextPage = next,
-                isLoadingContent = true,
-                contentError = null,
-            )
-        }
-
-        fetchMarkdownContent(entry.page.url, forceRefresh)
+    fun openLink(link: ExamDocsLink) {
+        val entry = directory?.let { index -> index.pageIndexes[link.path]?.let(index.entries::get) }
+        openPage(entry?.page ?: ExamDocNode.Page(documentTitle(link.path), link.path), anchor = link.fragment)
     }
 
-    private fun openRawPath(
-        rawPath: String,
-        titleFallback: String? = null,
-        forceRefresh: Boolean = false,
-    ) {
-        val normalized = ExamDocsRepository.normalizeDocPath(rawPath)
-        val page = ExamDocNode.Page(
-            name = titleFallback ?: normalized.substringAfterLast('/').ifBlank { "文档" },
-            url = normalized,
-        )
-        repository.saveLastPageUrl(normalized)
+    fun openPage(page: ExamDocNode.Page) = openPage(page, refresh = false)
+
+    private fun openPage(page: ExamDocNode.Page, refresh: Boolean = false, anchor: String? = null) {
+        val state = _uiState.value
+        if (!refresh && state.currentPage?.url == page.url && state.document != null) {
+            _uiState.update { it.copy(pendingAnchor = anchor) }
+            return
+        }
+
+        documentJob?.cancel()
+        val index = directory
+        val pageIndex = index?.pageIndexes?.get(page.url) ?: -1
+        val entry = index?.entries?.getOrNull(pageIndex)
         _uiState.update {
             it.copy(
                 currentPage = page,
-                currentBreadcrumb = emptyList(),
-                prevPage = null,
-                nextPage = null,
+                selectedModuleIndex = entry?.moduleIndex ?: it.selectedModuleIndex,
+                currentBreadcrumb = entry?.breadcrumb.orEmpty(),
+                prevPage = index?.entries?.getOrNull(pageIndex - 1)?.page,
+                nextPage = if (pageIndex >= 0) index?.entries?.getOrNull(pageIndex + 1)?.page else null,
                 isLoadingContent = true,
                 contentError = null,
+                document = null,
+                pendingAnchor = anchor,
             )
         }
-        fetchMarkdownContent(normalized, forceRefresh)
-    }
 
-    private fun fetchMarkdownContent(pageUrl: String, forceRefresh: Boolean) {
-        loadContentJob?.cancel()
-        val baseUrl = _uiState.value.baseUrl
-        loadContentJob = viewModelScope.launch {
-            repository.fetchMarkdown(baseUrl = baseUrl, pageUrl = pageUrl, forceRefresh = forceRefresh)
-                .onSuccess { rawMarkdown ->
-                    val processed = preprocessExamDocsMarkdown(rawMarkdown)
-                    val headings = extractDocHeadings(processed)
-                    _uiState.update {
-                        it.copy(
-                            isLoadingContent = false,
-                            contentError = null,
-                            markdownContent = rawMarkdown,
-                            headings = headings,
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    _uiState.update {
-                        it.copy(
-                            isLoadingContent = false,
-                            contentError = error.message ?: "无法加载文档内容",
-                        )
-                    }
-                }
+        documentJob = viewModelScope.launch {
+            try {
+                val document = repository.fetchDocument(
+                    state.activeSite, page.url, index?.usesAndroidMarkdown == true, refresh,
+                )
+                repository.saveLastPageUrl(state.activeSite, page.url)
+                _uiState.update { it.copy(isLoadingContent = false, document = document) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _uiState.update { it.copy(isLoadingContent = false, contentError = error.message ?: "无法加载文档") }
+            }
         }
     }
+
+    fun consumeAnchor(anchor: String) {
+        _uiState.update { if (it.pendingAnchor == anchor) it.copy(pendingAnchor = null) else it }
+    }
+
+    private fun documentTitle(path: String): String =
+        ("https://docs.invalid$path").toHttpUrl().pathSegments.last().ifBlank { "文档" }
 }

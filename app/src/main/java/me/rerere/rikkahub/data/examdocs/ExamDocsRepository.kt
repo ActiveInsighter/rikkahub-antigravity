@@ -1,24 +1,50 @@
 package me.rerere.rikkahub.data.examdocs
 
 import android.content.Context
+import android.util.LruCache
 import androidx.core.content.edit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.IOException
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 const val DEFAULT_EXAM_DOCS_BASE_URL = "https://exam-docs.2212148739lbw.workers.dev"
+const val DEFAULT_STUDY_DOCS_BASE_URL = "https://study-docs.any1.tech"
 private const val PREFS_NAME = "exam_docs_prefs"
+private const val KEY_SITES = "sites"
+private const val KEY_ACTIVE_SITE = "active_site"
 private const val KEY_BASE_URL = "base_url"
 private const val KEY_LAST_PAGE_URL = "last_page_url"
+private const val ANDROID_MARKDOWN_VERSION = 1
+private const val MAX_RESPONSE_BYTES = 16L * 1024 * 1024
+
+@Serializable
+data class ExamDocsSite(val name: String, val baseUrl: String)
+
+val builtInDocsSites = listOf(
+    ExamDocsSite("Exam Docs", DEFAULT_EXAM_DOCS_BASE_URL),
+    ExamDocsSite("Study Docs", DEFAULT_STUDY_DOCS_BASE_URL),
+)
+
+data class ExamDocsSiteSettings(val sites: List<ExamDocsSite>, val active: ExamDocsSite)
 
 @Serializable
 data class ExamDocSourceTreeDto(
-    val modules: List<ExamDocRawNodeDto> = emptyList(),
+    val modules: List<ExamDocRawNodeDto>,
+    val androidMarkdownVersion: Int? = null,
 )
 
 @Serializable
@@ -54,98 +80,136 @@ data class ExamDocFlatEntry(
     val breadcrumb: List<String>,
 )
 
-class ExamDocsRepository(
-    private val context: Context,
-    private val okHttpClient: OkHttpClient,
-    private val json: Json,
+data class ExamDocsDirectory(
+    val modules: List<ExamDocNode.Folder>,
+    val entries: List<ExamDocFlatEntry>,
+    val usesAndroidMarkdown: Boolean,
 ) {
-    private val prefs by lazy {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    val pageIndexes = entries.mapIndexed { index, entry -> entry.page.url to index }.toMap()
+}
+
+class ExamDocsRepository(
+    context: Context,
+    okHttpClient: OkHttpClient,
+    json: Json,
+) {
+    private val prefs by lazy { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+    private val json = Json(from = json) { ignoreUnknownKeys = true }
+    private val client = okHttpClient.newBuilder().callTimeout(30, TimeUnit.SECONDS).build()
+    private val directories = LruCache<String, ExamDocsDirectory>(4)
+    private val documents = object : LruCache<String, ExamDocsDocument>(8 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: ExamDocsDocument) = value.sourceBytes
     }
 
-    private val markdownCache = ConcurrentHashMap<String, String>()
-    private var cachedTreeUrl: String? = null
-    private var cachedModules: List<ExamDocNode.Folder>? = null
-
-    fun getSavedBaseUrl(): String {
-        val raw = prefs.getString(KEY_BASE_URL, null)
-        return normalizeBaseUrl(raw ?: DEFAULT_EXAM_DOCS_BASE_URL)
-    }
-
-    fun saveBaseUrl(url: String): String {
-        val normalized = normalizeBaseUrl(url)
-        prefs.edit { putString(KEY_BASE_URL, normalized) }
-        if (cachedTreeUrl != normalized) {
-            cachedTreeUrl = null
-            cachedModules = null
-            markdownCache.clear()
-        }
-        return normalized
-    }
-
-    fun getLastPageUrl(): String? = prefs.getString(KEY_LAST_PAGE_URL, null)
-
-    fun saveLastPageUrl(pageUrl: String) {
-        prefs.edit { putString(KEY_LAST_PAGE_URL, normalizeDocPath(pageUrl)) }
-    }
-
-    suspend fun fetchSourceTree(
-        baseUrl: String = getSavedBaseUrl(),
-        forceRefresh: Boolean = false,
-    ): Result<List<ExamDocNode.Folder>> = withContext(Dispatchers.IO) {
-        val normalizedBase = normalizeBaseUrl(baseUrl)
-        if (!forceRefresh && cachedTreeUrl == normalizedBase) {
-            cachedModules?.let { return@withContext Result.success(it) }
-        }
-
-        runCatching {
-            val request = Request.Builder()
-                .url("$normalizedBase/doc-sources.json")
-                .header("Accept", "application/json")
-                .get()
-                .build()
-
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw IOException("HTTP ${response.code} ${response.message}".trim())
-                }
-                val body = response.body.string()
-                val dto = json.decodeFromString(ExamDocSourceTreeDto.serializer(), body)
-                val modules = dto.modules.mapNotNull { raw -> convertFolder(raw) }
-                cachedTreeUrl = normalizedBase
-                cachedModules = modules
-                modules
+    fun loadSiteSettings(): ExamDocsSiteSettings {
+        val saved = prefs.getString(KEY_SITES, null)
+        if (saved == null) {
+            val legacy = parseBaseUrl(prefs.getString(KEY_BASE_URL, DEFAULT_EXAM_DOCS_BASE_URL).orEmpty())
+            val active = builtInDocsSites.firstOrNull { it.baseUrl == legacy }
+                ?: legacy?.let { ExamDocsSite(it.toHttpUrl().host, it) }
+                ?: builtInDocsSites.first()
+            val sites = (builtInDocsSites + active).distinctBy(ExamDocsSite::baseUrl)
+            val lastPage = prefs.getString(KEY_LAST_PAGE_URL, null)
+            prefs.edit {
+                putString(KEY_SITES, json.encodeToString(sites.filterNot(builtInDocsSites::contains)))
+                putString(KEY_ACTIVE_SITE, active.baseUrl)
+                lastPage?.let { putString(lastPageKey(active.baseUrl), normalizeDocPath(it)) }
             }
+            return ExamDocsSiteSettings(sites, active)
+        }
+
+        val custom = runCatching { json.decodeFromString<List<ExamDocsSite>>(saved) }.getOrDefault(emptyList())
+        val sites = (builtInDocsSites + custom).distinctBy(ExamDocsSite::baseUrl)
+        val activeUrl = prefs.getString(KEY_ACTIVE_SITE, null)
+        return ExamDocsSiteSettings(sites, sites.firstOrNull { it.baseUrl == activeUrl } ?: sites.first())
+    }
+
+    fun saveSiteSettings(sites: List<ExamDocsSite>, active: ExamDocsSite) {
+        prefs.edit {
+            putString(KEY_SITES, json.encodeToString(sites.filterNot(builtInDocsSites::contains)))
+            putString(KEY_ACTIVE_SITE, active.baseUrl)
         }
     }
 
-    suspend fun fetchMarkdown(
-        baseUrl: String,
+    fun getLastPageUrl(site: ExamDocsSite): String? = prefs.getString(lastPageKey(site.baseUrl), null)
+
+    fun saveLastPageUrl(site: ExamDocsSite, pageUrl: String) {
+        prefs.edit { putString(lastPageKey(site.baseUrl), pageUrl) }
+    }
+
+    private fun lastPageKey(baseUrl: String) = "last_page:$baseUrl"
+
+    suspend fun fetchSourceTree(site: ExamDocsSite, refresh: Boolean): ExamDocsDirectory {
+        if (!refresh) directories.get(site.baseUrl)?.let { return it }
+        val body = fetchText("${site.baseUrl}/doc-sources.json", "application/json")
+            ?: throw IOException("站点缺少 /doc-sources.json")
+        return withContext(Dispatchers.Default) {
+            val tree = json.decodeFromString<ExamDocSourceTreeDto>(body)
+            val modules = tree.modules.mapNotNull(::convertFolder)
+            val directory = ExamDocsDirectory(
+                modules,
+                flattenPages(modules).distinctBy { it.page.url },
+                tree.androidMarkdownVersion == ANDROID_MARKDOWN_VERSION,
+            )
+            ensureActive()
+            directories.put(site.baseUrl, directory)
+            directory
+        }
+    }
+
+    suspend fun fetchDocument(
+        site: ExamDocsSite,
         pageUrl: String,
-        forceRefresh: Boolean = false,
-    ): Result<String> = withContext(Dispatchers.IO) {
-        val mdUrl = buildMarkdownUrl(baseUrl, pageUrl)
-        if (!forceRefresh) {
-            markdownCache[mdUrl]?.let { return@withContext Result.success(it) }
+        usesAndroidMarkdown: Boolean,
+        refresh: Boolean,
+    ): ExamDocsDocument {
+        val legacyUrl = buildMarkdownUrl(site.baseUrl, pageUrl)
+        val preferredUrl = buildMarkdownUrl(site.baseUrl, pageUrl, usesAndroidMarkdown)
+        if (!refresh) documents.get(preferredUrl)?.let { return it }
+        var sourceUrl = preferredUrl
+        val accept = "text/markdown, text/plain;q=0.9, */*;q=0.5"
+        var markdown = fetchText(sourceUrl, accept)
+        if (markdown == null && sourceUrl != legacyUrl) {
+            sourceUrl = legacyUrl
+            markdown = fetchText(sourceUrl, accept)
         }
-
-        runCatching {
-            val request = Request.Builder()
-                .url(mdUrl)
-                .header("Accept", "text/markdown, text/plain, */*")
-                .get()
-                .build()
-
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw IOException("HTTP ${response.code} ${response.message}".trim())
-                }
-                val text = response.body.string()
-                markdownCache[mdUrl] = text
-                text
-            }
+        val content = markdown ?: throw IOException("未找到文档")
+        return withContext(Dispatchers.Default) {
+            val document = prepareExamDocsDocument(content, sourceUrl, legacy = sourceUrl == legacyUrl)
+            ensureActive()
+            documents.put(preferredUrl, document)
+            document
         }
     }
+
+    private suspend fun fetchText(url: String, accept: String): String? =
+        suspendCancellableCoroutine { continuation ->
+            val call = client.newCall(Request.Builder().url(url).header("Accept", accept).build())
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    continuation.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        val text = response.use {
+                            if (it.code == 404 || it.code == 410) return@use null
+                            if (!it.isSuccessful) throw IOException("HTTP ${it.code} ${it.message}".trim())
+                            if (it.body.contentType()?.subtype?.contains("html") == true) {
+                                throw IOException("服务器返回了网页")
+                            }
+                            val source = it.body.source()
+                            if (source.request(MAX_RESPONSE_BYTES + 1)) throw IOException("文档超过大小限制")
+                            it.body.string()
+                        }
+                        continuation.resume(text)
+                    } catch (error: IOException) {
+                        continuation.resumeWithException(error)
+                    }
+                }
+            })
+        }
 
     private fun convertFolder(raw: ExamDocRawNodeDto): ExamDocNode.Folder? {
         if (raw.kind != "folder") return null
@@ -161,7 +225,7 @@ class ExamDocsRepository(
         return when (raw.kind) {
             "folder" -> convertFolder(raw)
             "page" -> {
-                val url = raw.url?.takeIf { it.isNotBlank() } ?: return null
+                val url = raw.url?.takeIf { it.startsWith("/docs/") || it == "/docs" } ?: return null
                 ExamDocNode.Page(
                     name = raw.name.ifBlank { url.substringAfterLast('/') },
                     url = normalizeDocPath(url),
@@ -173,43 +237,29 @@ class ExamDocsRepository(
     }
 
     companion object {
-        fun normalizeBaseUrl(raw: String): String {
-            val trimmed = raw.trim().trimEnd('/')
-            if (trimmed.isEmpty()) return DEFAULT_EXAM_DOCS_BASE_URL
-            return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-                trimmed
-            } else {
-                "https://$trimmed"
-            }
+        fun parseBaseUrl(raw: String): String? {
+            val trimmed = raw.trim()
+            if (trimmed.isEmpty() || trimmed.any(Char::isWhitespace)) return null
+            val hasScheme = trimmed.contains("://")
+            val url = (if (hasScheme) trimmed else "https://$trimmed").toHttpUrlOrNull() ?: return null
+            if (url.encodedUsername.isNotEmpty() || url.encodedPassword.isNotEmpty() ||
+                url.query != null || url.fragment != null
+            ) return null
+            return url.toString().trimEnd('/')
         }
 
-        fun normalizeDocPath(rawPath: String): String {
-            val bare = rawPath.trim()
-                .substringBefore('#')
-                .substringBefore('?')
-                .trimEnd('/')
-            if (bare.isEmpty()) return "/docs"
-            return if (bare.startsWith('/')) bare else "/$bare"
+        fun normalizeDocPath(raw: String): String {
+            val bare = raw.trim().substringBefore('#').substringBefore('?').trim('/')
+            val path = "/" + bare.ifEmpty { "docs" }
+            return ("https://docs.invalid$path").toHttpUrl().encodedPath
+                .let { if (it.startsWith("/android/docs")) it.removePrefix("/android") else it }
+                .removeSuffix(".md")
         }
 
-        fun buildMarkdownUrl(baseUrl: String, pageUrl: String): String {
-            val normalizedBase = normalizeBaseUrl(baseUrl)
-            val trimmed = pageUrl.trim()
-            if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-                val withoutQuery = trimmed.substringBefore('#').substringBefore('?')
-                return if (withoutQuery.endsWith(".md")) {
-                    withoutQuery
-                } else {
-                    "${withoutQuery.trimEnd('/')}.md"
-                }
-            }
-            val normalizedPath = normalizeDocPath(trimmed)
-            val mdPath = if (normalizedPath.endsWith(".md")) {
-                normalizedPath
-            } else {
-                "$normalizedPath.md"
-            }
-            return "$normalizedBase$mdPath"
+        fun buildMarkdownUrl(baseUrl: String, pageUrl: String, android: Boolean = false): String {
+            val base = requireNotNull(parseBaseUrl(baseUrl))
+            val prefix = if (android) "/android" else ""
+            return "$base$prefix${normalizeDocPath(pageUrl)}.md"
         }
 
         fun flattenPages(modules: List<ExamDocNode.Folder>): List<ExamDocFlatEntry> {

@@ -67,8 +67,10 @@ import me.rerere.bettertext.latex.LatexInline
 import me.rerere.bettertext.markdown.InlineDecoration
 import me.rerere.bettertext.markdown.MarkdownBlock
 import me.rerere.bettertext.markdown.MarkdownComponents
+import me.rerere.bettertext.markdown.MarkdownDocument
 import me.rerere.bettertext.markdown.MarkdownInline
 import me.rerere.bettertext.markdown.plainText
+import me.rerere.bettertext.markdown.rememberMarkdownDocument
 import me.rerere.bettertext.text.BetterInline
 import me.rerere.bettertext.text.ComposableInline
 import me.rerere.bettertext.text.DrawnInline
@@ -145,6 +147,25 @@ fun MarkdownBlock(
     onLinkClick: ((url: String) -> Unit)? = null,
     imageUrlResolver: ((String) -> String)? = null,
 ) {
+    MarkdownBlock(
+        document = rememberMarkdownDocument(content, streaming = streaming),
+        modifier = modifier,
+        style = style,
+        onClickCitation = onClickCitation,
+        onLinkClick = onLinkClick,
+        imageUrlResolver = imageUrlResolver,
+    )
+}
+
+@Composable
+internal fun MarkdownBlock(
+    document: MarkdownDocument,
+    modifier: Modifier = Modifier,
+    style: TextStyle = LocalTextStyle.current,
+    onClickCitation: (String) -> Unit = {},
+    onLinkClick: ((url: String) -> Unit)? = null,
+    imageUrlResolver: ((String) -> String)? = null,
+) {
     val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
     val enableQuoteHighlight = LocalSettings.current.displaySetting.enableQuoteHighlight
     val fontSize = LocalTextStyle.current.merge(style).fontSize
@@ -212,12 +233,11 @@ fun MarkdownBlock(
     }
 
     MaterialMarkdown(
-        content = content,
+        document = document,
         modifier = modifier.padding(horizontal = 4.dp),
         style = style,
         theme = theme,
         components = components,
-        streaming = streaming,
         onLinkClick = onLinkClick,
     )
 }

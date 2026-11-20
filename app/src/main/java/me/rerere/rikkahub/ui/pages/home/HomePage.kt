@@ -455,7 +455,7 @@ fun HomePage() {
                 }
             }
 
-            // 3.5 Exam Docs Reader Card
+            // 3.5 Docs Reader Card
             AnimatedVisibility(
                 visible = visible,
                 enter = fadeIn() + slideInVertically { it / 4 },
@@ -496,13 +496,13 @@ fun HomePage() {
                         }
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Exam Docs",
+                                text = "文档阅读器",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                             )
                             Text(
-                                text = "原生 Markdown 阅读器 · 数学 / 408 / 政治 / 编程",
+                                text = "Exam Docs · Study Docs",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f),
                                 maxLines = 1,
