@@ -94,7 +94,7 @@ fun HighlightCodeBlock(
     completeCodeBlock: Boolean = true,
     style: TextStyle? = TextStyle(
         fontSize = 12.sp,
-        lineHeight = 16.sp,
+        lineHeight = 19.sp,
     ),
 ) {
     val darkMode = LocalDarkMode.current
@@ -133,17 +133,16 @@ fun HighlightCodeBlock(
         }
     }
 
+    val containerShape = RoundedCornerShape(14.dp)
     Column(
         modifier = modifier
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.large)
-            .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceContainer),
+            .clip(containerShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.85f)),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(horizontal = 14.dp, vertical = 9.dp)
         ) {
             HighlightCodeActions(
                 language = language,
@@ -160,8 +159,15 @@ fun HighlightCodeBlock(
                 },
             )
         }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp)
+                .height(0.5.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+        )
         Column(
-            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
+            modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)
         ) {
             when {
                 canInlinePreview && previewMode -> {

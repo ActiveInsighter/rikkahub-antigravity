@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -17,7 +18,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.SubcomposeLayout
@@ -53,6 +57,10 @@ fun DataTable(
     outerBorder: BorderStroke? = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     shape: Shape = MaterialTheme.shapes.small,
     stretchToFillWidth: Boolean = true,
+    cellHorizontalPadding: Dp = cellPadding,
+    cellVerticalPadding: Dp = cellPadding,
+    rowDividerColor: Color? = null,
+    headerCornerRadius: Dp = 0.dp,
 ) {
     val hScroll = rememberScrollState()
     val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
@@ -82,13 +90,26 @@ fun DataTable(
             val headerP1 = arrayOfNulls<Placeable>(columnCount)
             val bodyP1 = arrayOfNulls<Placeable>(rowCount * columnCount)
 
+            fun headerCellShape(c: Int): Shape {
+                if (headerCornerRadius <= 0.dp) return RectangleShape
+                return when {
+                    columnCount == 1 -> RoundedCornerShape(headerCornerRadius)
+                    c == 0 -> RoundedCornerShape(topStart = headerCornerRadius, bottomStart = headerCornerRadius)
+                    c == columnCount - 1 -> RoundedCornerShape(topEnd = headerCornerRadius, bottomEnd = headerCornerRadius)
+                    else -> RectangleShape
+                }
+            }
+
             // ---------- 第一阶段：自然尺寸测量（估列宽、算行高） ----------
             fun subcomposeHeaderOnce(c: Int): Placeable {
                 val measurables = subcompose("h1_$c") {
                     CellBox(
-                        padding = cellPadding,
+                        horizontalPadding = cellHorizontalPadding,
+                        verticalPadding = cellVerticalPadding,
                         border = cellBorder,
                         background = headerBackground,
+                        backgroundShape = headerCellShape(c),
+                        bottomDividerColor = null,
                         alignment = columnAlignments.getOrNull(c) ?: cellAlignment
                     ) {
                         headers.getOrNull(c)?.invoke()
@@ -106,11 +127,15 @@ fun DataTable(
 
             fun subcomposeBodyOnce(r: Int, c: Int): Placeable {
                 val bg = if (zebraStriping && r % 2 == 1) surfaceContainer else Color.Transparent
+                val divider = if (r < rowCount - 1) rowDividerColor else null
                 val measurables = subcompose("b1_${r}_$c") {
                     CellBox(
-                        padding = cellPadding,
+                        horizontalPadding = cellHorizontalPadding,
+                        verticalPadding = cellVerticalPadding,
                         border = cellBorder,
                         background = bg,
+                        backgroundShape = RectangleShape,
+                        bottomDividerColor = divider,
                         alignment = bodyCellAlignment?.invoke(r, c) ?: columnAlignments.getOrNull(c) ?: cellAlignment
                     ) {
                         rows[r].getOrNull(c)?.invoke()
@@ -174,9 +199,12 @@ fun DataTable(
             val headerPlaceables = Array(columnCount) { c ->
                 val measurables = subcompose("h2_$c") {
                     CellBox(
-                        padding = cellPadding,
+                        horizontalPadding = cellHorizontalPadding,
+                        verticalPadding = cellVerticalPadding,
                         border = cellBorder,
                         background = headerBackground,
+                        backgroundShape = headerCellShape(c),
+                        bottomDividerColor = null,
                         alignment = columnAlignments.getOrNull(c) ?: cellAlignment
                     ) {
                         headers.getOrNull(c)?.invoke()
@@ -190,11 +218,15 @@ fun DataTable(
                 val c = i % columnCount
                 val bg =
                     if (zebraStriping && r % 2 == 1) surfaceContainer else Color.Transparent
+                val divider = if (r < rowCount - 1) rowDividerColor else null
                 val measurables = subcompose("b2_${r}_$c") {
                     CellBox(
-                        padding = cellPadding,
+                        horizontalPadding = cellHorizontalPadding,
+                        verticalPadding = cellVerticalPadding,
                         border = cellBorder,
                         background = bg,
+                        backgroundShape = RectangleShape,
+                        bottomDividerColor = divider,
                         alignment = bodyCellAlignment?.invoke(r, c) ?: columnAlignments.getOrNull(c) ?: cellAlignment
                     ) {
                         rows[r].getOrNull(c)?.invoke()
@@ -232,17 +264,36 @@ fun DataTable(
 
 @Composable
 private fun CellBox(
-    padding: Dp,
+    horizontalPadding: Dp,
+    verticalPadding: Dp,
     border: BorderStroke?,
     background: Color,
+    backgroundShape: Shape,
+    bottomDividerColor: Color?,
     alignment: Alignment,
     content: @Composable () -> Unit,
 ) {
     Box(
         modifier = Modifier
-            .then(if (background != Color.Transparent) Modifier.background(background) else Modifier)
+            .then(if (background != Color.Transparent) Modifier.background(background, backgroundShape) else Modifier)
             .then(if (border != null) Modifier.border(border) else Modifier)
-            .padding(padding),
+            .then(
+                if (bottomDividerColor != null) {
+                    Modifier.drawBehind {
+                        val stroke = 0.75.dp.toPx()
+                        val y = size.height - stroke / 2f
+                        drawLine(
+                            color = bottomDividerColor,
+                            start = Offset(0f, y),
+                            end = Offset(size.width, y),
+                            strokeWidth = stroke,
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            )
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding),
         contentAlignment = alignment,
     ) {
         content()

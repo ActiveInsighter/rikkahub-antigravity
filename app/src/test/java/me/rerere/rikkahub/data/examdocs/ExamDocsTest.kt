@@ -99,4 +99,39 @@ class ExamDocsTest {
         )
         assertNull(getExamDocsLink(base, "/docs/math/01", "https://other.example/docs/math"))
     }
+
+    @Test
+    fun defaultExamDocsSiteUsesCustomDomainAndParsesComponentContainers() {
+        assertEquals("https://exam.any1.tech", DEFAULT_EXAM_DOCS_BASE_URL)
+        val raw = """
+            # 组件测试
+
+            :::tabs
+            :::tab Kotlin
+            ```kotlin
+            val x = 1
+            ```
+            :::
+            :::tab Python
+            ```python
+            x = 1
+            ```
+            :::
+            :::
+
+            :::question {"id":"q1","type":"single","number":"1"}
+            题干
+            :::option {"label":"A","correct":true}
+            选项 A
+            :::
+            :::
+        """.trimIndent()
+        val doc = prepareExamDocsDocument(raw, "https://exam.any1.tech/android/docs/test.md", legacy = false)
+        val tabs = doc.blocks[1] as ExamDocsSegment.CustomBlock
+        assertEquals("tabs", tabs.type)
+        assertEquals(2, tabs.blocks.size)
+        val question = doc.blocks[2] as ExamDocsSegment.CustomBlock
+        assertEquals("question", question.type)
+        assertTrue(question.blocks.any { it is ExamDocsSegment.CustomBlock && it.type == "option" })
+    }
 }

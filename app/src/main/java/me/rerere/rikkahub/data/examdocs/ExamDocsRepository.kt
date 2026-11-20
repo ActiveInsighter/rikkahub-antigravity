@@ -21,10 +21,12 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-const val DEFAULT_EXAM_DOCS_BASE_URL = "https://exam-docs.2212148739lbw.workers.dev"
+const val DEFAULT_EXAM_DOCS_BASE_URL = "https://exam.any1.tech"
+private const val LEGACY_EXAM_DOCS_BASE_URL = "https://exam-docs.2212148739lbw.workers.dev"
 const val DEFAULT_STUDY_DOCS_BASE_URL = "https://study-docs.any1.tech"
 private const val PREFS_NAME = "exam_docs_prefs"
 private const val KEY_SITES = "sites"
+private const val KEY_SITES_V2 = "sites_v2"
 private const val KEY_ACTIVE_SITE = "active_site"
 private const val KEY_BASE_URL = "base_url"
 private const val KEY_LAST_PAGE_URL = "last_page_url"
@@ -102,32 +104,54 @@ class ExamDocsRepository(
     }
 
     fun loadSiteSettings(): ExamDocsSiteSettings {
-        val saved = prefs.getString(KEY_SITES, null)
-        if (saved == null) {
-            val legacy = parseBaseUrl(prefs.getString(KEY_BASE_URL, DEFAULT_EXAM_DOCS_BASE_URL).orEmpty())
-            val active = builtInDocsSites.firstOrNull { it.baseUrl == legacy }
+        val savedV2 = prefs.getString(KEY_SITES_V2, null)
+        if (savedV2 != null) {
+            val sites = runCatching { json.decodeFromString<List<ExamDocsSite>>(savedV2) }
+                .getOrDefault(emptyList())
+                .distinctBy(ExamDocsSite::baseUrl)
+                .ifEmpty { builtInDocsSites }
+            val activeUrl = prefs.getString(KEY_ACTIVE_SITE, null)
+            return ExamDocsSiteSettings(sites, sites.firstOrNull { it.baseUrl == activeUrl } ?: sites.first())
+        }
+
+        val savedV1 = prefs.getString(KEY_SITES, null)
+        val sites: List<ExamDocsSite>
+        val active: ExamDocsSite
+        if (savedV1 == null) {
+            val rawLegacy = parseBaseUrl(prefs.getString(KEY_BASE_URL, DEFAULT_EXAM_DOCS_BASE_URL).orEmpty())
+            val legacy = if (rawLegacy == LEGACY_EXAM_DOCS_BASE_URL) DEFAULT_EXAM_DOCS_BASE_URL else rawLegacy
+            active = builtInDocsSites.firstOrNull { it.baseUrl == legacy }
                 ?: legacy?.let { ExamDocsSite(it.toHttpUrl().host, it) }
                 ?: builtInDocsSites.first()
-            val sites = (builtInDocsSites + active).distinctBy(ExamDocsSite::baseUrl)
+            sites = (builtInDocsSites + active).distinctBy(ExamDocsSite::baseUrl)
             val lastPage = prefs.getString(KEY_LAST_PAGE_URL, null)
             prefs.edit {
-                putString(KEY_SITES, json.encodeToString(sites.filterNot(builtInDocsSites::contains)))
+                putString(KEY_SITES_V2, json.encodeToString(sites))
                 putString(KEY_ACTIVE_SITE, active.baseUrl)
                 lastPage?.let { putString(lastPageKey(active.baseUrl), normalizeDocPath(it)) }
             }
-            return ExamDocsSiteSettings(sites, active)
+        } else {
+            val custom = runCatching { json.decodeFromString<List<ExamDocsSite>>(savedV1) }
+                .getOrDefault(emptyList())
+                .filterNot { it.baseUrl == LEGACY_EXAM_DOCS_BASE_URL }
+            sites = (builtInDocsSites + custom).distinctBy(ExamDocsSite::baseUrl)
+            val rawActiveUrl = prefs.getString(KEY_ACTIVE_SITE, null)
+            val migratedActiveUrl = if (rawActiveUrl == LEGACY_EXAM_DOCS_BASE_URL) DEFAULT_EXAM_DOCS_BASE_URL else rawActiveUrl
+            active = sites.firstOrNull { it.baseUrl == migratedActiveUrl } ?: sites.first()
+            prefs.edit {
+                putString(KEY_SITES_V2, json.encodeToString(sites))
+                putString(KEY_ACTIVE_SITE, active.baseUrl)
+            }
         }
-
-        val custom = runCatching { json.decodeFromString<List<ExamDocsSite>>(saved) }.getOrDefault(emptyList())
-        val sites = (builtInDocsSites + custom).distinctBy(ExamDocsSite::baseUrl)
-        val activeUrl = prefs.getString(KEY_ACTIVE_SITE, null)
-        return ExamDocsSiteSettings(sites, sites.firstOrNull { it.baseUrl == activeUrl } ?: sites.first())
+        return ExamDocsSiteSettings(sites, active)
     }
 
     fun saveSiteSettings(sites: List<ExamDocsSite>, active: ExamDocsSite) {
+        val normalized = sites.distinctBy(ExamDocsSite::baseUrl).ifEmpty { builtInDocsSites }
+        val resolvedActive = normalized.firstOrNull { it.baseUrl == active.baseUrl } ?: normalized.first()
         prefs.edit {
-            putString(KEY_SITES, json.encodeToString(sites.filterNot(builtInDocsSites::contains)))
-            putString(KEY_ACTIVE_SITE, active.baseUrl)
+            putString(KEY_SITES_V2, json.encodeToString(normalized))
+            putString(KEY_ACTIVE_SITE, resolvedActive.baseUrl)
         }
     }
 

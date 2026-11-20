@@ -117,9 +117,15 @@ class ExamDocsVM(
 
     fun removeSite(site: ExamDocsSite) {
         val state = _uiState.value
-        if (site in builtInDocsSites) return
+        if (state.sites.size <= 1) return
         val sites = state.sites - site
         applySiteSettings(sites, state.activeSite.takeUnless { it == site } ?: sites.first())
+    }
+
+    fun restoreDefaultSites() {
+        val state = _uiState.value
+        val sites = (builtInDocsSites + state.sites).distinctBy(ExamDocsSite::baseUrl)
+        applySiteSettings(sites, state.activeSite)
     }
 
     private fun applySiteSettings(sites: List<ExamDocsSite>, active: ExamDocsSite) {

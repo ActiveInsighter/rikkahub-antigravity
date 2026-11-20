@@ -259,8 +259,8 @@ object MaterialMarkdownDefaults {
     fun Table(
         table: MarkdownBlock.Table,
         modifier: Modifier = Modifier,
-        outerBorder: BorderStroke? = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        shape: Shape = MaterialTheme.shapes.small,
+        outerBorder: BorderStroke? = null,
+        shape: Shape = MaterialTheme.shapes.medium,
     ) {
         val columnCount = max(table.header.size, table.rows.maxOfOrNull { it.size } ?: 0)
         val headers: List<@Composable () -> Unit> = table.header.mapIndexed { index, cell ->
@@ -275,12 +275,19 @@ object MaterialMarkdownDefaults {
                 }
             }
         }
+        val colorScheme = MaterialTheme.colorScheme
         DataTable(
             headers = headers,
             rows = rows,
             modifier = modifier,
+            cellBorder = null,
+            headerBackground = colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
+            headerCornerRadius = 10.dp,
+            cellHorizontalPadding = 12.dp,
+            cellVerticalPadding = 10.dp,
+            rowDividerColor = colorScheme.outlineVariant.copy(alpha = 0.35f),
             columnMinWidths = List(columnCount) { 80.dp },
-            columnMaxWidths = List(columnCount) { 200.dp },
+            columnMaxWidths = List(columnCount) { 220.dp },
             columnAlignments = List(columnCount) { index ->
                 table.alignments.getOrNull(index)?.toCellAlignment() ?: Alignment.CenterStart
             },
