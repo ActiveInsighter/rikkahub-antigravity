@@ -91,7 +91,7 @@ fun HomePage() {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         visible = true
-        agentRepository.syncThreadsFromRemote()
+        agentRepository.syncThreadsFromRemoteIfStale()
     }
 
     val greeting = remember {

@@ -104,7 +104,7 @@ internal class AgentRealtimeSync(
         }
         launch {
             for (change in metadataChanges) {
-                delay(100)
+                delay(400)
                 metadataChanges.tryReceive()
                 if (reconcileAll) {
                     reconcileAll = false
@@ -197,7 +197,7 @@ internal class AgentJobInvalidations(initiallyActive: Boolean) {
             false
         }
         // A transaction can publish several notifications for the same update.
-        if (!timedOut) delay(150)
+        if (!timedOut) delay(450)
         changes.tryReceive()
         return (timedOut || refreshJob).also { refreshJob = false }
     }

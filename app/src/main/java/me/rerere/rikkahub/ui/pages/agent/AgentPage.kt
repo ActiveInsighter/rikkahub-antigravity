@@ -73,6 +73,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import me.rerere.rikkahub.utils.JsonInstant
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -892,6 +893,7 @@ private fun DecisionSchemaBar(
 ) {
     var showEditor by remember { mutableStateOf(false) }
     var draftSchema by remember(schemaJson) { mutableStateOf(schemaJson) }
+    var schemaError by remember { mutableStateOf<String?>(null) }
 
     Surface(
         color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
@@ -918,7 +920,16 @@ private fun DecisionSchemaBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = { showEditor = true }) {
+            if (schemaJson.isNotBlank()) {
+                TextButton(onClick = { onUpdateSchema("") }) {
+                    Text("清空")
+                }
+            }
+            TextButton(onClick = {
+                draftSchema = schemaJson
+                schemaError = null
+                showEditor = true
+            }) {
                 Text(if (schemaJson.isBlank()) "设置 Schema" else "编辑")
             }
         }
@@ -938,25 +949,39 @@ private fun DecisionSchemaBar(
                     ) {
                         FilterChip(
                             selected = draftSchema.isBlank(),
-                            onClick = { draftSchema = "" },
+                            onClick = {
+                                draftSchema = ""
+                                schemaError = null
+                            },
                             label = { Text("自由 JSON") },
                         )
                         FilterChip(
                             selected = draftSchema == routePreset,
-                            onClick = { draftSchema = routePreset },
+                            onClick = {
+                                draftSchema = routePreset
+                                schemaError = null
+                            },
                             label = { Text("路由分类") },
                         )
                         FilterChip(
                             selected = draftSchema == scorePreset,
-                            onClick = { draftSchema = scorePreset },
+                            onClick = {
+                                draftSchema = scorePreset
+                                schemaError = null
+                            },
                             label = { Text("评分审批") },
                         )
                     }
                     OutlinedTextField(
                         value = draftSchema,
-                        onValueChange = { draftSchema = it },
+                        onValueChange = {
+                            draftSchema = it
+                            schemaError = null
+                        },
                         label = { Text("responseSchema (可选)") },
                         placeholder = { Text("留空则由模型自动决定 JSON 字段") },
+                        isError = schemaError != null,
+                        supportingText = schemaError?.let { err -> { Text(err) } },
                         minLines = 4,
                         maxLines = 8,
                         modifier = Modifier.fillMaxWidth(),
@@ -966,8 +991,19 @@ private fun DecisionSchemaBar(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        onUpdateSchema(draftSchema.trim())
-                        showEditor = false
+                        val trimmed = draftSchema.trim()
+                        if (trimmed.isEmpty()) {
+                            onUpdateSchema("")
+                            showEditor = false
+                        } else {
+                            val parsed = runCatching { JsonInstant.parseToJsonElement(trimmed) }
+                            if (parsed.isSuccess) {
+                                onUpdateSchema(trimmed)
+                                showEditor = false
+                            } else {
+                                schemaError = "Schema 不是有效的 JSON"
+                            }
+                        }
                     },
                 ) {
                     Text("应用")
