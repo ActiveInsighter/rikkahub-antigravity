@@ -265,17 +265,20 @@ private fun ExamDocsArticle(
     val imageResolver: (String) -> String = remember(baseUrl, pageUrl) {
         { resolveExamDocsUrl(baseUrl, pageUrl, it) }
     }
-    val handleLink: (String) -> Unit = { raw ->
-        val link = getExamDocsLink(baseUrl, pageUrl, raw)
-        if (link != null) {
-            onLink(link)
-        } else {
-            val target = resolveExamDocsUrl(baseUrl, pageUrl, raw)
-            if (target.substringBefore(':').lowercase() in externalLinkSchemes) {
-                runCatching { uriHandler.openUri(target) }
+    val handleLink: (String) -> Unit = remember(baseUrl, pageUrl, onLink, uriHandler) {
+        { raw ->
+            val link = getExamDocsLink(baseUrl, pageUrl, raw)
+            if (link != null) {
+                onLink(link)
+            } else {
+                val target = resolveExamDocsUrl(baseUrl, pageUrl, raw)
+                if (target.substringBefore(':').lowercase() in externalLinkSchemes) {
+                    runCatching { uriHandler.openUri(target) }
+                }
             }
         }
     }
+    val renderMarkdown = rememberExamDocsRenderer(document, listState, handleLink, imageResolver)
 
     SelectableContent {
         LazyColumn(
@@ -284,8 +287,13 @@ private fun ExamDocsArticle(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            items(document.blocks, contentType = { it is ExamDocsSegment.CustomBlock }) { block ->
-                ExamDocsMarkdownBlock(block, registry, handleLink, imageResolver)
+            items(document.blocks, contentType = { block ->
+                when (block) {
+                    is ExamDocsSegment.Markdown -> block.document.blocks.firstOrNull()?.javaClass
+                    is ExamDocsSegment.CustomBlock -> block.type
+                }
+            }) { block ->
+                ExamDocsMarkdownBlock(block, registry, renderMarkdown)
             }
             if (previous != null || next != null) {
                 item(key = "page-navigation") {

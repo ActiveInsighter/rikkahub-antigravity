@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.examdocs
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,7 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -206,7 +207,9 @@ private fun DirectoryTree(
                 node = node,
                 active = node is ExamDocNode.Page && node.url == currentUrl,
                 expanded = entry.expanded,
-                modifier = Modifier.padding(start = (entry.depth.coerceAtMost(10) * 12).dp),
+                modifier = Modifier
+                    .animateItem()
+                    .padding(start = (entry.depth.coerceAtMost(10) * 12).dp),
                 onClick = {
                     when (node) {
                         is ExamDocNode.Folder -> overrides[entry.key] = !entry.expanded
@@ -241,10 +244,11 @@ private fun DirectoryRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (folder) {
+                val rotation = animateFloatAsState(if (expanded) 90f else 0f, label = "directoryChevron")
                 Icon(
                     HugeIcons.ArrowRight01,
                     if (expanded) "收起" else "展开",
-                    Modifier.size(14.dp).rotate(if (expanded) 90f else 0f),
+                    Modifier.size(14.dp).graphicsLayer { rotationZ = rotation.value },
                     tint = colors.onSurfaceVariant,
                 )
             } else if (subtitle == null) {

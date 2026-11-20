@@ -123,7 +123,7 @@ class AgentDrawerVM(
     init {
         viewModelScope.launch {
             repository.ensureDefaultAssistant()
-            repository.syncUsageWithRemote()
+            repository.syncUsageWithRemoteIfStale()
         }
     }
 

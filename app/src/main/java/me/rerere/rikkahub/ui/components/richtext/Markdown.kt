@@ -166,6 +166,21 @@ internal fun MarkdownBlock(
     onLinkClick: ((url: String) -> Unit)? = null,
     imageUrlResolver: ((String) -> String)? = null,
 ) {
+    val render = rememberRichMarkdownRenderer(style, onClickCitation, onLinkClick, imageUrlResolver)
+    render(document, modifier)
+}
+
+internal typealias RichMarkdownRenderer = @Composable (MarkdownDocument, Modifier) -> Unit
+
+@Composable
+internal fun rememberRichMarkdownRenderer(
+    style: TextStyle = LocalTextStyle.current,
+    onClickCitation: (String) -> Unit = {},
+    onLinkClick: ((String) -> Unit)? = null,
+    imageUrlResolver: ((String) -> String)? = null,
+    displayMath: (@Composable (String) -> Unit)? = null,
+    inlineMath: ((String) -> BetterInline)? = null,
+): RichMarkdownRenderer {
     val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
     val enableQuoteHighlight = LocalSettings.current.displaySetting.enableQuoteHighlight
     val fontSize = LocalTextStyle.current.merge(style).fontSize
@@ -186,7 +201,7 @@ internal fun MarkdownBlock(
 
     val currentOnClickCitation by rememberUpdatedState(onClickCitation)
     val currentImageUrlResolver by rememberUpdatedState(imageUrlResolver)
-    val components = remember(enableLatexRendering) {
+    val components = remember(enableLatexRendering, displayMath, inlineMath) {
         MarkdownComponents(
             codeBlock = { block ->
                 HighlightCodeBlock(
@@ -211,35 +226,43 @@ internal fun MarkdownBlock(
             },
             // 禁用 LaTeX 渲染时不注册公式组件，公式以等宽字体显示源码
             mathBlock = if (enableLatexRendering) {
-                { formula -> MathBlock(latex = formula, modifier = Modifier.fillMaxWidth()) }
+                displayMath ?: { formula -> MathBlock(latex = formula, modifier = Modifier.fillMaxWidth()) }
             } else {
                 null
             },
             table = { table -> TableCard(table) },
             details = MaterialMarkdownDefaults.components.details,
             inlineMath = if (enableLatexRendering) {
-                { formula -> LatexInline.cached(formula, context) }
+                { formula -> inlineMath?.invoke(formula) ?: LatexInline.cached(formula, context) }
             } else {
                 null
             },
             inlineLink = { link -> citationWidget(link) { currentOnClickCitation(it) } },
             inlineCodePrefix = { code -> parseColorCode(code)?.let(::ColorSwatch) },
             textDecorations = { text ->
-                TEXT_COLOR.findAll(text).mapNotNull { match ->
-                    parseColorCode(match.value)?.let { InlineDecoration(match.range.first, ColorSwatch(it)) }
-                }.toList()
+                if ('#' in text || "rgb" in text) {
+                    TEXT_COLOR.findAll(text).mapNotNull { match ->
+                        parseColorCode(match.value)?.let { InlineDecoration(match.range.first, ColorSwatch(it)) }
+                    }.toList()
+                } else {
+                    emptyList()
+                }
             },
         )
     }
 
-    MaterialMarkdown(
-        document = document,
-        modifier = modifier.padding(horizontal = 4.dp),
-        style = style,
-        theme = theme,
-        components = components,
-        onLinkClick = onLinkClick,
-    )
+    return remember<RichMarkdownRenderer>(style, theme, components, onLinkClick) {
+        { document, modifier ->
+            MaterialMarkdown(
+                document = document,
+                modifier = modifier.padding(horizontal = 4.dp),
+                style = style,
+                theme = theme,
+                components = components,
+                onLinkClick = onLinkClick,
+            )
+        }
+    }
 }
 
 /**

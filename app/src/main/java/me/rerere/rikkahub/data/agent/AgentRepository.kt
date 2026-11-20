@@ -1,11 +1,15 @@
 package me.rerere.rikkahub.data.agent
 
+import android.os.SystemClock
 import androidx.room.withTransaction
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,7 +20,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import me.rerere.ai.core.MessageRole
+import me.rerere.ai.core.ReasoningLevel
+import me.rerere.ai.provider.Model
+import me.rerere.ai.ui.ModelSnapshot
+import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.UIMessage
+import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.AppScope
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
@@ -29,6 +39,7 @@ import me.rerere.rikkahub.data.workflow.WorkflowRepository
 import me.rerere.rikkahub.data.workflow.WorkflowSession
 import me.rerere.rikkahub.utils.JsonInstant
 import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 
 data class AgentConversationSnapshot(
@@ -44,6 +55,11 @@ data class AgentConversationStatusInfo(
     val hasUnread: Boolean,
 )
 
+data class LocalGenerationState(
+    val conversation: Conversation,
+    val startedAt: Long,
+)
+
 /**
  * Repository backed by [AgentDatabase], synchronized with the remote
  * AnyWorkflow / PocketBase database as the source of truth.
@@ -54,6 +70,7 @@ class AgentRepository(
     private val workflowRepository: WorkflowRepository,
     private val appScope: AppScope,
     private val appEventBus: AppEventBus,
+    private val gatewayClient: AgentGatewayClient,
 ) {
     private val conversationDao = database.conversationDao()
     private val messageNodeDao = database.messageNodeDao()
@@ -64,6 +81,10 @@ class AgentRepository(
     private val modelDao = database.modelDao()
     @Volatile
     private var visibleConversation: Uuid? = null
+    @Volatile
+    private var lastThreadsSyncAt: Long = 0L
+    @Volatile
+    private var lastUsageSyncAt: Long = 0L
 
     // A job creation event can arrive before its HTTP response binds the remote root to the local ID.
     private val draftMutex = Mutex()
@@ -73,6 +94,9 @@ class AgentRepository(
     val submittingIds = _submittingIds.asStateFlow()
     private val _submittingStartedAt = MutableStateFlow<Map<Uuid, Long>>(emptyMap())
     val submittingStartedAt = _submittingStartedAt.asStateFlow()
+    private val localGenerationJobs = ConcurrentHashMap<Uuid, Job>()
+    private val _localGenerations = MutableStateFlow<Map<Uuid, LocalGenerationState>>(emptyMap())
+    val localGenerations = _localGenerations.asStateFlow()
 
     fun observeConversations(sortOrder: ConversationSortOrder): Flow<List<Conversation>> {
         val source = when (sortOrder) {
@@ -171,7 +195,14 @@ class AgentRepository(
         val session = workflowRepository.session.value ?: return@runCatching
         syncFoldersWithRemote()
         syncThreads(session)
+        lastThreadsSyncAt = System.currentTimeMillis()
     }.onFailure { if (it is CancellationException) throw it }
+
+    suspend fun syncThreadsFromRemoteIfStale(minIntervalMs: Long = 30_000L): Result<Unit> {
+        val now = System.currentTimeMillis()
+        if (now - lastThreadsSyncAt < minIntervalMs) return Result.success(Unit)
+        return syncThreadsFromRemote()
+    }
 
     internal suspend fun syncThreads(session: WorkflowSession, root: String? = null): Unit = threadSyncMutex.withLock {
         if (workflowRepository.session.value != session) return@withLock
@@ -471,15 +502,19 @@ class AgentRepository(
     }
 
     suspend fun deleteConversation(id: Uuid) {
+        localGenerationJobs[id]?.cancelAndJoin()
         val existing = conversationDao.getById(id.toString())
         val remoteJobId = existing?.remoteJobId
         if (!remoteJobId.isNullOrBlank() && cloudClient.hasSession()) {
             runCatching { cloudClient.deleteThread(remoteJobId) }
         }
-        conversationDao.deleteById(id.toString())
+        conversationLock(id).withLock { conversationDao.deleteById(id.toString()) }
     }
 
     suspend fun deleteAllConversations() {
+        val jobs = localGenerationJobs.values.toList()
+        jobs.forEach { it.cancel() }
+        jobs.forEach { it.join() }
         conversationDao.deleteAll()
     }
 
@@ -737,6 +772,13 @@ class AgentRepository(
                 )
             }
         }
+        lastUsageSyncAt = System.currentTimeMillis()
+    }
+
+    suspend fun syncUsageWithRemoteIfStale(minIntervalMs: Long = 60_000L): Result<Unit> {
+        val now = System.currentTimeMillis()
+        if (now - lastUsageSyncAt < minIntervalMs) return Result.success(Unit)
+        return syncUsageWithRemote()
     }
 
     // ---- Local-only Agent Models (Room DB, no cloud sync) ----
@@ -823,5 +865,300 @@ class AgentRepository(
 
     suspend fun deleteLocalModel(id: String) {
         modelDao.deleteById(id)
+    }
+
+    // ---- Background-safe Local Gateway Execution (Chat / Decision / Agent Dispatch) ----
+
+    fun cancelLocalGeneration(conversationId: Uuid) {
+        localGenerationJobs[conversationId]?.cancel()
+    }
+
+    private fun launchLocalGeneration(conversation: Conversation, generate: suspend (Long) -> Unit) {
+        val id = conversation.id
+        val startedAt = System.currentTimeMillis()
+        val job = appScope.launch(start = CoroutineStart.LAZY) { generate(startedAt) }
+        if (localGenerationJobs.putIfAbsent(id, job) != null) {
+            job.cancel()
+            return
+        }
+        _localGenerations.update { it + (id to LocalGenerationState(conversation, startedAt)) }
+        job.invokeOnCompletion {
+            _localGenerations.update { it - id }
+            localGenerationJobs.remove(id, job)
+        }
+        job.start()
+    }
+
+    fun startLocalChat(
+        baseConversation: Conversation,
+        modelEntity: AgentModelEntity,
+        systemPrompt: String,
+        reasoningLevel: ReasoningLevel,
+        temperature: Float?,
+        fallbackBaseUrl: String,
+        fallbackApiKey: String,
+        targetNodeId: Uuid? = null,
+        historyOverride: List<UIMessage>? = null,
+        onError: ((String) -> Unit)? = null,
+    ) {
+        val convId = baseConversation.id
+        val nodeId = targetNodeId ?: Uuid.random()
+        val displayName = modelEntity.displayName.ifBlank { modelEntity.modelId }
+        val placeholderMsg = UIMessage(
+            id = Uuid.random(),
+            role = MessageRole.ASSISTANT,
+            parts = emptyList(),
+            modelSnapshot = ModelSnapshot(
+                displayName = displayName,
+                modelId = modelEntity.modelId,
+            ),
+        )
+        val initialConv = if (targetNodeId != null) {
+            baseConversation.upsertMessage(nodeId, placeholderMsg)
+        } else {
+            baseConversation.copy(
+                messageNodes = baseConversation.messageNodes + MessageNode(
+                    id = nodeId,
+                    messages = listOf(placeholderMsg),
+                    selectIndex = 0,
+                ),
+            )
+        }
+        val historyMessages = historyOverride ?: baseConversation.messageNodes.map { it.currentMessage }
+        val handler = StreamChunkHandler(
+            Model(
+                modelId = modelEntity.modelId,
+                displayName = displayName,
+            )
+        )
+
+        launchLocalGeneration(initialConv) { startedAt ->
+            var workingMessages = historyMessages + placeholderMsg
+            var workingConv = initialConv
+            var lastDbFlushAt = SystemClock.elapsedRealtime()
+            try {
+                coroutineScope {
+                    // The initial write can overlap network setup, but must precede all later snapshots.
+                    val initialWrite = async { saveConversation(initialConv) }
+                    gatewayClient.streamChat(
+                        modelEntity = modelEntity,
+                        messages = historyMessages,
+                        systemPrompt = systemPrompt,
+                        reasoningLevel = reasoningLevel,
+                        temperature = temperature,
+                        fallbackBaseUrl = fallbackBaseUrl,
+                        fallbackApiKey = fallbackApiKey,
+                    ).collect { chunk ->
+                        workingMessages = handler.handle(workingMessages, chunk)
+                        val updatedAssistant = workingMessages.last().copy(
+                            modelSnapshot = placeholderMsg.modelSnapshot,
+                        )
+                        workingConv = workingConv.upsertMessage(nodeId, updatedAssistant)
+                        _localGenerations.update { it + (convId to LocalGenerationState(workingConv, startedAt)) }
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastDbFlushAt >= 2_000L) {
+                            initialWrite.await()
+                            saveConversation(workingConv)
+                            lastDbFlushAt = now
+                        }
+                    }
+                    initialWrite.await()
+                }
+                withContext(NonCancellable) {
+                    saveConversation(workingConv)
+                    if (convId != visibleConversation) {
+                        conversationDao.updateUnread(convId.toString(), true)
+                        val preview = workingConv.messageNodes.lastOrNull()?.currentMessage?.toText().orEmpty()
+                            .trim().replace('\n', ' ').take(60)
+                        appEventBus.tryEmit(AppEvent.AgentJobFinished(convId, workingConv.title.ifBlank { "Chat" }, true, preview))
+                    }
+                }
+            } catch (e: CancellationException) {
+                withContext(NonCancellable) {
+                    runCatching { saveConversation(workingConv) }
+                }
+                throw e
+            } catch (e: Exception) {
+                val msg = e.message ?: "Chat 流式请求失败"
+                onError?.invoke(msg)
+                val errAssistant = workingMessages.lastOrNull()?.let { currentMsg ->
+                    currentMsg.copy(
+                        parts = currentMsg.parts + UIMessagePart.Notice(title = "请求失败", text = msg),
+                    )
+                } ?: placeholderMsg.copy(parts = listOf(UIMessagePart.Notice(title = "请求失败", text = msg)))
+                val failedConv = workingConv.upsertMessage(nodeId, errAssistant)
+                withContext(NonCancellable) {
+                    saveConversation(failedConv)
+                    if (convId != visibleConversation) {
+                        conversationDao.updateUnread(convId.toString(), true)
+                        appEventBus.tryEmit(AppEvent.AgentJobFinished(convId, failedConv.title.ifBlank { "Chat" }, false, msg.take(60)))
+                    }
+                }
+            }
+        }
+    }
+
+    fun startLocalDecision(
+        baseConversation: Conversation,
+        modelEntity: AgentModelEntity,
+        prompt: String,
+        historyMessages: List<UIMessage> = emptyList(),
+        systemPrompt: String,
+        reasoningLevel: ReasoningLevel,
+        temperature: Float?,
+        schemaJson: String?,
+        fallbackBaseUrl: String,
+        fallbackApiKey: String,
+        targetNodeId: Uuid? = null,
+        onError: ((String) -> Unit)? = null,
+    ) {
+        val convId = baseConversation.id
+        val nodeId = targetNodeId ?: Uuid.random()
+        val displayName = modelEntity.displayName.ifBlank { modelEntity.modelId }
+        val placeholderMsg = UIMessage(
+            id = Uuid.random(),
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Text("正在执行结构化决策…")),
+            modelSnapshot = ModelSnapshot(
+                displayName = displayName,
+                modelId = modelEntity.modelId,
+            ),
+        )
+        val initialConv = if (targetNodeId != null) {
+            baseConversation.upsertMessage(nodeId, placeholderMsg)
+        } else {
+            baseConversation.copy(
+                messageNodes = baseConversation.messageNodes + MessageNode(
+                    id = nodeId,
+                    messages = listOf(placeholderMsg),
+                    selectIndex = 0,
+                ),
+            )
+        }
+
+        launchLocalGeneration(initialConv) {
+            try {
+                saveConversation(initialConv)
+                val result = gatewayClient.callDecision(
+                    modelEntity = modelEntity,
+                    prompt = prompt,
+                    messages = historyMessages,
+                    systemPrompt = systemPrompt,
+                    reasoningLevel = reasoningLevel,
+                    temperature = temperature,
+                    schemaJson = schemaJson,
+                    fallbackBaseUrl = fallbackBaseUrl,
+                    fallbackApiKey = fallbackApiKey,
+                )
+                result.onSuccess { res ->
+                    val doneMsg = placeholderMsg.copy(
+                        parts = listOf(UIMessagePart.Text(res.summaryMarkdown)),
+                        usage = res.usage,
+                    )
+                    val doneConv = initialConv.upsertMessage(nodeId, doneMsg)
+                    withContext(NonCancellable) {
+                        saveConversation(doneConv)
+                        if (convId != visibleConversation) {
+                            conversationDao.updateUnread(convId.toString(), true)
+                            val preview = res.summaryMarkdown.trim().replace('\n', ' ').take(60)
+                            appEventBus.tryEmit(AppEvent.AgentJobFinished(convId, doneConv.title.ifBlank { "Decision" }, true, preview))
+                        }
+                    }
+                }.onFailure { err ->
+                    if (err is CancellationException) throw err
+                    val msg = err.message ?: "Decision 请求失败"
+                    onError?.invoke(msg)
+                    val errMsg = placeholderMsg.copy(
+                        parts = listOf(UIMessagePart.Notice(title = "决策失败", text = msg)),
+                    )
+                    val failedConv = initialConv.upsertMessage(nodeId, errMsg)
+                    withContext(NonCancellable) {
+                        saveConversation(failedConv)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onError?.invoke(error.message ?: "无法保存网关会话")
+            }
+        }
+    }
+
+    fun startGatewayAgentDispatch(
+        baseConversation: Conversation,
+        modelEntity: AgentModelEntity,
+        prompt: String,
+        reasoningLevel: ReasoningLevel,
+        fallbackBaseUrl: String,
+        fallbackApiKey: String,
+        targetNodeId: Uuid? = null,
+        onError: ((String) -> Unit)? = null,
+    ) {
+        val convId = baseConversation.id
+        val nodeId = targetNodeId ?: Uuid.random()
+        val displayName = modelEntity.displayName.ifBlank { modelEntity.modelId }
+        val placeholderMsg = UIMessage(
+            id = Uuid.random(),
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Text("正在派发到 GitHub Actions…")),
+            modelSnapshot = ModelSnapshot(
+                displayName = displayName,
+                modelId = modelEntity.modelId,
+            ),
+        )
+        val initialConv = if (targetNodeId != null) {
+            baseConversation.upsertMessage(nodeId, placeholderMsg)
+        } else {
+            baseConversation.copy(
+                messageNodes = baseConversation.messageNodes + MessageNode(
+                    id = nodeId,
+                    messages = listOf(placeholderMsg),
+                    selectIndex = 0,
+                ),
+            )
+        }
+
+        launchLocalGeneration(initialConv) {
+            try {
+                saveConversation(initialConv)
+                val result = gatewayClient.dispatchAgent(
+                    modelEntity = modelEntity,
+                    prompt = prompt,
+                    reasoningLevel = reasoningLevel,
+                    fallbackBaseUrl = fallbackBaseUrl,
+                    fallbackApiKey = fallbackApiKey,
+                )
+                result.onSuccess { res ->
+                    val summary = buildString {
+                        appendLine("已通过网关派发 Agent 任务到 GitHub Actions：")
+                        appendLine("- **Request ID**: `${res.requestId}`")
+                        appendLine("- **仓库**: `${res.repo}`")
+                        appendLine("- **工作流**: `${res.workflow}` (`${res.ref}`)")
+                        appendLine()
+                        append("如需实时同步云端执行步骤，可在右上角菜单连接 PocketBase 账号。")
+                    }
+                    val doneMsg = placeholderMsg.copy(parts = listOf(UIMessagePart.Text(summary)))
+                    val doneConv = initialConv.upsertMessage(nodeId, doneMsg)
+                    withContext(NonCancellable) {
+                        saveConversation(doneConv)
+                    }
+                }.onFailure { err ->
+                    if (err is CancellationException) throw err
+                    val msg = err.message ?: "派发 Agent Action 失败"
+                    onError?.invoke(msg)
+                    val errMsg = placeholderMsg.copy(
+                        parts = listOf(UIMessagePart.Notice(title = "派发失败", text = msg)),
+                    )
+                    val failedConv = initialConv.upsertMessage(nodeId, errMsg)
+                    withContext(NonCancellable) {
+                        saveConversation(failedConv)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                onError?.invoke(error.message ?: "无法保存网关会话")
+            }
+        }
     }
 }

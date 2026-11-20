@@ -7,10 +7,13 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
@@ -97,8 +100,10 @@ class AgentGatewayClient(
     suspend fun callDecision(
         modelEntity: AgentModelEntity,
         prompt: String,
+        messages: List<UIMessage> = emptyList(),
         systemPrompt: String,
         reasoningLevel: ReasoningLevel,
+        temperature: Float? = null,
         schemaJson: String?,
         fallbackBaseUrl: String,
         fallbackApiKey: String,
@@ -111,11 +116,31 @@ class AgentGatewayClient(
             val payload = buildJsonObject {
                 put("model", cleanModelId)
                 put("prompt", prompt)
+                val history = messages.mapNotNull { msg ->
+                    if (msg.role != MessageRole.USER && msg.role != MessageRole.ASSISTANT) return@mapNotNull null
+                    val text = msg.toText().trim()
+                    if (text.isEmpty()) return@mapNotNull null
+                    msg.role.name.lowercase() to text
+                }
+                if (history.isNotEmpty()) {
+                    putJsonArray("messages") {
+                        for ((role, text) in history) {
+                            addJsonObject {
+                                put("role", role)
+                                put("text", text)
+                            }
+                        }
+                    }
+                }
                 if (systemPrompt.isNotBlank()) {
                     put("systemPrompt", systemPrompt)
                 }
+                if (temperature != null) {
+                    put("temperature", temperature)
+                }
                 val thinking = when (reasoningLevel) {
-                    ReasoningLevel.OFF, ReasoningLevel.AUTO -> ""
+                    ReasoningLevel.OFF -> "off"
+                    ReasoningLevel.AUTO -> ""
                     ReasoningLevel.LOW -> "low"
                     ReasoningLevel.MEDIUM -> "medium"
                     ReasoningLevel.HIGH, ReasoningLevel.XHIGH, ReasoningLevel.MAX -> "high"
@@ -124,7 +149,11 @@ class AgentGatewayClient(
                     put("thinkingLevel", thinking)
                 }
                 if (!schemaJson.isNullOrBlank()) {
-                    val parsedSchema = JsonInstant.parseToJsonElement(schemaJson)
+                    val parsedSchema = runCatching {
+                        JsonInstant.parseToJsonElement(schemaJson).jsonObject
+                    }.getOrElse { err ->
+                        error("Decision Schema JSON 格式无效: ${err.message}")
+                    }
                     put("schema", parsedSchema)
                 }
             }
@@ -247,7 +276,7 @@ class AgentGatewayClient(
             if (decisionElem is JsonObject && decisionElem.isNotEmpty()) {
                 for ((k, v) in decisionElem) {
                     val valueText = when (v) {
-                        is JsonPrimitive -> v.content
+                        is JsonPrimitive -> v.contentOrNull ?: v.toString()
                         is JsonArray -> v.joinToString(", ") { it.toString() }
                         is JsonObject -> v.toString()
                     }
