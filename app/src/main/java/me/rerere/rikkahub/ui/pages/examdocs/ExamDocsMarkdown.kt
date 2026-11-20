@@ -30,7 +30,7 @@ internal typealias ExamDocsCustomBlockRenderer = @Composable (
     content: @Composable () -> Unit,
 ) -> Unit
 
-class ExamDocsComponentRegistry(
+internal class ExamDocsComponentRegistry(
     private val renderers: Map<String, ExamDocsCustomBlockRenderer> = defaultRenderers,
 ) {
     internal fun get(type: String): ExamDocsCustomBlockRenderer? = renderers[type.lowercase()]
