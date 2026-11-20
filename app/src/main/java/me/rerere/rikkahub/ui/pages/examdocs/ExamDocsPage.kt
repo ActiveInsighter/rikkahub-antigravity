@@ -65,8 +65,8 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Copy01
-import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
+import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.data.examdocs.DocHeading
@@ -77,12 +77,12 @@ import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 import me.rerere.rikkahub.data.examdocs.getExamDocsLink
 import me.rerere.rikkahub.data.examdocs.resolveExamDocsUrl
 import me.rerere.rikkahub.ui.components.ai.ChatTopBarCapsule
-import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.nav.TopBarMenuItem
 import me.rerere.rikkahub.ui.components.nav.TopBarMoreMenu
 import me.rerere.rikkahub.ui.components.richtext.SelectableContent
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
+import me.rerere.rikkahub.ui.pages.chat.AssistantBackground
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.ui.toast.ToastType
 import org.koin.androidx.compose.koinViewModel
@@ -131,6 +131,7 @@ fun ExamDocsPage(
         color = MaterialTheme.colorScheme.background,
         modifier = Modifier.fillMaxSize(),
     ) {
+        AssistantBackground(setting = settings, modifier = Modifier.hazeSource(hazeState))
         Scaffold(
             containerColor = Color.Transparent,
             topBar = {
@@ -143,35 +144,33 @@ fun ExamDocsPage(
                             showBackground = listScrolledUnderTopBar,
                             modifier = Modifier.padding(start = 8.dp, end = 4.dp),
                         ) {
-                            BackButton()
+                            IconButton(
+                                onClick = { sheet = ReaderSheet.Directory },
+                                enabled = state.sitesReady,
+                            ) {
+                                Icon(HugeIcons.Menu03, "文档目录")
+                            }
                         }
                     },
                     title = {
-                        ChatTopBarCapsule(
-                            hazeState = hazeState,
-                            displaySetting = settings.displaySetting,
-                            showBackground = listScrolledUnderTopBar,
-                            modifier = Modifier.padding(horizontal = 4.dp),
-                        ) {
-                            Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                        Column {
+                            Text(
+                                page?.name ?: state.activeSite.name,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            if (page != null) {
+                                val subtitle = remember(state.activeSite.name, state.currentBreadcrumb) {
+                                    (listOf(state.activeSite.name) + state.currentBreadcrumb).joinToString(" / ")
+                                }
                                 Text(
-                                    page?.name ?: state.activeSite.name,
+                                    subtitle,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.titleMedium,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                if (page != null) {
-                                    val subtitle = remember(state.activeSite.name, state.currentBreadcrumb) {
-                                        (listOf(state.activeSite.name) + state.currentBreadcrumb).joinToString(" / ")
-                                    }
-                                    Text(
-                                        subtitle,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
                             }
                         }
                     },
@@ -182,9 +181,6 @@ fun ExamDocsPage(
                             showBackground = listScrolledUnderTopBar,
                             modifier = Modifier.padding(start = 4.dp, end = 8.dp),
                         ) {
-                            IconButton(onClick = { sheet = ReaderSheet.Directory }, enabled = state.sitesReady) {
-                                Icon(HugeIcons.Folder01, "文档目录")
-                            }
                             IconButton(
                                 onClick = { sheet = ReaderSheet.Outline },
                                 enabled = !document?.headings.isNullOrEmpty(),
