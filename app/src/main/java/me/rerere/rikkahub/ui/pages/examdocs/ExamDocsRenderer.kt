@@ -2,6 +2,8 @@ package me.rerere.rikkahub.ui.pages.examdocs
 
 import android.content.Context
 import android.util.LruCache
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -10,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -17,10 +20,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.takeOrElse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collectLatest
@@ -59,7 +62,7 @@ internal fun rememberExamDocsRenderer(
             LatexBlock(
                 layout,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                fontSize = style.fontSize,
+                fontSize = style.fontSize.takeOrElse { MaterialTheme.typography.bodyLarge.fontSize },
                 scale = 1f,
                 color = style.color.takeOrElse { LocalContentColor.current },
             )
@@ -90,15 +93,30 @@ internal fun rememberExamDocsRenderer(
     }
     val imageContent: @Composable (MarkdownInline.Image, String?, String) -> Unit = remember(onLinkClick) {
         { image, link, url ->
-            Column(Modifier.fillMaxWidth()) {
-                ZoomableAsyncImage(
-                    model = url,
-                    contentDescription = image.alt,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 480.dp)
-                        .clip(MaterialTheme.shapes.medium),
-                )
-                if (link != null && link != image.url) {
-                    TextButton(onClick = { onLinkClick(link) }) { Text("打开图片链接") }
+            val colors = MaterialTheme.colorScheme
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                color = colors.surfaceContainerLow,
+                border = BorderStroke(1.dp, colors.outlineVariant),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ZoomableAsyncImage(
+                        model = url,
+                        contentDescription = image.alt,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 480.dp),
+                    )
+                    if (!image.alt.isNullOrBlank()) {
+                        Text(
+                            text = image.alt.orEmpty(),
+                            modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    if (link != null && link != image.url) {
+                        TextButton(onClick = { onLinkClick(link) }) { Text("打开图片链接") }
+                    }
                 }
             }
         }

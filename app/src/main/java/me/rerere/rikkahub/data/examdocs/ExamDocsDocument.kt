@@ -39,18 +39,29 @@ private val attrPairPattern = """([A-Za-z0-9_-]+)="((?:[^"\\]|\\.)*)""""
 private val attrPairRegex = Regex(attrPairPattern)
 private val attrBlockRegex = Regex("""^\{((?:$attrPairPattern[ \t]*)*)\}(?:[ \t]+(.*))?$""")
 private val escapedAttribute = Regex("""\\(["\\])""")
-private val inlineCodeOrMath = Regex(
-    """(\x60+)(?!\x60).*?(?<!\x60)\1(?!\x60)|(?<![\\$])\$(?!\$)((?:\\.|[^\\$])+)\$(?![$\d])""",
+private val markdownInlineToken = Regex(
+    """(\x60+)(?!\x60).*?(?<!\x60)\1(?!\x60)|""" +
+        """(?<![\\$])\$(?!\$)((?:\\.|[^\\$])+)\$(?![$\d])|""" +
+        """(?<!\\)<Image(?=\s|/?>)((?:"[^"]*"|'[^']*'|[^"'<>])*+)>""",
 )
+private val displayMathLine = Regex("""^((?: {0,3}>[ \t]?)* {0,3})\$\$(.+?)\$\$[ \t]*$""")
 private val wideMathEnvironment = Regex("""\\begin\{(?:cases|[pbBvV]?matrix|array|aligned|gathered)\}""")
 
-private fun normalizeMathLine(line: String): String {
-    if ('$' !in line || line.startsWith('\t') || line.startsWith("    ")) return line
-    return inlineCodeOrMath.replace(line) { match ->
+private fun normalizeMarkdownLine(line: String): String {
+    if (line.startsWith('\t') || line.startsWith("    ")) return line
+    if ('$' !in line && "<Image" !in line) return line
+
+    displayMathLine.matchEntire(line)?.let { match ->
+        val formula = match.groupValues[2].trim()
+        if (formula.isNotEmpty()) return match.groupValues[1] + "\$\$" + formula + "\$\$"
+    }
+    return markdownInlineToken.replace(line) { match ->
+        // BetterText handles HTML img and LaTeX delimiters, including their code-span exclusions.
+        match.groups[3]?.value?.let { return@replace "<img$it>" }
         val formula = match.groups[2]?.value?.trim()
         if (formula.isNullOrEmpty()) return@replace match.value
-        val standalone = line.trim() == match.value && wideMathEnvironment.containsMatchIn(formula)
-        val delimiter = if (standalone) "\$\$" else "\$"
+        val standaloneWide = line.trim() == match.value && wideMathEnvironment.containsMatchIn(formula)
+        val delimiter = if (standaloneWide) "\$\$" else "\$"
         delimiter + formula + delimiter
     }
 }
@@ -111,7 +122,7 @@ internal fun parseExamDocsSegments(markdown: String): List<ExamDocsSegment> {
             marker != null -> fence = marker
             containerOpen.matches(line) -> open.addLast(index)
             containerClose.matches(line) && open.isNotEmpty() -> matchingEnds[open.removeLast()] = index
-            else -> lines[index] = normalizeMathLine(line)
+            else -> lines[index] = normalizeMarkdownLine(line)
         }
     }
 
@@ -154,17 +165,20 @@ fun getExamDocsLink(baseUrl: String, currentPageUrl: String, rawUrl: String): Ex
     val base = baseUrl.toHttpUrl()
     val target = base.resolve(resolveExamDocsUrl(baseUrl, currentPageUrl, rawUrl)) ?: return null
     if (target.scheme != base.scheme || target.host != base.host || target.port != base.port) return null
-    val path = target.encodedPath.removePrefix(base.encodedPath.trimEnd('/'))
-    val normalized = ExamDocsRepository.normalizeDocPath(path)
+    val prefix = base.encodedPath.trimEnd('/')
+    val path = target.encodedPath
+    if (prefix.isNotEmpty() && !path.startsWith("$prefix/")) return null
+    val normalized = ExamDocsRepository.normalizeDocPath(path.removePrefix(prefix))
     if (normalized != "/docs" && !normalized.startsWith("/docs/")) return null
     return ExamDocsLink(normalized, target.fragment?.takeIf(String::isNotBlank))
 }
 
 fun resolveExamDocsUrl(baseUrl: String, currentPageUrl: String, rawUrl: String): String {
-    val link = rawUrl.trim()
-    val base = "$baseUrl$currentPageUrl".toHttpUrl()
+    val link = rawUrl.trim().removeSurrounding("<", ">")
+    val site = baseUrl.trimEnd('/')
+    val base = "$site/${currentPageUrl.trimStart('/')}".toHttpUrl()
     if (link.startsWith('/') && !link.startsWith("//")) {
-        return base.resolve("$baseUrl$link")?.toString() ?: link
+        return base.resolve("$site$link")?.toString() ?: link
     }
     return base.resolve(link)?.toString() ?: link
 }
