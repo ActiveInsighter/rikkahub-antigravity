@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.data.examdocs
 
 import me.rerere.bettertext.markdown.MarkdownBlock
+import me.rerere.bettertext.markdown.MarkdownInline
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -141,4 +142,35 @@ class ExamDocsTest {
         assertEquals("info", card.attrs["tone"])
         assertEquals("/docs/intro", card.attrs["href"])
     }
+    @Test
+    fun normalizesSpacedMathAndLetsWideStandaloneFormulaScroll() {
+        val raw = """
+            设函数 ${'$'} f(x)${'$'} 在 ${'$'} [a,+\infty)${'$'} 上一阶可导。
+
+            ${'$'}F(x)=\begin{cases}x^2,&x\le0,\\x+2,&x>0\end{cases}${'$'}
+
+            ~~~
+            ${'$'} x ${'$'}
+            ~~~
+        """.trimIndent()
+        val blocks = parseExamDocsSegments(raw).filterIsInstance<ExamDocsSegment.Markdown>()
+            .flatMap { it.document.blocks }
+        val first = blocks[0] as MarkdownBlock.Paragraph
+        assertEquals(listOf("f(x)", "[a,+\\infty)"), first.content.filterIsInstance<MarkdownInline.Math>().map { it.formula })
+        val wide = (blocks[1] as MarkdownBlock.Paragraph).content.filterIsInstance<MarkdownInline.Math>().single()
+        assertTrue(wide.display)
+        assertEquals("${'$'} x ${'$'}", (blocks[2] as MarkdownBlock.CodeBlock).code.trim())
+    }
+
+    @Test
+    fun preservesMathBracesAndEscapesInStructuredAnswerKeys() {
+        val raw = """
+            :::question {type="blank" blanks="[{\"answer\":\"\\\\frac{1}{2}\",\"aliases\":[\"0.5\"]}]"}
+            求值
+            :::
+        """.trimIndent()
+        val question = parseExamDocsSegments(raw).single() as ExamDocsSegment.CustomBlock
+        assertEquals("""[{"answer":"\\frac{1}{2}","aliases":["0.5"]}]""", question.attrs["blanks"])
+    }
+
 }

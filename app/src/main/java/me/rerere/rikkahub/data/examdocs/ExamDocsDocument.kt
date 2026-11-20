@@ -35,8 +35,25 @@ private val containerClose = Regex("""^ {0,3}:::[ \t]*$""")
 private val codeFence = Regex("""^ {0,3}(`{3,}|~{3,})(.*)$""")
 private val anchorPunctuation = Regex("""[^\p{L}\p{M}\p{N}_\s-]""")
 private val anchorWhitespace = Regex("""\s+""")
-private val attrBlockRegex = Regex("""^\{([^}]*)\}(?:\s+(.*))?$""")
-private val attrPairRegex = Regex("""([A-Za-z0-9_-]+)="((?:[^"\\]|\\.)*)"""")
+private val attrPairPattern = """([A-Za-z0-9_-]+)="((?:[^"\\]|\\.)*)""""
+private val attrPairRegex = Regex(attrPairPattern)
+private val attrBlockRegex = Regex("""^\{((?:$attrPairPattern[ \t]*)*)\}(?:[ \t]+(.*))?$""")
+private val escapedAttribute = Regex("""\\(["\\])""")
+private val inlineCodeOrMath = Regex(
+    """(\x60+)(?!\x60).*?(?<!\x60)\1(?!\x60)|(?<![\\$])\$(?!\$)((?:\\.|[^\\$])+)\$(?![$\d])""",
+)
+private val wideMathEnvironment = Regex("""\\begin\{(?:cases|[pbBvV]?matrix|array|aligned|gathered)\}""")
+
+private fun normalizeMathLine(line: String): String {
+    if ('$' !in line || line.startsWith('\t') || line.startsWith("    ")) return line
+    return inlineCodeOrMath.replace(line) { match ->
+        val formula = match.groups[2]?.value?.trim()
+        if (formula.isNullOrEmpty()) return@replace match.value
+        val standalone = line.trim() == match.value && wideMathEnvironment.containsMatchIn(formula)
+        val delimiter = if (standalone) "\$\$" else "\$"
+        delimiter + formula + delimiter
+    }
+}
 
 private fun parseDirectiveHeader(rawRest: String?): Pair<Map<String, String>, String?> {
     val trimmed = rawRest?.trim().orEmpty()
@@ -44,10 +61,10 @@ private fun parseDirectiveHeader(rawRest: String?): Pair<Map<String, String>, St
     val blockMatch = attrBlockRegex.matchEntire(trimmed) ?: return emptyMap<String, String>() to trimmed
     val attrs = buildMap {
         for (match in attrPairRegex.findAll(blockMatch.groupValues[1])) {
-            put(match.groupValues[1], match.groupValues[2].replace("\\\"", "\""))
+            put(match.groupValues[1], escapedAttribute.replace(match.groupValues[2]) { it.groupValues[1] })
         }
     }
-    val title = blockMatch.groupValues[2].trim().ifEmpty { null }
+    val title = blockMatch.groupValues.last().trim().ifEmpty { null }
     return attrs to title
 }
 
@@ -74,7 +91,7 @@ fun prepareExamDocsDocument(raw: String, sourceUrl: String, legacy: Boolean): Ex
 }
 
 internal fun parseExamDocsSegments(markdown: String): List<ExamDocsSegment> {
-    val lines = markdown.lines()
+    val lines = markdown.lines().toMutableList()
     val matchingEnds = mutableMapOf<Int, Int>()
     val open = ArrayDeque<Int>()
     var fence: String? = null
@@ -94,6 +111,7 @@ internal fun parseExamDocsSegments(markdown: String): List<ExamDocsSegment> {
             marker != null -> fence = marker
             containerOpen.matches(line) -> open.addLast(index)
             containerClose.matches(line) && open.isNotEmpty() -> matchingEnds[open.removeLast()] = index
+            else -> lines[index] = normalizeMathLine(line)
         }
     }
 

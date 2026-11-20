@@ -180,6 +180,7 @@ internal fun rememberRichMarkdownRenderer(
     imageUrlResolver: ((String) -> String)? = null,
     displayMath: (@Composable (String) -> Unit)? = null,
     inlineMath: ((String) -> BetterInline)? = null,
+    imageContent: (@Composable (MarkdownInline.Image, String?, String) -> Unit)? = null,
 ): RichMarkdownRenderer {
     val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
     val enableQuoteHighlight = LocalSettings.current.displaySetting.enableQuoteHighlight
@@ -201,7 +202,7 @@ internal fun rememberRichMarkdownRenderer(
 
     val currentOnClickCitation by rememberUpdatedState(onClickCitation)
     val currentImageUrlResolver by rememberUpdatedState(imageUrlResolver)
-    val components = remember(enableLatexRendering, displayMath, inlineMath) {
+    val components = remember(enableLatexRendering, displayMath, inlineMath, imageContent) {
         MarkdownComponents(
             codeBlock = { block ->
                 HighlightCodeBlock(
@@ -211,18 +212,22 @@ internal fun rememberRichMarkdownRenderer(
                     completeCodeBlock = block.closed,
                 )
             },
-            image = { image, _ ->
+            image = { image, link ->
                 val resolvedUrl = remember(image.url, currentImageUrlResolver) {
                     currentImageUrlResolver?.invoke(image.url) ?: image.url
                 }
-                ZoomableAsyncImage(
-                    model = rememberWorkspaceImageUrl(resolvedUrl),
-                    contentDescription = image.alt,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .widthIn(min = 120.dp)
-                        .heightIn(min = 120.dp),
-                )
+                if (imageContent != null) {
+                    imageContent(image, link, resolvedUrl)
+                } else {
+                    ZoomableAsyncImage(
+                        model = rememberWorkspaceImageUrl(resolvedUrl),
+                        contentDescription = image.alt,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .widthIn(min = 120.dp)
+                            .heightIn(min = 120.dp),
+                    )
+                }
             },
             // 禁用 LaTeX 渲染时不注册公式组件，公式以等宽字体显示源码
             mathBlock = if (enableLatexRendering) {
