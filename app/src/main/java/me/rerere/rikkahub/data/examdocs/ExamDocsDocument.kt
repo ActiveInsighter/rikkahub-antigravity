@@ -25,6 +25,7 @@ sealed interface ExamDocsSegment {
         val type: String,
         val title: String?,
         val blocks: List<ExamDocsSegment>,
+        val attrs: Map<String, String> = emptyMap(),
     ) : ExamDocsSegment
 }
 
@@ -34,6 +35,21 @@ private val containerClose = Regex("""^ {0,3}:::[ \t]*$""")
 private val codeFence = Regex("""^ {0,3}(`{3,}|~{3,})(.*)$""")
 private val anchorPunctuation = Regex("""[^\p{L}\p{M}\p{N}_\s-]""")
 private val anchorWhitespace = Regex("""\s+""")
+private val attrBlockRegex = Regex("""^\{([^}]*)\}(?:\s+(.*))?$""")
+private val attrPairRegex = Regex("""([A-Za-z0-9_-]+)="((?:[^"\\]|\\.)*)"""")
+
+private fun parseDirectiveHeader(rawRest: String?): Pair<Map<String, String>, String?> {
+    val trimmed = rawRest?.trim().orEmpty()
+    if (trimmed.isEmpty()) return emptyMap<String, String>() to null
+    val blockMatch = attrBlockRegex.matchEntire(trimmed) ?: return emptyMap<String, String>() to trimmed
+    val attrs = buildMap {
+        for (match in attrPairRegex.findAll(blockMatch.groupValues[1])) {
+            put(match.groupValues[1], match.groupValues[2].replace("\\\"", "\""))
+        }
+    }
+    val title = blockMatch.groupValues[2].trim().ifEmpty { null }
+    return attrs to title
+}
 
 fun prepareExamDocsDocument(raw: String, sourceUrl: String, legacy: Boolean): ExamDocsDocument {
     val normalized = raw.replace("\r\n", "\n").replace('\r', '\n').removePrefix("\uFEFF")
@@ -101,10 +117,10 @@ internal fun parseExamDocsSegments(markdown: String): List<ExamDocsSegment> {
             }
             val directive = requireNotNull(containerOpen.matchEntire(lines[index]))
             val type = directive.groupValues[1].lowercase()
-            val title = directive.groupValues[2].trim().ifEmpty { null }
+            val (attrs, title) = parseDirectiveHeader(directive.groupValues[2])
             val children = parseRange(index + 1, close, depth + 1)
             addMarkdown(from, index)
-            add(ExamDocsSegment.CustomBlock(type, title, children))
+            add(ExamDocsSegment.CustomBlock(type, title, children, attrs))
             index = close + 1
             from = index
         }

@@ -93,8 +93,8 @@ fun HighlightCodeBlock(
     modifier: Modifier = Modifier,
     completeCodeBlock: Boolean = true,
     style: TextStyle? = TextStyle(
-        fontSize = 12.sp,
-        lineHeight = 16.sp,
+        fontSize = 12.5.sp,
+        lineHeight = 18.sp,
     ),
 ) {
     val darkMode = LocalDarkMode.current
@@ -133,17 +133,22 @@ fun HighlightCodeBlock(
         }
     }
 
+    val containerShape = RoundedCornerShape(14.dp)
+    val containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    val headerTint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (darkMode) 0.04f else 0.03f)
+    val borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
+
     Column(
         modifier = modifier
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.large)
-            .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceContainer),
+            .clip(containerShape)
+            .border(0.8.dp, borderColor, containerShape)
+            .background(containerColor),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .background(headerTint)
+                .padding(horizontal = 14.dp, vertical = 9.dp)
         ) {
             HighlightCodeActions(
                 language = language,
@@ -160,8 +165,14 @@ fun HighlightCodeBlock(
                 },
             )
         }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(0.8.dp)
+                .background(borderColor.copy(alpha = 0.6f))
+        )
         Column(
-            modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
             when {
                 canInlinePreview && previewMode -> {

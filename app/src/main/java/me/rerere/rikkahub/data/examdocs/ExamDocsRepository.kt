@@ -21,10 +21,12 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-const val DEFAULT_EXAM_DOCS_BASE_URL = "https://exam-docs.2212148739lbw.workers.dev"
+const val DEFAULT_EXAM_DOCS_BASE_URL = "https://exam.any1.tech"
+private const val LEGACY_EXAM_DOCS_BASE_URL = "https://exam-docs.2212148739lbw.workers.dev"
 const val DEFAULT_STUDY_DOCS_BASE_URL = "https://study-docs.any1.tech"
 private const val PREFS_NAME = "exam_docs_prefs"
 private const val KEY_SITES = "sites"
+private const val KEY_SITES_V2_MIGRATED = "sites_v2_migrated"
 private const val KEY_ACTIVE_SITE = "active_site"
 private const val KEY_BASE_URL = "base_url"
 private const val KEY_LAST_PAGE_URL = "last_page_url"
@@ -104,30 +106,49 @@ class ExamDocsRepository(
     fun loadSiteSettings(): ExamDocsSiteSettings {
         val saved = prefs.getString(KEY_SITES, null)
         if (saved == null) {
-            val legacy = parseBaseUrl(prefs.getString(KEY_BASE_URL, DEFAULT_EXAM_DOCS_BASE_URL).orEmpty())
+            val rawLegacy = parseBaseUrl(prefs.getString(KEY_BASE_URL, DEFAULT_EXAM_DOCS_BASE_URL).orEmpty())
+            val legacy = if (rawLegacy == LEGACY_EXAM_DOCS_BASE_URL) DEFAULT_EXAM_DOCS_BASE_URL else rawLegacy
             val active = builtInDocsSites.firstOrNull { it.baseUrl == legacy }
                 ?: legacy?.let { ExamDocsSite(it.toHttpUrl().host, it) }
                 ?: builtInDocsSites.first()
             val sites = (builtInDocsSites + active).distinctBy(ExamDocsSite::baseUrl)
             val lastPage = prefs.getString(KEY_LAST_PAGE_URL, null)
             prefs.edit {
-                putString(KEY_SITES, json.encodeToString(sites.filterNot(builtInDocsSites::contains)))
+                putString(KEY_SITES, json.encodeToString(sites))
                 putString(KEY_ACTIVE_SITE, active.baseUrl)
+                putBoolean(KEY_SITES_V2_MIGRATED, true)
                 lastPage?.let { putString(lastPageKey(active.baseUrl), normalizeDocPath(it)) }
             }
             return ExamDocsSiteSettings(sites, active)
         }
 
-        val custom = runCatching { json.decodeFromString<List<ExamDocsSite>>(saved) }.getOrDefault(emptyList())
-        val sites = (builtInDocsSites + custom).distinctBy(ExamDocsSite::baseUrl)
-        val activeUrl = prefs.getString(KEY_ACTIVE_SITE, null)
-        return ExamDocsSiteSettings(sites, sites.firstOrNull { it.baseUrl == activeUrl } ?: sites.first())
+        val decoded = runCatching { json.decodeFromString<List<ExamDocsSite>>(saved) }.getOrDefault(emptyList())
+        val rawActiveUrl = prefs.getString(KEY_ACTIVE_SITE, null)
+        if (!prefs.getBoolean(KEY_SITES_V2_MIGRATED, false)) {
+            val migratedCustom = decoded.map { site ->
+                if (site.baseUrl == LEGACY_EXAM_DOCS_BASE_URL) site.copy(baseUrl = DEFAULT_EXAM_DOCS_BASE_URL) else site
+            }
+            val sites = (builtInDocsSites + migratedCustom).distinctBy(ExamDocsSite::baseUrl)
+            val migratedActiveUrl = if (rawActiveUrl == LEGACY_EXAM_DOCS_BASE_URL) DEFAULT_EXAM_DOCS_BASE_URL else rawActiveUrl
+            val active = sites.firstOrNull { it.baseUrl == migratedActiveUrl } ?: sites.first()
+            prefs.edit {
+                putString(KEY_SITES, json.encodeToString(sites))
+                putString(KEY_ACTIVE_SITE, active.baseUrl)
+                putBoolean(KEY_SITES_V2_MIGRATED, true)
+            }
+            return ExamDocsSiteSettings(sites, active)
+        }
+
+        val sites = decoded.distinctBy(ExamDocsSite::baseUrl).ifEmpty { builtInDocsSites }
+        val active = sites.firstOrNull { it.baseUrl == rawActiveUrl } ?: sites.first()
+        return ExamDocsSiteSettings(sites, active)
     }
 
     fun saveSiteSettings(sites: List<ExamDocsSite>, active: ExamDocsSite) {
         prefs.edit {
-            putString(KEY_SITES, json.encodeToString(sites.filterNot(builtInDocsSites::contains)))
+            putString(KEY_SITES, json.encodeToString(sites))
             putString(KEY_ACTIVE_SITE, active.baseUrl)
+            putBoolean(KEY_SITES_V2_MIGRATED, true)
         }
     }
 

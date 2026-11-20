@@ -3,44 +3,75 @@ package me.rerere.rikkahub.ui.pages.examdocs
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import me.rerere.bettertext.markdown.MarkdownBlock.Details
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 import me.rerere.rikkahub.ui.components.richtext.RichMarkdownRenderer
-import me.rerere.rikkahub.ui.components.richtext.MaterialMarkdownDefaults
+import me.rerere.rikkahub.ui.pages.examdocs.components.DocAccordion
+import me.rerere.rikkahub.ui.pages.examdocs.components.DocCallout
+import me.rerere.rikkahub.ui.pages.examdocs.components.DocCard
+import me.rerere.rikkahub.ui.pages.examdocs.components.DocCards
+import me.rerere.rikkahub.ui.pages.examdocs.components.DocQuestionCard
+import me.rerere.rikkahub.ui.pages.examdocs.components.DocSteps
+import me.rerere.rikkahub.ui.pages.examdocs.components.DocTabs
+import me.rerere.rikkahub.ui.pages.examdocs.components.DocWordCards
+
+data class ExamDocsRenderContext(
+    val registry: ExamDocsComponentRegistry,
+    val renderMarkdown: RichMarkdownRenderer,
+    val onLinkClick: ((String) -> Unit)? = null,
+)
 
 typealias ExamDocsCustomBlockRenderer = @Composable (
     block: ExamDocsSegment.CustomBlock,
-    content: @Composable () -> Unit,
+    context: ExamDocsRenderContext,
 ) -> Unit
 
 class ExamDocsComponentRegistry(
+    private val onLinkClick: ((String) -> Unit)? = null,
     private val renderers: Map<String, ExamDocsCustomBlockRenderer> = defaultRenderers,
 ) {
     fun get(type: String): ExamDocsCustomBlockRenderer? = renderers[type.lowercase()]
 
     fun extend(type: String, renderer: ExamDocsCustomBlockRenderer): ExamDocsComponentRegistry =
-        ExamDocsComponentRegistry(renderers + (type.lowercase() to renderer))
+        ExamDocsComponentRegistry(onLinkClick, renderers + (type.lowercase() to renderer))
+
+    fun createContext(renderMarkdown: RichMarkdownRenderer): ExamDocsRenderContext =
+        ExamDocsRenderContext(this, renderMarkdown, onLinkClick)
 
     private companion object {
-        val callout: ExamDocsCustomBlockRenderer = { block, content -> ExamDocsCalloutCard(block, content) }
-        val collapsible: ExamDocsCustomBlockRenderer = { block, content ->
-            MaterialMarkdownDefaults.Details(
-                block = Details(summary = emptyList(), children = emptyList()),
-                summary = {
-                    val label = if (block.type == "solution") "参考答案与解析" else "展开详情"
-                    Text(block.title ?: label, style = MaterialTheme.typography.titleSmall)
-                },
-                content = content,
+        val callout: ExamDocsCustomBlockRenderer = { block, ctx ->
+            DocCallout(block = block, content = { RenderSegmentList(block.blocks, ctx) })
+        }
+        val accordion: ExamDocsCustomBlockRenderer = { block, ctx ->
+            DocAccordion(block = block, content = { RenderSegmentList(block.blocks, ctx) })
+        }
+        val cards: ExamDocsCustomBlockRenderer = { block, ctx ->
+            DocCards(block = block, renderChild = { child -> ExamDocsMarkdownBlock(child, ctx) })
+        }
+        val card: ExamDocsCustomBlockRenderer = { block, ctx ->
+            DocCard(
+                block = block,
+                content = { RenderSegmentList(block.blocks, ctx) },
+                onLinkClick = ctx.onLinkClick,
             )
         }
+        val steps: ExamDocsCustomBlockRenderer = { block, ctx ->
+            DocSteps(block = block, renderChildren = { children -> RenderSegmentList(children, ctx) })
+        }
+        val tabs: ExamDocsCustomBlockRenderer = { block, ctx ->
+            DocTabs(block = block, renderChildren = { children -> RenderSegmentList(children, ctx) })
+        }
+        val question: ExamDocsCustomBlockRenderer = { block, ctx ->
+            DocQuestionCard(block = block, renderChildren = { children -> RenderSegmentList(children, ctx) })
+        }
+        val wordCards: ExamDocsCustomBlockRenderer = { block, _ ->
+            DocWordCards(block = block)
+        }
+
         val defaultRenderers = mapOf(
             "note" to callout,
             "tip" to callout,
@@ -48,10 +79,17 @@ class ExamDocsComponentRegistry(
             "warning" to callout,
             "danger" to callout,
             "callout" to callout,
-            "solution" to collapsible,
-            "accordion" to collapsible,
-            "details" to collapsible,
-            "question" to callout,
+            "solution" to accordion,
+            "accordion" to accordion,
+            "details" to accordion,
+            "cards" to cards,
+            "card" to card,
+            "steps" to steps,
+            "cardsteps" to steps,
+            "tabs" to tabs,
+            "codetabs" to tabs,
+            "question" to question,
+            "wordcards" to wordCards,
         )
     }
 }
@@ -62,23 +100,24 @@ internal fun ExamDocsMarkdownBlock(
     registry: ExamDocsComponentRegistry,
     renderMarkdown: RichMarkdownRenderer,
 ) {
+    ExamDocsMarkdownBlock(block, registry.createContext(renderMarkdown))
+}
+
+@Composable
+private fun ExamDocsMarkdownBlock(
+    block: ExamDocsSegment,
+    context: ExamDocsRenderContext,
+) {
     when (block) {
-        is ExamDocsSegment.Markdown -> renderMarkdown(block.document, Modifier.fillMaxWidth())
+        is ExamDocsSegment.Markdown -> context.renderMarkdown(block.document, Modifier.fillMaxWidth())
         is ExamDocsSegment.CustomBlock -> {
-            val content: @Composable () -> Unit = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    block.blocks.forEach {
-                        ExamDocsMarkdownBlock(it, registry, renderMarkdown)
-                    }
-                }
-            }
-            val renderer = registry.get(block.type)
+            val renderer = context.registry.get(block.type)
             if (renderer != null) {
-                renderer(block, content)
+                renderer(block, context)
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     block.title?.let { Text(it, style = MaterialTheme.typography.titleSmall) }
-                    content()
+                    RenderSegmentList(block.blocks, context)
                 }
             }
         }
@@ -86,27 +125,13 @@ internal fun ExamDocsMarkdownBlock(
 }
 
 @Composable
-private fun ExamDocsCalloutCard(block: ExamDocsSegment.CustomBlock, content: @Composable () -> Unit) {
-    val colorScheme = MaterialTheme.colorScheme
-    val (color, label) = when (block.type) {
-        "tip" -> colorScheme.secondaryContainer to "提示"
-        "warning" -> colorScheme.tertiaryContainer to "注意"
-        "danger" -> colorScheme.errorContainer to "警告"
-        "note" -> colorScheme.surfaceContainerHigh to "笔记"
-        "question" -> colorScheme.surfaceContainerHigh to "题目"
-        else -> colorScheme.primaryContainer to "说明"
-    }
-    Surface(
-        color = color,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(block.title ?: label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            content()
+private fun RenderSegmentList(
+    blocks: List<ExamDocsSegment>,
+    context: ExamDocsRenderContext,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        blocks.forEach { child ->
+            ExamDocsMarkdownBlock(child, context)
         }
     }
 }

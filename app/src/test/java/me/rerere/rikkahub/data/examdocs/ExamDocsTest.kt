@@ -99,4 +99,46 @@ class ExamDocsTest {
         )
         assertNull(getExamDocsLink(base, "/docs/math/01", "https://other.example/docs/math"))
     }
+
+    @Test
+    fun parsesDirectiveAttributesAndNestedComponentContainers() {
+        val raw = """
+            # 测试
+
+            :::question {id="q-1" type="single" number="1" tags="来源:408"}
+            题干内容
+            :::option {label="A" correct="true"}
+            选项A
+            :::
+            :::solution 参考答案与解析
+            解析内容
+            :::
+            :::
+
+            :::cards
+            :::card {icon="rocket" tone="info" href="/docs/intro"} 卡片标题
+            卡片说明
+            :::
+            :::
+        """.trimIndent()
+        val doc = prepareExamDocsDocument(raw, "https://exam.any1.tech/android/docs/test.md", legacy = false)
+        val question = doc.blocks[1] as ExamDocsSegment.CustomBlock
+        assertEquals("question", question.type)
+        assertEquals("q-1", question.attrs["id"])
+        assertEquals("single", question.attrs["type"])
+        assertEquals("1", question.attrs["number"])
+        assertEquals("来源:408", question.attrs["tags"])
+        val option = question.blocks[1] as ExamDocsSegment.CustomBlock
+        assertEquals("option", option.type)
+        assertEquals("A", option.attrs["label"])
+        assertEquals("true", option.attrs["correct"])
+
+        val cards = doc.blocks[2] as ExamDocsSegment.CustomBlock
+        val card = cards.blocks.single() as ExamDocsSegment.CustomBlock
+        assertEquals("card", card.type)
+        assertEquals("卡片标题", card.title)
+        assertEquals("rocket", card.attrs["icon"])
+        assertEquals("info", card.attrs["tone"])
+        assertEquals("/docs/intro", card.attrs["href"])
+    }
 }
