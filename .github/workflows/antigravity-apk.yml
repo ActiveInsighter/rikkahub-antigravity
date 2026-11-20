@@ -73,6 +73,8 @@ jobs:
           VERSION_NAME=$(python3 -c 'import json; print(json.load(open("app/build/outputs/apk/github/debug/output-metadata.json"))["elements"][0]["versionName"])')
           [[ "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+([a-zA-Z0-9.+-]*)$ ]]
           echo "RIKKA_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          APK_PREFIX="RikkaHub-${VERSION_NAME}-antigravity"
+          echo "APK_PREFIX=$APK_PREFIX" >> "$GITHUB_ENV"
           mkdir -p artifacts
           APK_SIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -n 1)
@@ -84,15 +86,42 @@ jobs:
             cat "$RUNNER_TEMP/apk-signature.txt"
             grep -Fi -- "$EXPECTED_CERT" "$RUNNER_TEMP/apk-signature.txt"
             name=$(basename "$apk")
-            cp "$apk" "artifacts/${name/app-github-/RikkaHub-${VERSION_NAME}-antigravity-}"
+            cp "$apk" "artifacts/$APK_PREFIX-${name#app-github-}"
           done
           cd artifacts
           sha256sum *.apk > SHA256SUMS.txt
-      - name: Upload APKs
-        uses: actions/upload-artifact@v4
+          {
+            echo '### APK SHA-256'
+            echo '~~~text'
+            cat SHA256SUMS.txt
+            echo '~~~'
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Match the filename in each name input so overwrite can replace earlier attempts.
+      - name: Upload arm64-v8a APK
+        uses: actions/upload-artifact@v7
         with:
-          name: RikkaHub-Antigravity-${{ github.run_number }}
-          path: artifacts/
+          name: ${{ env.APK_PREFIX }}-arm64-v8a-debug.apk
+          path: artifacts/${{ env.APK_PREFIX }}-arm64-v8a-debug.apk
+          archive: false
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload x86_64 APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.APK_PREFIX }}-x86_64-debug.apk
+          path: artifacts/${{ env.APK_PREFIX }}-x86_64-debug.apk
+          archive: false
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 90
+      - name: Upload universal APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.APK_PREFIX }}-universal-debug.apk
+          path: artifacts/${{ env.APK_PREFIX }}-universal-debug.apk
+          archive: false
+          overwrite: true
           if-no-files-found: error
           retention-days: 90
       - name: Publish downloadable APK release
@@ -103,13 +132,6 @@ jobs:
             --target "$GITHUB_SHA" --prerelease \
             --title "RikkaHub ${RIKKA_VERSION_NAME} Antigravity · Build ${GITHUB_RUN_NUMBER}" \
             --notes-file docs/ANTIGRAVITY-RELEASE.md
-      - name: Upload test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: interactions-tests-${{ github.run_number }}
-          path: ai/build/reports/tests/testDebugUnitTest/
-          if-no-files-found: ignore
       - name: Remove signing key from runner
         if: always()
         run: rm -f "$RUNNER_TEMP/rikkahub-debug.keystore"
