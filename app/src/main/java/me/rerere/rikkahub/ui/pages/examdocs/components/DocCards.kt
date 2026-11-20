@@ -144,8 +144,6 @@ internal fun DocCard(
     }
 }
 
-import me.rerere.rikkahub.ui.theme.extendColors
-
 @Composable
 internal fun resolveToneColor(tone: String?): Color {
     val scheme = MaterialTheme.colorScheme
