@@ -53,6 +53,8 @@ import me.rerere.rikkahub.ui.components.ui.CardGroupIcon
 import me.rerere.rikkahub.ui.components.ui.CardGroupValue
 import me.rerere.rikkahub.ui.components.ui.ConnectedChoiceButtons
 import me.rerere.rikkahub.ui.components.ui.ConnectedChoiceLabel
+import me.rerere.rikkahub.ui.components.ui.formItem
+import me.rerere.rikkahub.ui.components.ui.switchItem
 import kotlin.math.roundToInt
 
 private enum class DocsSettingsPage { Hub, Sites, Ui }
