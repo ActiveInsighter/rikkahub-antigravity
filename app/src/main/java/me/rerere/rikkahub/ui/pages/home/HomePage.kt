@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -39,6 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,13 +50,16 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.Clock01
+import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.GitFork
 import me.rerere.hugeicons.stroke.MessageAdd01
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.hugeicons.stroke.Sparkles
+import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
+import me.rerere.rikkahub.data.update.usesAntigravityUpdates
 import me.rerere.rikkahub.data.workflow.WorkflowRepository
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.CardGroupIcon
@@ -150,6 +155,7 @@ fun HomePage() {
                         greeting = greeting,
                         isConnected = session != null,
                         onConnectionClick = ::openWorkflow,
+                        onDownloadsClick = { navController.navigate(Screen.ApkDownloads) },
                         onSettingsClick = { navController.navigate(Screen.Setting) },
                     )
                 }
@@ -347,6 +353,7 @@ private fun HomeHeader(
     greeting: String,
     isConnected: Boolean,
     onConnectionClick: () -> Unit,
+    onDownloadsClick: () -> Unit,
     onSettingsClick: () -> Unit,
 ) {
     Row(
@@ -420,6 +427,17 @@ private fun HomeHeader(
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
+                    )
+                }
+            }
+
+            if (usesAntigravityUpdates) {
+                IconButton(onClick = onDownloadsClick, modifier = Modifier.size(48.dp)) {
+                    Icon(
+                        imageVector = HugeIcons.Download01,
+                        contentDescription = stringResource(R.string.apk_updates_title),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
                     )
                 }
             }

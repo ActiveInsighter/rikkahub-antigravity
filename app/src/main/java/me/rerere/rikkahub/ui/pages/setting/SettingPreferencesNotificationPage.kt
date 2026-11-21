@@ -36,6 +36,7 @@ import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.datastore.DisplaySetting
+import me.rerere.rikkahub.data.update.usesAntigravityUpdates
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.CardGroup
 import me.rerere.rikkahub.ui.components.ui.ConnectedChoiceButtons
@@ -111,7 +112,7 @@ fun SettingPreferencesNotificationPage(vm: SettingVM = koinViewModel()) {
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Play 版由商店负责更新，不提供更新提醒
-            if (!BuildConfig.IS_PLAY_STORE) {
+            if (!BuildConfig.IS_PLAY_STORE && !usesAntigravityUpdates) {
                 item {
                     CardGroup {
                         item(

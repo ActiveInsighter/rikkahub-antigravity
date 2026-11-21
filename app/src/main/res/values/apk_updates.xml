@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="apk_updates_title">Downloads and updates</string>
+  <string name="apk_updates_refresh">Refresh</string>
+  <string name="apk_updates_current_version">Installed version %1$s · %2$d</string>
+  <string name="apk_updates_build">%1$s · Build %2$d</string>
+  <string name="apk_updates_installed">Installed</string>
+  <string name="apk_updates_older">Older build</string>
+  <string name="apk_updates_latest">Latest build</string>
+  <string name="apk_updates_delta">Incremental · %1$s (save %2$d%%)</string>
+  <string name="apk_updates_full">Full APK · %1$s</string>
+  <string name="apk_updates_unconfigured">This build has no update server configured. APKs are available on GitHub.</string>
+  <string name="apk_updates_empty">No builds have been published yet.</string>
+  <string name="apk_updates_load_failed">Could not load or verify the build list.</string>
+  <string name="apk_updates_open_github">GitHub releases</string>
+  <string name="apk_updates_downloading_delta">Downloading incremental update…</string>
+  <string name="apk_updates_downloading_fallback">Incremental update failed. Downloading the full APK…</string>
+  <string name="apk_updates_downloading_full">Downloading the full APK…</string>
+  <string name="apk_updates_progress">%1$s / %2$s</string>
+  <string name="apk_updates_patching">Rebuilding the APK…</string>
+  <string name="apk_updates_verifying">Verifying the APK…</string>
+  <string name="apk_updates_ready">The APK is ready to install.</string>
+  <string name="apk_updates_install">Install update</string>
+  <string name="apk_updates_no_space">Free up storage space, then retry.</string>
+  <string name="apk_updates_download_failed">Could not download or verify this update. Retry from the build list.</string>
+  <string name="apk_updates_install_failed">Could not open the Android installer or its settings.</string>
+  <string name="apk_updates_permission_title">Allow installation from RikkaHub</string>
+  <string name="apk_updates_permission_message">Enable “Allow from this source” in Android settings to continue with installation.</string>
+  <string name="apk_updates_open_settings">Open settings</string>
+</resources>
