@@ -12,6 +12,9 @@
 - Agent 支持手动添加 Gemini 模型。普通 Gemini 可设置思考程度，Antigravity 使用托管推理。
 - Agent 侧栏的「工作流」可定时执行提示词。每个任务可设置模型、系统提示词、Cron 和时区，也可暂停或立即执行。
 - Antigravity 的新对话由 Gemini 3.5 Flash-Lite 生成标题。点击运行耗时或消息末尾的执行详情，可查看执行总结及派发、首响和步骤时间线。
+- 文档阅读器复用 Chat 的三点菜单，修复「设置」「站点设置」「UI 设置」的跳转崩溃。
+- Agent 遇到 HTTP 400 后发送下一条消息时，原轮次已同步的工具步骤、推理和错误仍会显示。
+- 首页的「下载与更新」支持签名构建列表、增量更新和完整 APK 下载。更新源启用前可通过本页下载完整 APK。
 - Actions 运行请求及同步回归测试，构建 APK 并验证签名。
 - Debug 版关闭 Firebase Analytics 和 Crashlytics 数据收集，使用本地占位配置，无需 Firebase 密钥。
 
