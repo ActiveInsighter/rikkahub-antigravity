@@ -20,10 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.booleanOrNull
@@ -191,9 +189,9 @@ object ReadFileToolUI : ToolUIRenderer {
     @Composable
     override fun Summary(context: ToolUIContext) {
         val text = remember(context) { textOf(context) } ?: return
-        FileContentSummary(
+        ToolCodeSummary(
             text = text,
-            path = context.arguments.getStringContent("path"),
+            language = languageOf(context.arguments.getStringContent("path")),
             loading = context.loading,
         )
     }
@@ -231,9 +229,9 @@ object WriteFileToolUI : ToolUIRenderer {
     @Composable
     override fun Summary(context: ToolUIContext) {
         val text = remember(context) { textOf(context) } ?: return
-        FileContentSummary(
+        ToolCodeSummary(
             text = text,
-            path = context.arguments.getStringContent("path"),
+            language = languageOf(context.arguments.getStringContent("path")),
             loading = context.loading,
         )
     }
@@ -249,11 +247,11 @@ object WriteFileToolUI : ToolUIRenderer {
     }
 }
 
-/** 内联摘要: 按扩展名语法高亮展示文件内容首部若干行 */
+/** 内联摘要只显示工具输出的前几行。 */
 @Composable
-private fun FileContentSummary(text: String, path: String?, loading: Boolean) {
-    val preview = remember(text) {
-        text.lineSequence().take(FILE_SUMMARY_MAX_LINES).joinToString("\n")
+private fun ToolCodeSummary(text: String, language: String, loading: Boolean, maxLines: Int = FILE_SUMMARY_MAX_LINES) {
+    val preview = remember(text, maxLines) {
+        text.lineSequence().take(maxLines).joinToString("\n")
     }
     val style = codeBlockTextStyle(LocalSettings.current.displaySetting.fontSizeRatio)
     Box(
@@ -266,11 +264,11 @@ private fun FileContentSummary(text: String, path: String?, loading: Boolean) {
     ) {
         CodeHighlightText(
             code = preview,
-            language = languageOf(path),
+            language = language,
             fontFamily = JetbrainsMono,
             fontSize = style.fontSize,
             lineHeight = style.lineHeight,
-            maxLines = FILE_SUMMARY_MAX_LINES,
+            maxLines = maxLines,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -335,23 +333,7 @@ object ShellToolUI : ToolUIRenderer {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             ShellExitStatus(content, MaterialTheme.typography.labelSmall)
             if (combined.isNotEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MaterialTheme.shapes.small)
-                        .background(MaterialTheme.colorScheme.surfaceContainer)
-                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                        .shimmer(isLoading = context.loading),
-                ) {
-                    Text(
-                        text = combined.lineSequence().take(SUMMARY_MAX_LINES).joinToString("\n"),
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                        maxLines = SUMMARY_MAX_LINES,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                ToolCodeSummary(combined, language = "plaintext", loading = context.loading, maxLines = SUMMARY_MAX_LINES)
             }
         }
     }
