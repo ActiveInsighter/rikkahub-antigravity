@@ -43,6 +43,11 @@ jobs:
           cert=$(keytool -exportcert -keystore "$keystore_path" -storepass android -alias androiddebugkey | sha256sum | cut -d ' ' -f 1)
           for build in 116 118; do
             gh release download "antigravity-$build-1" --pattern '*-debug.apk' --pattern SHA256SUMS.txt --dir "$RUNNER_TEMP/releases/$build"
+            if [[ "$build" == 116 ]]; then
+              version_code=197
+            else
+              version_code=$((100000 + build))
+            fi
             (
               cd "$RUNNER_TEMP/releases/$build"
               sha256sum -c SHA256SUMS.txt
@@ -51,7 +56,7 @@ jobs:
                 grep -Fi "$cert" "$RUNNER_TEMP/signature"
                 "$aapt_tool" dump badging "$apk" > "$RUNNER_TEMP/badging"
                 grep -F "name='me.rerere.rikkahub.debug'" "$RUNNER_TEMP/badging"
-                grep -F "versionCode='$((100000 + build))'" "$RUNNER_TEMP/badging"
+                grep -F "versionCode='$version_code'" "$RUNNER_TEMP/badging"
                 grep -F "versionName='3.3.0'" "$RUNNER_TEMP/badging"
               done
             )
@@ -67,20 +72,29 @@ jobs:
           from pathlib import Path
           from types import SimpleNamespace
 
-          from publish_updates import PACKAGE_NAME, json_bytes, publish, read_signed_catalog, sign
+          from publish_updates import ABIS, PACKAGE_NAME, apk_key, digest, json_bytes, publish, read_signed_catalog, sign
 
           temp = Path(os.environ["RUNNER_TEMP"])
 
           class BundleStore:
               def __init__(self, root):
                   self.root = root
+                  self.legacy_files = {}
+                  self.legacy_apks = []
+                  for abi in ABIS:
+                      (path,) = (temp / "releases" / "116").glob(f"*-{abi}-debug.apk")
+                      apk = {"abi": abi, "sha256": digest(path), "size": path.stat().st_size}
+                      self.legacy_files[apk_key(197, apk)] = path
+                      self.legacy_apks.append(apk)
 
               def read_catalog(self):
                   catalog = self.root / "catalog.json"
-                  return (read_signed_catalog(catalog.read_bytes()), None) if catalog.exists() else ([], None)
+                  if catalog.exists():
+                      return read_signed_catalog(catalog.read_bytes()), None
+                  return [{"versionCode": 197, "apks": self.legacy_apks}], None
 
               def get_file(self, key, destination):
-                  shutil.copyfile(self.root / key, destination)
+                  shutil.copyfile(self.legacy_files[key], destination)
 
               def put_file(self, key, path, content_type):
                   destination = self.root / key
@@ -88,28 +102,26 @@ jobs:
                   shutil.copyfile(path, destination)
 
               def write_catalog(self, builds, etag):
-                  payload = json_bytes({"schemaVersion": 1, "packageName": PACKAGE_NAME, "builds": builds})
+                  current_builds = [build for build in builds if build["versionCode"] >= 100001]
+                  payload = json_bytes({"schemaVersion": 1, "packageName": PACKAGE_NAME, "builds": current_builds})
                   (self.root / "catalog.json").write_bytes(sign(payload))
 
               def prune(self, builds):
                   pass
 
           store = BundleStore(temp / "r2-bundle")
-          for build, commit in (
-              (116, "7eeb4bcceff71de1c4fa48b41792010b69a2300e"),
-              (118, "df1b6c09861b8828d15caffc411acd939ca28724"),
-          ):
-              publish(store, SimpleNamespace(
-                  apk_dir=temp / "releases" / str(build),
-                  hdiff_tools=temp / "hdiffpatch",
-                  work_dir=temp,
-                  build_number=build,
-                  version_code=100000 + build,
-                  version_name="3.3.0",
-                  commit=commit,
-              ))
+          publish(store, SimpleNamespace(
+              apk_dir=temp / "releases" / "118",
+              hdiff_tools=temp / "hdiffpatch",
+              work_dir=temp,
+              build_number=118,
+              version_code=100118,
+              version_name="3.3.0",
+              commit="df1b6c09861b8828d15caffc411acd939ca28724",
+          ))
           builds, _ = store.read_catalog()
-          assert [build["buildNumber"] for build in builds] == [118, 116]
+          assert [build["buildNumber"] for build in builds] == [118]
+          assert any(patch["baseVersionCode"] == 197 for apk in builds[0]["apks"] for patch in apk["patches"])
           PY
 
       - uses: actions/upload-artifact@v7
