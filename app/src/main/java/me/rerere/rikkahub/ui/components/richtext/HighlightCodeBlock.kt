@@ -5,10 +5,8 @@ import android.net.Uri
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -27,7 +26,6 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,7 +72,6 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
-import me.rerere.rikkahub.ui.context.Navigator
 import me.rerere.rikkahub.ui.modifier.onClick
 import me.rerere.rikkahub.ui.theme.AtomOneDarkPalette
 import me.rerere.rikkahub.ui.theme.AtomOneLightPalette
@@ -87,17 +84,16 @@ import me.rerere.ui.webview.rememberWebViewState
 import kotlin.time.Clock
 
 private const val COLLAPSE_LINES = 10
-private val PREVIEWABLE_LANGUAGES = setOf("html", "svg")
 
 internal val LocalCodeBlockEmbedded = compositionLocalOf { false }
+internal val CodeBlockShape = RoundedCornerShape(14.dp)
 
 @Composable
 internal fun codeBlockBackground(): Color =
     if (LocalDarkMode.current) Color(0xFF1E1F22) else Color(0xFFF1F3F5)
 
-@Composable
-internal fun codeBlockBorder(): Color =
-    if (LocalDarkMode.current) Color(0xFF2E3035) else Color(0xFFE2E5E9)
+internal fun codeBlockTextStyle(ratio: Float = 1f): TextStyle =
+    TextStyle(fontFamily = JetbrainsMono, fontSize = 14.sp * ratio, lineHeight = 21.sp * ratio)
 
 @Composable
 fun HighlightCodeBlock(
@@ -105,7 +101,7 @@ fun HighlightCodeBlock(
     language: String,
     modifier: Modifier = Modifier,
     completeCodeBlock: Boolean = true,
-    style: TextStyle? = null,
+    svgPreviewByDefault: Boolean = false,
 ) {
     val darkMode = LocalDarkMode.current
     val embedded = LocalCodeBlockEmbedded.current
@@ -113,14 +109,17 @@ fun HighlightCodeBlock(
     val scrollState = rememberScrollState()
     val clipboardManager = LocalClipboard.current
     val scope = rememberCoroutineScope()
-    val navController = LocalNavController.current
     val context = LocalContext.current
     val settings = LocalSettings.current
     val normalizedLanguage = remember(language) { language.lowercase() }
-    val canInlinePreview = completeCodeBlock && normalizedLanguage in PREVIEWABLE_LANGUAGES
-    var previewMode by remember(canInlinePreview, code, normalizedLanguage) {
-        mutableStateOf(false)
+    val svg = remember(code, normalizedLanguage, completeCodeBlock) {
+        if (completeCodeBlock && normalizedLanguage == "svg") code.toByteArray() else null
     }
+    val canInlinePreview = svg != null || (completeCodeBlock && normalizedLanguage == "html")
+    var previewMode by remember(canInlinePreview, code, normalizedLanguage, svgPreviewByDefault) {
+        mutableStateOf(svgPreviewByDefault && svg != null)
+    }
+    var showSvgFullscreen by remember(svg) { mutableStateOf(false) }
 
     var isExpanded by remember(settings.displaySetting.codeBlockAutoCollapse) {
         mutableStateOf(!settings.displaySetting.codeBlockAutoCollapse)
@@ -144,7 +143,6 @@ fun HighlightCodeBlock(
         }
     }
 
-    val containerShape = RoundedCornerShape(14.dp)
     val containerColor = codeBlockBackground()
 
     Column(
@@ -152,9 +150,8 @@ fun HighlightCodeBlock(
             modifier
         } else {
             modifier
-                .clip(containerShape)
+                .clip(CodeBlockShape)
                 .background(containerColor)
-                .border(1.dp, codeBlockBorder(), containerShape)
         },
     ) {
         Box(
@@ -168,12 +165,20 @@ fun HighlightCodeBlock(
                 clipboardManager = clipboardManager,
                 code = code,
                 createDocumentLauncher = createDocumentLauncher,
-                navController = navController,
-                completeCodeBlock = completeCodeBlock,
                 previewMode = previewMode,
                 canInlinePreview = canInlinePreview,
-                onTogglePreviewMode = {
-                    previewMode = !previewMode
+                onTogglePreviewMode = { previewMode = !previewMode },
+                onFullscreen = when {
+                    svg != null -> { { showSvgFullscreen = true } }
+                    canInlinePreview && normalizedLanguage == "html" -> {
+                        val navigator = LocalNavController.current
+                        val open: () -> Unit = {
+                            val contentId = WebViewContentCache.store(context.cacheDir, code)
+                            navigator.navigate(Screen.WebView(contentId = contentId))
+                        }
+                        open
+                    }
+                    else -> null
                 },
             )
         }
@@ -186,14 +191,15 @@ fun HighlightCodeBlock(
             )
         ) {
             when {
-                canInlinePreview && previewMode -> {
-                    CodeBlockPreview(
-                        code = code,
-                        language = normalizedLanguage,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp),
+                previewMode && svg != null -> {
+                    SvgPreview(
+                        model = svg,
+                        description = stringResource(R.string.code_block_preview),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp, max = 480.dp),
                     )
+                }
+                previewMode && normalizedLanguage == "html" -> {
+                    HtmlCodePreview(code, Modifier.fillMaxWidth().height(200.dp))
                 }
                 completeCodeBlock && normalizedLanguage == "mermaid" -> {
                     Mermaid(
@@ -202,12 +208,7 @@ fun HighlightCodeBlock(
                     )
                 }
                 else -> {
-                    val ratio = settings.displaySetting.fontSizeRatio
-                    val resolvedStyle = style ?: TextStyle(
-                        fontSize = 14.sp * ratio,
-                        lineHeight = 20.sp * ratio,
-                    )
-                    val textStyle = LocalTextStyle.current.merge(resolvedStyle)
+                    val textStyle = LocalTextStyle.current.merge(codeBlockTextStyle(settings.displaySetting.fontSizeRatio))
                     val codeLines = remember(code) { code.lines() }
                     val collapsedCode = remember(codeLines) { codeLines.take(COLLAPSE_LINES).joinToString("\n") }
                     val displayCode = if (isExpanded) code else collapsedCode
@@ -257,7 +258,7 @@ fun HighlightCodeBlock(
                                 Icon(
                                     imageVector = if (isExpanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                                     modifier = Modifier.size(textStyle.fontSize.toDp())
                                 )
                                 Text(
@@ -275,6 +276,9 @@ fun HighlightCodeBlock(
                 }
             }
         }
+    }
+    if (showSvgFullscreen && svg != null) {
+        SvgPreviewDialog(svg, onDismiss = { showSvgFullscreen = false })
     }
 }
 
@@ -385,13 +389,11 @@ private fun HighlightCodeActions(
     clipboardManager: Clipboard,
     code: String,
     createDocumentLauncher: ManagedActivityResultLauncher<String, Uri?>,
-    navController: Navigator,
-    completeCodeBlock: Boolean = true,
     previewMode: Boolean = false,
     canInlinePreview: Boolean = false,
-    onTogglePreviewMode: () -> Unit = {},
+    onTogglePreviewMode: () -> Unit,
+    onFullscreen: (() -> Unit)?,
 ) {
-    val context = LocalContext.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
@@ -399,10 +401,10 @@ private fun HighlightCodeActions(
         Text(
             text = language,
             fontSize = 12.sp,
-            lineHeight = 12.sp,
+            lineHeight = 16.sp,
             fontFamily = JetbrainsMono,
             color = MaterialTheme.colorScheme.onSurfaceVariant
-                .copy(alpha = 0.5f),
+                .copy(alpha = 0.8f),
         )
         Spacer(Modifier.weight(1f))
         Row(
@@ -410,7 +412,7 @@ private fun HighlightCodeActions(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val iconSize = 16.dp
-            val iconTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            val iconTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
 
             Icon(
                 imageVector = HugeIcons.Download04,
@@ -463,7 +465,6 @@ private fun HighlightCodeActions(
                     .size(iconSize)
             )
 
-            val normalizedLanguage = language.lowercase()
             if (canInlinePreview) {
                 Icon(
                     imageVector = if (previewMode) HugeIcons.Code else HugeIcons.View,
@@ -479,18 +480,14 @@ private fun HighlightCodeActions(
                 )
             }
 
-            if (completeCodeBlock && normalizedLanguage in PREVIEWABLE_LANGUAGES) {
+            if (onFullscreen != null) {
                 Icon(
                     imageVector = HugeIcons.Eye,
                     contentDescription = stringResource(id = R.string.code_block_preview),
                     tint = iconTint,
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
-                        .onClick {
-                            val content = buildCodePreviewHtml(code = code, language = normalizedLanguage)
-                            val contentId = WebViewContentCache.store(context.cacheDir, content)
-                            navController.navigate(Screen.WebView(contentId = contentId))
-                        }
+                        .onClick { onFullscreen() }
                         .padding(4.dp)
                         .size(iconSize)
                 )
@@ -500,13 +497,12 @@ private fun HighlightCodeActions(
 }
 
 @Composable
-private fun CodeBlockPreview(
+private fun HtmlCodePreview(
     code: String,
-    language: String,
     modifier: Modifier = Modifier,
 ) {
     val state = rememberWebViewState(
-        data = buildCodePreviewHtml(code = code, language = language),
+        data = code,
         baseUrl = "https://rikkahub.local",
         mimeType = "text/html",
         settings = {
@@ -521,14 +517,6 @@ private fun CodeBlockPreview(
         state = state,
         modifier = modifier.clip(RoundedCornerShape(4.dp)),
     )
-}
-
-private fun buildCodePreviewHtml(code: String, language: String): String {
-    return if (language == "svg") {
-        """<!DOCTYPE html><html><body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;">$code</body></html>"""
-    } else {
-        code
-    }
 }
 
 class HighlightCodeVisualTransformation(

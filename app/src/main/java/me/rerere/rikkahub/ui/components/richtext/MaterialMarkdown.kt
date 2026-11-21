@@ -197,9 +197,8 @@ object MaterialMarkdownDefaults {
     fun CodeBlock(block: MarkdownBlock.CodeBlock, modifier: Modifier = Modifier) {
         Surface(
             modifier = modifier.fillMaxWidth(),
-            shape = MaterialTheme.shapes.medium,
+            shape = CodeBlockShape,
             color = codeBlockBackground(),
-            border = BorderStroke(1.dp, codeBlockBorder()),
         ) {
             Column(
                 modifier = Modifier.padding(12.dp),
@@ -208,14 +207,14 @@ object MaterialMarkdownDefaults {
                 block.language?.let { language ->
                     Text(
                         text = language,
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Text(
                     text = block.code,
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    style = codeBlockTextStyle(),
                     softWrap = false,
                 )
             }

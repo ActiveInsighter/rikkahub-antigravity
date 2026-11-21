@@ -15,10 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.contentOrNull
@@ -156,7 +154,6 @@ fun DefaultToolPreview(
             HighlightCodeBlock(
                 code = JsonInstantPretty.encodeToString(context.arguments),
                 language = "json",
-                style = TextStyle(fontSize = 10.sp, lineHeight = 12.sp)
             )
         }
         if (context.tool.output.isNotEmpty()) {
@@ -170,12 +167,9 @@ fun DefaultToolPreview(
                         when (part) {
                             is UIMessagePart.Text -> HighlightCodeBlock(
                                 code = runCatching {
-                                    JsonInstantPretty.encodeToString(
-                                        JsonInstant.parseToJsonElement(part.text)
-                                    )
-                                }.getOrElse { part.text },
+                                    JsonInstantPretty.encodeToString(JsonInstant.parseToJsonElement(part.text))
+                                }.getOrDefault(part.text),
                                 language = "json",
-                                style = TextStyle(fontSize = 10.sp, lineHeight = 12.sp)
                             )
 
                             is UIMessagePart.Image -> ZoomableAsyncImage(

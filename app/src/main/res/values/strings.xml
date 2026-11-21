@@ -295,6 +295,7 @@
   <string name="code_block_copy">Copy Code</string>
   <string name="code_block_expand">Expand</string>
   <string name="code_block_preview">Preview</string>
+  <string name="svg_preview_error">Unable to display SVG</string>
   <string name="collapse_translation">Collapse Translation</string>
   <string name="confirm">Confirm</string>
   <string name="confirm_delete">Confirm Delete</string>

@@ -53,9 +53,9 @@ import me.rerere.bettertext.markdown.MarkdownBlock
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
+import me.rerere.rikkahub.ui.components.richtext.CodeBlockShape
 import me.rerere.rikkahub.ui.components.richtext.LocalCodeBlockEmbedded
 import me.rerere.rikkahub.ui.components.richtext.codeBlockBackground
-import me.rerere.rikkahub.ui.components.richtext.codeBlockBorder
 import kotlin.math.roundToInt
 
 private data class TabMeasurement(
@@ -86,17 +86,13 @@ internal fun DocTabs(
     }
     val useCodeSurface = isCodeTabs || hasAnySingleCodeBlock
 
-    val shape = RoundedCornerShape(if (useCodeSurface) 14.dp else 16.dp)
+    val shape = if (useCodeSurface) CodeBlockShape else RoundedCornerShape(16.dp)
     val surfaceColor = if (useCodeSurface) {
         codeBlockBackground()
     } else {
         MaterialTheme.colorScheme.surfaceContainerLow
     }
-    val borderColor = if (useCodeSurface) {
-        codeBlockBorder()
-    } else {
-        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-    }
+    val borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
 
     val density = LocalDensity.current
     val scrollState = rememberScrollState()
@@ -132,7 +128,7 @@ internal fun DocTabs(
     Surface(
         shape = shape,
         color = surfaceColor,
-        border = BorderStroke(1.dp, borderColor),
+        border = if (useCodeSurface) null else BorderStroke(1.dp, borderColor),
         modifier = modifier
             .fillMaxWidth()
             .animateContentSize(
@@ -214,12 +210,9 @@ internal fun DocTabs(
                 }
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(0.8.dp)
-                    .background(borderColor.copy(alpha = 0.7f)),
-            )
+            if (!useCodeSurface) {
+                Box(Modifier.fillMaxWidth().height(0.8.dp).background(borderColor))
+            }
 
             AnimatedContent(
                 targetState = safeIndex,
@@ -233,7 +226,7 @@ internal fun DocTabs(
             ) { index ->
                 val tab = tabs[index]
                 val singleCodeBlock = tab.isSingleCodeBlock()
-                if (singleCodeBlock) {
+                if (useCodeSurface && singleCodeBlock) {
                     CompositionLocalProvider(LocalCodeBlockEmbedded provides true) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             renderChildren(tab.blocks)

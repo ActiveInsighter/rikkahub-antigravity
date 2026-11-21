@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.examdocs
 import android.content.Context
 import android.util.LruCache
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +18,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
@@ -24,6 +28,7 @@ import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.takeOrElse
+import androidx.core.net.toUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collectLatest
@@ -39,6 +44,8 @@ import me.rerere.bettertext.text.BetterInline
 import me.rerere.rikkahub.data.examdocs.ExamDocsDocument
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 import me.rerere.rikkahub.ui.components.richtext.RichMarkdownRenderer
+import me.rerere.rikkahub.ui.components.richtext.SvgPreview
+import me.rerere.rikkahub.ui.components.richtext.SvgPreviewDialog
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.richtext.rememberRichMarkdownRenderer
 import me.rerere.rikkahub.ui.context.LocalSettings
@@ -101,11 +108,26 @@ internal fun rememberExamDocsRenderer(
                 border = BorderStroke(1.dp, colors.outlineVariant),
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    ZoomableAsyncImage(
-                        model = url,
-                        contentDescription = image.alt,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 480.dp),
-                    )
+                    if (url.startsWith("data:image/svg+xml", ignoreCase = true) ||
+                        url.toUri().path?.endsWith(".svg", ignoreCase = true) == true
+                    ) {
+                        var expanded by remember(url) { mutableStateOf(false) }
+                        SvgPreview(
+                            model = url,
+                            description = image.alt,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 600.dp)
+                                .clickable { expanded = true },
+                        )
+                        if (expanded) {
+                            SvgPreviewDialog(url, onDismiss = { expanded = false }, description = image.alt)
+                        }
+                    } else {
+                        ZoomableAsyncImage(
+                            model = url,
+                            contentDescription = image.alt,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 480.dp),
+                        )
+                    }
                     if (!image.alt.isNullOrBlank()) {
                         Text(
                             text = image.alt.orEmpty(),
@@ -127,6 +149,7 @@ internal fun rememberExamDocsRenderer(
         displayMath = displayMath,
         inlineMath = inlineMath,
         imageContent = imageContent,
+        svgPreviewByDefault = true,
     )
 }
 

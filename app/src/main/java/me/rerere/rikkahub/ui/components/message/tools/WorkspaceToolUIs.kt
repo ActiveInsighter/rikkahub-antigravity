@@ -32,7 +32,6 @@ import kotlinx.serialization.json.longOrNull
 import me.rerere.ai.ui.DiffMetadata
 import me.rerere.ai.ui.metadataAs
 import me.rerere.common.http.jsonObjectOrNull
-import me.rerere.rikkahub.ui.components.richtext.CodeHighlightText
 import androidx.compose.ui.res.stringResource
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ComputerTerminal01
@@ -43,8 +42,14 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.service.BackgroundShellManager
 import me.rerere.rikkahub.service.BackgroundShellStatus
 import me.rerere.rikkahub.ui.components.ai.BackgroundTaskLog
+import me.rerere.rikkahub.ui.components.richtext.CodeBlockShape
+import me.rerere.rikkahub.ui.components.richtext.CodeHighlightText
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
+import me.rerere.rikkahub.ui.components.richtext.codeBlockBackground
+import me.rerere.rikkahub.ui.components.richtext.codeBlockTextStyle
+import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.modifier.shimmer
+import me.rerere.rikkahub.ui.theme.JetbrainsMono
 import me.rerere.rikkahub.utils.generateUnifiedDiff
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import me.rerere.ui.richtext.DiffAddedColor
@@ -104,12 +109,7 @@ object EditFileToolUI : ToolUIRenderer {
                 color = DiffRemovedColor,
             )
         }
-        DiffView(
-            diff = diff,
-            modifier = Modifier.fillMaxWidth(),
-            maxLines = SUMMARY_MAX_LINES,
-            showFileHeader = false,
-        )
+        ToolDiffPreview(diff, maxLines = SUMMARY_MAX_LINES, showFileHeader = false)
     }
 
     @Composable
@@ -150,12 +150,22 @@ object EditFileToolUI : ToolUIRenderer {
                     color = DiffRemovedColor,
                 )
             }
-            DiffView(
-                diff = diff,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            ToolDiffPreview(diff)
         }
     }
+}
+
+@Composable
+private fun ToolDiffPreview(diff: String, maxLines: Int = Int.MAX_VALUE, showFileHeader: Boolean = true) {
+    DiffView(
+        diff = diff,
+        modifier = Modifier.fillMaxWidth(),
+        maxLines = maxLines,
+        showFileHeader = showFileHeader,
+        shape = CodeBlockShape,
+        containerColor = codeBlockBackground(),
+        textStyle = codeBlockTextStyle(LocalSettings.current.displaySetting.fontSizeRatio),
+    )
 }
 
 /**
@@ -245,19 +255,21 @@ private fun FileContentSummary(text: String, path: String?, loading: Boolean) {
     val preview = remember(text) {
         text.lineSequence().take(FILE_SUMMARY_MAX_LINES).joinToString("\n")
     }
+    val style = codeBlockTextStyle(LocalSettings.current.displaySetting.fontSizeRatio)
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.small)
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .clip(CodeBlockShape)
+            .background(codeBlockBackground())
+            .padding(horizontal = 12.dp, vertical = 8.dp)
             .shimmer(isLoading = loading),
     ) {
         CodeHighlightText(
             code = preview,
             language = languageOf(path),
-            fontSize = 11.sp,
-            lineHeight = 14.sp,
+            fontFamily = JetbrainsMono,
+            fontSize = style.fontSize,
+            lineHeight = style.lineHeight,
             maxLines = FILE_SUMMARY_MAX_LINES,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),

@@ -16,6 +16,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -52,6 +54,9 @@ fun DiffView(
     modifier: Modifier = Modifier,
     maxLines: Int = Int.MAX_VALUE,
     showFileHeader: Boolean = true,
+    shape: Shape = RoundedCornerShape(8.dp),
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerLow,
+    textStyle: TextStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp),
 ) {
     val allLines = remember(diff, showFileHeader) {
         val lines = diff.lines()
@@ -68,22 +73,20 @@ fun DiffView(
 
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .clip(shape)
+            .background(containerColor)
             .horizontalScroll(rememberScrollState())
             .width(IntrinsicSize.Max)
             .padding(vertical = 4.dp),
     ) {
         lines.fastForEach { line ->
-            DiffLine(line)
+            DiffLine(line, textStyle)
         }
         if (truncated > 0) {
             Text(
                 text = "… +$truncated lines",
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                lineHeight = 16.sp,
+                style = textStyle,
                 modifier = Modifier.padding(horizontal = 8.dp),
             )
         }
@@ -91,7 +94,7 @@ fun DiffView(
 }
 
 @Composable
-private fun DiffLine(line: String) {
+private fun DiffLine(line: String, textStyle: TextStyle) {
     val (textColor, background) = when {
         line.startsWith("+++") || line.startsWith("---") ->
             MaterialTheme.colorScheme.onSurfaceVariant to Color.Transparent
@@ -111,9 +114,7 @@ private fun DiffLine(line: String) {
     Text(
         text = line.ifEmpty { " " },
         color = textColor,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
+        style = textStyle,
         softWrap = false,
         modifier = Modifier
             .fillMaxWidth()

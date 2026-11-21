@@ -6,11 +6,15 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -19,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.examdocs.prepareExamDocsDocument
+import me.rerere.rikkahub.ui.components.richtext.SvgPreview
 import me.rerere.rikkahub.ui.context.LocalSettings
 import org.junit.Rule
 import org.junit.Test
@@ -96,6 +101,25 @@ class ExamDocsReaderTest {
         compose.onNodeWithText("Measure the distance.").assertIsDisplayed()
         compose.onNodeWithContentDescription("关闭词卡").performClick()
         compose.onNodeWithText("Measure the distance.").assertDoesNotExist()
+    }
+
+    @Test
+    fun rendersSvgBytesAsAnImage() {
+        val svg = """
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">
+                <rect width="100" height="50" fill="#d02030"/>
+            </svg>
+        """.trimIndent().toByteArray()
+        compose.setContent {
+            MaterialTheme {
+                SvgPreview(svg, description = "SVG test image", modifier = Modifier.size(160.dp, 80.dp))
+            }
+        }
+        val image = compose.onNodeWithContentDescription("SVG test image")
+        compose.waitUntil(timeoutMillis = 10_000) {
+            val pixels = image.captureToImage().toPixelMap()
+            pixels[pixels.width / 2, pixels.height / 2] == Color(0xFFD02030)
+        }
     }
 
     private fun render(markdown: String, modifier: Modifier = Modifier.fillMaxSize()) {

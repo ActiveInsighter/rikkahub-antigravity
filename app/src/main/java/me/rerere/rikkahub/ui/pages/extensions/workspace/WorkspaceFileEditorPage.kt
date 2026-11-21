@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.pages.extensions.workspace
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
@@ -35,6 +36,8 @@ import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.theme.JetbrainsMono
+import me.rerere.rikkahub.ui.components.richtext.SvgPreview
+import me.rerere.rikkahub.ui.components.richtext.SvgPreviewDialog
 import me.rerere.ui.webview.WebView
 import me.rerere.ui.webview.rememberWebViewState
 import me.rerere.workspace.WorkspaceStorageArea
@@ -152,9 +155,22 @@ fun WorkspaceFileEditorPage(
                 )
             }
 
+            showPreview && extension == "svg" -> {
+                val source = textState.text.toString()
+                val svg = remember(source) { source.toByteArray() }
+                var expanded by remember(svg) { mutableStateOf(false) }
+                SvgPreview(
+                    model = svg,
+                    description = path.substringAfterLast('/'),
+                    modifier = Modifier.fillMaxSize().padding(innerPadding).clickable { expanded = true },
+                )
+                if (expanded) {
+                    SvgPreviewDialog(svg, onDismiss = { expanded = false }, description = path.substringAfterLast('/'))
+                }
+            }
+
             showPreview -> WorkspaceWebPreview(
                 content = textState.text.toString(),
-                isSvg = extension == "svg",
                 modifier = Modifier.fillMaxSize().padding(innerPadding),
             )
 
@@ -179,13 +195,12 @@ fun WorkspaceFileEditorPage(
 @Composable
 private fun WorkspaceWebPreview(
     content: String,
-    isSvg: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val state = rememberWebViewState(
         data = content,
         baseUrl = "https://workspace-preview.invalid/",
-        mimeType = if (isSvg) "image/svg+xml" else "text/html",
+        mimeType = "text/html",
         settings = {
             allowFileAccess = false
             allowContentAccess = false

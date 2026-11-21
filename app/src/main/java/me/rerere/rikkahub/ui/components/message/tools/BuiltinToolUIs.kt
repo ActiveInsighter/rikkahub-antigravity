@@ -35,7 +35,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
@@ -47,7 +46,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import me.rerere.common.http.jsonObjectOrNull
-import me.rerere.rikkahub.ui.components.richtext.CodeHighlightText
+import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Book02
@@ -882,10 +881,10 @@ private fun SearchWebPreview(
             }
         } else {
             item {
-                CodeHighlightText(
+                HighlightCodeBlock(
                     code = JsonInstantPretty.encodeToString(content),
                     language = "json",
-                    fontSize = 12.sp
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }

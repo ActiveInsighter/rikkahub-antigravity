@@ -295,6 +295,7 @@
   <string name="code_block_copy">复制代码</string>
   <string name="code_block_expand">展开</string>
   <string name="code_block_preview">预览</string>
+  <string name="svg_preview_error">无法显示 SVG</string>
   <string name="collapse_translation">折叠翻译</string>
   <string name="confirm">确认</string>
   <string name="confirm_delete">确认删除</string>

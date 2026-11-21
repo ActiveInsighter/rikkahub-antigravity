@@ -8,7 +8,6 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -131,13 +130,13 @@ private data class WordPalette(val surface: Color, val accent: Color, val ink: C
 
 // Study Docs vocabulary tones, used in the same order in the Android deck.
 private val palettes = listOf(
-    WordPalette(Color(0xFFDFE9DC), Color(0xFF6D866E), Color(0xFF34473A)),
-    WordPalette(Color(0xFFEADFD4), Color(0xFF8A6F59), Color(0xFF4A3B31)),
-    WordPalette(Color(0xFFEADBDF), Color(0xFF8D6875), Color(0xFF4B373E)),
-    WordPalette(Color(0xFFD7E5EB), Color(0xFF607F8D), Color(0xFF304751)),
-    WordPalette(Color(0xFFE1DBE8), Color(0xFF756686), Color(0xFF40374C)),
-    WordPalette(Color(0xFFEBE3D2), Color(0xFF87704D), Color(0xFF493E30)),
-    WordPalette(Color(0xFFDAE3C9), Color(0xFF71844F), Color(0xFF3D4B30)),
+    WordPalette(Color(0xFFE0EBD9), Color(0xFF4D6B4B), Color(0xFF233522)),
+    WordPalette(Color(0xFFF2E3DA), Color(0xFF815E48), Color(0xFF432F22)),
+    WordPalette(Color(0xFFF1E0E6), Color(0xFF80586B), Color(0xFF432C38)),
+    WordPalette(Color(0xFFDFEBF5), Color(0xFF4C657D), Color(0xFF25394A)),
+    WordPalette(Color(0xFFEAE3F4), Color(0xFF6F5A87), Color(0xFF3B2C4C)),
+    WordPalette(Color(0xFFF0E8D6), Color(0xFF796237), Color(0xFF3F341E)),
+    WordPalette(Color(0xFFDBEBE4), Color(0xFF406B61), Color(0xFF233C36)),
 )
 private val wordCardJson = Json { ignoreUnknownKeys = true }
 private const val PAGE_SIZE = 20
@@ -236,7 +235,6 @@ private fun WordStudyModeTabs(
     Surface(
         shape = CircleShape,
         color = scheme.surfaceContainerHigh,
-        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.5f)),
     ) {
         BoxWithConstraints(
             modifier = Modifier
@@ -289,12 +287,16 @@ private fun WordStudyModeTabs(
 @Composable
 private fun wordPalette(index: Int): WordPalette {
     val tone = palettes[index % palettes.size]
-    if (!LocalDarkMode.current) return tone
-    return WordPalette(
-        lerp(Color(0xFF202320), tone.accent, 0.25f),
-        lerp(tone.accent, tone.surface, 0.7f),
-        lerp(Color(0xFFEEEEED), tone.surface, 0.35f),
-    )
+    val scheme = MaterialTheme.colorScheme
+    return if (LocalDarkMode.current) {
+        WordPalette(
+            surface = lerp(scheme.surfaceContainerHigh, tone.accent, 0.27f),
+            accent = lerp(tone.accent, tone.surface, 0.78f),
+            ink = lerp(scheme.onSurface, tone.surface, 0.2f),
+        )
+    } else {
+        tone.copy(surface = lerp(tone.surface, scheme.surfaceContainerLowest, 0.2f))
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -314,7 +316,6 @@ private fun WordCardFace(
         color = tone.surface,
         contentColor = tone.ink,
         shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, tone.ink.copy(alpha = 0.08f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(start = 16.dp, top = 12.dp, end = 12.dp, bottom = 15.dp)) {
@@ -407,7 +408,6 @@ private fun MaskedRevealChip(
         shape = RoundedCornerShape(10.dp),
         color = lerp(tone.surface, tone.accent, 0.14f),
         contentColor = lerp(tone.accent, tone.ink, 0.68f),
-        border = BorderStroke(1.dp, tone.accent.copy(alpha = 0.25f)),
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onClick),
@@ -637,7 +637,6 @@ private fun WordDetails(
                 color = tone.surface,
                 contentColor = tone.ink,
                 shape = RoundedCornerShape(22.dp),
-                border = BorderStroke(1.dp, tone.ink.copy(alpha = 0.08f)),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -699,7 +698,6 @@ private fun WordSenseDetails(sense: WordSense, total: Int, tone: WordPalette) {
     Surface(
         color = scheme.surfaceContainerLow,
         shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.55f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -738,11 +736,7 @@ private fun WordExampleItem(example: WordExample, tone: WordPalette) {
 
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = if (showTranslation) scheme.surfaceContainer else scheme.surface,
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (showTranslation) tone.accent.copy(alpha = 0.45f) else scheme.outlineVariant.copy(alpha = 0.5f),
-        ),
+        color = if (showTranslation) lerp(scheme.surfaceContainer, tone.surface, 0.35f) else scheme.surface,
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
