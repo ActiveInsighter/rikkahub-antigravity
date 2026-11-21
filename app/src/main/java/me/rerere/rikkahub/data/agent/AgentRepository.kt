@@ -9,6 +9,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -930,29 +931,34 @@ class AgentRepository(
             var lastDbFlushAt = SystemClock.elapsedRealtime()
             try {
                 coroutineScope {
-                    // The initial write can overlap network setup, but must precede all later snapshots.
-                    val initialWrite = async { saveConversation(initialConv) }
-                    gatewayClient.streamChat(
-                        modelEntity = modelEntity,
-                        messages = historyMessages,
-                        systemPrompt = systemPrompt,
-                        reasoningLevel = reasoningLevel,
-                        temperature = temperature,
-                        fallbackBaseUrl = fallbackBaseUrl,
-                        fallbackApiKey = fallbackApiKey,
-                        initialReply = placeholderMsg,
-                    ) { reply ->
-                        workingReply = reply
-                        workingConv = workingConv.upsertMessage(nodeId, reply)
-                        _localGenerations.update { it + (convId to LocalGenerationState(workingConv, startedAt)) }
-                        val now = SystemClock.elapsedRealtime()
-                        if (now - lastDbFlushAt >= 2_000L) {
-                            initialWrite.await()
-                            saveConversation(workingConv)
-                            lastDbFlushAt = now
-                        }
+                    val checkpoints = Channel<Conversation>(Channel.CONFLATED)
+                    launch {
+                        saveConversation(initialConv)
+                        for (checkpoint in checkpoints) saveConversation(checkpoint)
                     }
-                    initialWrite.await()
+                    try {
+                        gatewayClient.streamChat(
+                            modelEntity = modelEntity,
+                            messages = historyMessages,
+                            systemPrompt = systemPrompt,
+                            reasoningLevel = reasoningLevel,
+                            temperature = temperature,
+                            fallbackBaseUrl = fallbackBaseUrl,
+                            fallbackApiKey = fallbackApiKey,
+                            initialReply = placeholderMsg,
+                        ) { reply ->
+                            workingReply = reply
+                            workingConv = workingConv.upsertMessage(nodeId, reply)
+                            _localGenerations.update { it + (convId to LocalGenerationState(workingConv, startedAt)) }
+                            val now = SystemClock.elapsedRealtime()
+                            if (now - lastDbFlushAt >= 2_000L) {
+                                checkpoints.trySend(workingConv)
+                                lastDbFlushAt = now
+                            }
+                        }
+                    } finally {
+                        checkpoints.close()
+                    }
                 }
                 withContext(NonCancellable) {
                     saveConversation(workingConv)

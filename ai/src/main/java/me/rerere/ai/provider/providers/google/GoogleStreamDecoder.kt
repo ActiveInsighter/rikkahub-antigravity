@@ -36,9 +36,16 @@ internal class GoogleStreamDecoder(
 
     override fun accept(event: SseEvent): DecodeResult {
         if (finished) return DecodeResult(completed = true)
-        if (event.data == "[DONE]") return DecodeResult(finish(), completed = true)
+        if (event.data == "[DONE]") {
+            if (finishReason == null) finishReason = "STOP"
+            return DecodeResult(finish(), completed = true)
+        }
 
         val jsonData = json.parseToJsonElement(event.data).jsonObject
+        val errorMessage = (jsonData["error"] as? JsonObject)
+            ?.get("message")?.jsonPrimitiveOrNull?.contentOrNull
+        if (errorMessage != null) error(errorMessage)
+
         val blockedReason = jsonData["promptFeedback"]?.jsonObject
             ?.get("blockReason")?.jsonPrimitiveOrNull?.contentOrNull
         if (blockedReason != null) error("Prompt feedback: $blockedReason")

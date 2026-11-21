@@ -2,15 +2,15 @@
 
 ### 本次更新
 
-- 文档和工作区原生预览 SVG，可放大查看。
-- 统一文档、聊天和工具详情中的代码块，使用灰底、无边框和更易读的字号。
-- 文档步骤加入连续导线，单词卡片改用无边框的柔和配色。
+- 修复 Gemini 聊天无法发送图片库和历史消息中的图片。
+- 修复 Gemini 流式回复只显示半截的问题。
+- 聊天存盘移到后台，关闭思考时减少 Gemini 返回的思考摘要。
 
 ### Updates
 
-- Open and zoom SVGs in the native document and workspace previews.
-- Code blocks across documents, chat, and tool details share borderless gray backgrounds and more readable text.
-- Document steps have a continuous guide, and vocabulary cards use softer colors and borderless surfaces.
+- Fix sending library and history images in Gemini chat.
+- Recover Gemini replies after interrupted streams.
+- Save chat progress in the background and omit Gemini thought summaries when thinking is off.
 
 - Android 8.0 及以上；普通手机优先下载 **arm64-v8a-debug.apk**，不确定架构时下载 **universal-debug.apk**。
 - 独立包名 `me.rerere.rikkahub.debug`，可与官方正式版并存；**Build 6 起**显式使用固定签名，并核对 APK 证书。Build 3/4 的临时签名不同，升级前请导出数据，再卸载旧修改版、安装新版并导入；从 Build 6 升级后续构建可直接覆盖。

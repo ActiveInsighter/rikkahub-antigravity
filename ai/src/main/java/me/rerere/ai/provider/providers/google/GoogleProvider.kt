@@ -61,7 +61,6 @@ import me.rerere.ai.util.configureReferHeaders
 import me.rerere.ai.util.configureSessionHeaders
 import me.rerere.ai.util.encodeBase64
 import me.rerere.ai.util.json
-import me.rerere.ai.util.logRequestBody
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.mergeCustomHeaders
 import me.rerere.ai.util.removeElements
@@ -71,6 +70,7 @@ import me.rerere.common.http.jsonPrimitiveOrNull
 import me.rerere.common.http.sse.newEventSource
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -79,10 +79,13 @@ import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import org.apache.commons.text.StringEscapeUtils
+import java.util.concurrent.TimeUnit
+import kotlin.io.encoding.Base64
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 private const val TAG = "GoogleProvider"
+private const val MAX_REMOTE_IMAGE_BYTES = 15_000_000L
 
 class GoogleProvider(private val client: OkHttpClient, context: Context? = null) : Provider<ProviderSetting.Google> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
@@ -185,7 +188,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             return@withContext interactionsAPI.generateText(providerSetting, messages, params)
         }
 
-        val requestBody = buildCompletionRequestBody(messages, params)
+        val requestBody = buildCompletionRequestBody(resolveRemoteImages(messages), params)
 
         val url = buildUrl(
             providerSetting = providerSetting,
@@ -209,12 +212,13 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .build()
         )
 
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body?.string()}")
+        val bodyStr = client.newCall(request).await().use { response ->
+            val body = response.body.string()
+            if (!response.isSuccessful) {
+                throw Exception("Failed to get response: ${response.code} $body")
+            }
+            body
         }
-
-        val bodyStr = response.body?.string() ?: ""
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
         val candidate = bodyJson["candidates"]?.jsonArray?.firstOrNull()?.jsonObject
@@ -243,7 +247,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): Flow<StreamChunk> = callbackFlow {
-        val requestBody = buildCompletionRequestBody(messages, params)
+        val requestBody = buildCompletionRequestBody(resolveRemoteImages(messages), params)
 
         val url = buildUrl(
             providerSetting = providerSetting,
@@ -267,8 +271,6 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .build()
         )
 
-        logRequestBody(TAG, "streamText") { json.encodeToString(requestBody) }
-
         val responseId = Uuid.random().toString()
         val decoder = GoogleStreamDecoder(responseId, params.model.modelId)
 
@@ -287,14 +289,12 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 type: String?,
                 data: String
             ) {
-                Log.i(TAG, "onEvent: $data")
-
                 try {
                     val result = decoder.accept(SseEvent(id = id, event = type, data = data))
                     sendChunks(result.chunks)
                     if (result.completed) close()
                 } catch (e: Throwable) {
-                    Log.e(TAG, "Failed to parse stream event: $data", e)
+                    Log.e(TAG, "Failed to parse Google stream event", e)
                     close(e)
                 }
             }
@@ -395,6 +395,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                         ReasoningLevel.OFF -> {
                             if (useThinkingLevel) {
                                 put("thinkingLevel", "minimal")
+                                put("includeThoughts", false)
                             } else if (!isGeminiPro) {
                                 put("thinkingBudget", 0)
                                 put("includeThoughts", false)
@@ -698,6 +699,46 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
             // 未知 part 直接跳过，避免整次请求失败
             else -> null
+        }
+    }
+
+    // Keep URLs in saved history. Only the outgoing GenerateContent request contains image bytes.
+    private suspend fun resolveRemoteImages(messages: List<UIMessage>): List<UIMessage> {
+        val resolved = mutableMapOf<HttpUrl, String>()
+
+        suspend fun resolveImage(part: UIMessagePart): UIMessagePart {
+            if (part !is UIMessagePart.Image) return part
+            val url = part.url.toHttpUrlOrNull() ?: return part
+            val dataUrl = resolved.getOrPut(url) {
+                val call = client.newCall(Request.Builder().url(url).build())
+                call.timeout().timeout(20, TimeUnit.SECONDS)
+                call.await().use { response ->
+                    check(response.isSuccessful) { "无法读取聊天图片（HTTP ${response.code}）" }
+                    val body = response.body
+                    val mime = body.contentType()
+                    check(mime?.type == "image") { "聊天图片地址未返回图片" }
+                    val source = body.source()
+                    check(
+                        body.contentLength() <= MAX_REMOTE_IMAGE_BYTES &&
+                            !source.request(MAX_REMOTE_IMAGE_BYTES + 1)
+                    ) { "聊天图片超过 15 MB" }
+                    val bytes = source.readByteArray()
+                    check(bytes.isNotEmpty()) { "聊天图片内容为空" }
+                    "data:${mime.type}/${mime.subtype};base64,${Base64.encode(bytes)}"
+                }
+            }
+            return part.copy(url = dataUrl)
+        }
+
+        return messages.map { message ->
+            if (message.role == MessageRole.SYSTEM) return@map message
+            message.copy(parts = message.parts.map { part ->
+                if (part is UIMessagePart.Tool) {
+                    part.copy(output = part.output.map { resolveImage(it) })
+                } else {
+                    resolveImage(part)
+                }
+            })
         }
     }
 

@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.agent
 
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import me.rerere.ai.core.MessageRole
@@ -12,6 +13,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 
 class AgentChatReplyTest {
     private val initialReply = UIMessage(
@@ -67,6 +69,53 @@ class AgentChatReplyTest {
     }
 
     @Test
+    fun `partial replies recover after EOF output limit or transport failure`() = runTest {
+        val endings = listOf(
+            flowOf(StreamChunk.Finish()),
+            flowOf(StreamChunk.Finish("MAX_TOKENS")),
+            flow<StreamChunk> { throw IOException("Connection reset") },
+        )
+        endings.forEach { ending ->
+            val replies = mutableListOf<UIMessage>()
+            var retries = 0
+            collectAgentChatReply(
+                initialReply,
+                flow {
+                    emit(StreamChunk.TextDelta("text", "Partial"))
+                    ending.collect { emit(it) }
+                },
+                onReply = { replies += it },
+                retry = {
+                    retries++
+                    TextGenerationResult("retry-id", "gemini-3.5-flash-lite", UIMessage.assistant("Complete"), "STOP")
+                },
+            )
+
+            assertEquals(1, retries)
+            assertEquals("Partial", replies.first().toText())
+            assertEquals("Complete", replies.last().toText())
+        }
+    }
+
+    @Test
+    fun `second truncated reply reports failure and keeps the original partial output`() = runTest {
+        val replies = mutableListOf<UIMessage>()
+        val failed = runCatching {
+            collectAgentChatReply(
+                initialReply,
+                flowOf(StreamChunk.TextDelta("text", "Partial"), StreamChunk.Finish("MAX_TOKENS")),
+                onReply = { replies += it },
+                retry = {
+                    TextGenerationResult("retry-id", "gemini-3.5-flash-lite", UIMessage.assistant("Still partial"), "MAX_TOKENS")
+                },
+            )
+        }
+
+        assertEquals("Gemini 重试后仍未完成回复（MAX_TOKENS）", failed.exceptionOrNull()?.message)
+        assertEquals("Partial", replies.last().toText())
+    }
+
+    @Test
     fun `empty retry reports failure and retains the streamed thinking`() = runTest {
         val replies = mutableListOf<UIMessage>()
         val failed = runCatching {
@@ -93,6 +142,6 @@ class AgentChatReplyTest {
             )
         }
 
-        assertEquals("Gemini 未返回正文（SAFETY）", failed.exceptionOrNull()?.message)
+        assertEquals("Gemini 未正常完成回复（SAFETY）", failed.exceptionOrNull()?.message)
     }
 }

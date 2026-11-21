@@ -2,6 +2,7 @@ package me.rerere.rikkahub.data.agent
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -32,6 +33,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 
 data class GatewayDecisionResponse(
     val model: String,
@@ -56,20 +58,26 @@ internal suspend fun collectAgentChatReply(
     val handler = StreamChunkHandler()
     var reply = initialReply
     var finishReason: String? = null
-    chunks.collect { chunk ->
+    chunks.catch { cause ->
+        // Transport failures after a partial reply can be recovered. Explicit API errors propagate.
+        if (cause !is IOException || reply.parts.isEmpty() || finishReason != null) throw cause
+    }.collect { chunk ->
         if (chunk is StreamChunk.Finish) finishReason = chunk.finishReason
         reply = handler.handle(listOf(reply), chunk).single()
         onReply(reply)
     }
-    if (reply.hasChatOutput()) return
 
-    // An empty stream can end without a finish reason. Honor explicit upstream blocks.
+    if (finishReason == "STOP" && reply.hasChatOutput()) return
     check(finishReason == null || finishReason == "STOP" || finishReason == "MAX_TOKENS") {
-        "Gemini 未返回正文（$finishReason）"
+        "Gemini 未正常完成回复（$finishReason）"
     }
+
     val result = retry()
     check(result.message.hasChatOutput()) {
         "Gemini 重试后仍未返回正文" + (result.finishReason?.let { "（$it）" } ?: "")
+    }
+    check(result.finishReason == null || result.finishReason == "STOP") {
+        "Gemini 重试后仍未完成回复（${result.finishReason}）"
     }
 
     // Replace the partial reply as a unit so its thought signatures match the answer on replay.
