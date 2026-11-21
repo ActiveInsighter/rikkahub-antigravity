@@ -46,25 +46,38 @@ def tap_matching(predicate, timeout):
     raise RuntimeError(f"Expected control not found. Last visible controls: {visible}")
 
 
-print(adb("install", BASE_APK), flush=True)
-assert version() == 100118, version()
-adb("shell", "appops", "set", PACKAGE, "REQUEST_INSTALL_PACKAGES", "allow")
-adb("logcat", "-c")
-adb("shell", "monkey", "-p", PACKAGE, "1")
-tap_matching(lambda node: node.get("content-desc") == "Downloads and updates", timeout=45)
-tap_matching(lambda node: node.get("text", "").startswith("Incremental"), timeout=55)
-print("Selected the incremental update from Build 118.", flush=True)
-tap_matching(
-    lambda node: "packageinstaller" in node.get("package", "")
-    and node.get("text", "").casefold() in {"install", "update"},
-    timeout=120,
-)
-for _ in range(45):
-    if version() == TARGET_VERSION:
-        break
-    time.sleep(2)
-else:
-    raise RuntimeError(f"Android still reports versionCode {version()}")
-log = adb("logcat", "-d", "-s", "ApkUpdates:W")
-assert "trying full APK" not in log, log
-print(f"Android installed versionCode {TARGET_VERSION} from the live delta.", flush=True)
+def verify_upgrade():
+    print(adb("install", BASE_APK), flush=True)
+    assert version() == 100118, version()
+    adb("shell", "appops", "set", PACKAGE, "REQUEST_INSTALL_PACKAGES", "allow")
+    adb("logcat", "-c")
+    adb("shell", "monkey", "-p", PACKAGE, "1")
+    tap_matching(
+        lambda node: node.get("content-desc") in {"Downloads and updates", "下载与更新"},
+        timeout=45,
+    )
+    tap_matching(lambda node: node.get("text", "").startswith(("Incremental", "增量更新")), timeout=55)
+    print("Selected the incremental update from Build 118.", flush=True)
+    tap_matching(
+        lambda node: "packageinstaller" in node.get("package", "")
+        and node.get("text", "").casefold() in {"install", "update", "安装", "更新"},
+        timeout=120,
+    )
+    for _ in range(45):
+        if version() == TARGET_VERSION:
+            break
+        time.sleep(2)
+    else:
+        raise RuntimeError(f"Android still reports versionCode {version()}")
+    log = adb("logcat", "-d", "-s", "ApkUpdates:W")
+    assert "trying full APK" not in log, log
+    print(f"Android installed versionCode {TARGET_VERSION} from the live delta.", flush=True)
+
+
+
+if __name__ == "__main__":
+    try:
+        verify_upgrade()
+    except Exception:
+        print(adb("logcat", "-d", "-s", "ApkUpdates:W"), flush=True)
+        raise
