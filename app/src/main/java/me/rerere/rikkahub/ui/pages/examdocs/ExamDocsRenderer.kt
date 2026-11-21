@@ -63,7 +63,7 @@ internal fun rememberExamDocsRenderer(
                 layout,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 fontSize = style.fontSize.takeOrElse { MaterialTheme.typography.bodyLarge.fontSize },
-                scale = 1f,
+                scale = 1.15f,
                 color = style.color.takeOrElse { LocalContentColor.current },
             )
         }

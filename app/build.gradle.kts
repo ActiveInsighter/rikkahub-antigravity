@@ -2,6 +2,7 @@ import com.android.build.api.dsl.Packaging
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.FileInputStream
+import java.net.URI
 import java.util.Properties
 
 plugins {
@@ -12,6 +13,17 @@ plugins {
     alias(libs.plugins.google.services)
     alias(libs.plugins.firebase.crashlytics)
     alias(libs.plugins.baselineprofile)
+}
+
+val antigravityVersionCode = providers.environmentVariable("RIKKA_ANTIGRAVITY_VERSION_CODE").orNull?.let {
+    it.toInt().also { code -> require(code in 100_001..2_100_000_000) }
+}
+val updateBaseUrl = providers.environmentVariable("RIKKA_UPDATE_BASE_URL").orNull.orEmpty().trim().trimEnd('/')
+if (updateBaseUrl.isNotEmpty()) {
+    val uri = URI(updateBaseUrl)
+    require(uri.scheme == "https" && uri.host != null && uri.userInfo == null &&
+        uri.query == null && uri.fragment == null && updateBaseUrl == uri.toASCIIString()
+    ) { "RIKKA_UPDATE_BASE_URL must be a public HTTPS base URL" }
 }
 
 android {
@@ -113,10 +125,20 @@ android {
             dimension = "distribution"
             isDefault = true
             buildConfigField("boolean", "IS_PLAY_STORE", "false")
+            buildConfigField("String", "APK_UPDATE_BASE_URL", "\"$updateBaseUrl\"")
+            externalNativeBuild.cmake.arguments += "-DRIKKA_APK_UPDATES=ON"
         }
         create("play") {
             dimension = "distribution"
             buildConfigField("boolean", "IS_PLAY_STORE", "true")
+            buildConfigField("String", "APK_UPDATE_BASE_URL", "\"\"")
+            externalNativeBuild.cmake.arguments += "-DRIKKA_APK_UPDATES=OFF"
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/github/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
     compileOptions {
@@ -167,6 +189,11 @@ baselineProfile {
 // baselineprofile 插件按 release 复制出 nonMinifiedRelease 时只关掉 isMinifyEnabled，关不掉 optimization，
 // 不手动关的话生成用的包会被 R8 内联、合并类，profile 里记下的是优化后的类和方法
 androidComponents {
+    onVariants(selector().withFlavor("distribution" to "github").withBuildType("debug")) { variant ->
+        if (antigravityVersionCode != null) {
+            variant.outputs.forEach { it.versionCode.set(antigravityVersionCode) }
+        }
+    }
     finalizeDsl { extension ->
         extension.buildTypes.findByName("nonMinifiedRelease")?.optimization?.enable = false
     }

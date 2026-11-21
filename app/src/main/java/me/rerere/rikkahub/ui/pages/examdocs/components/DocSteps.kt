@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
+import me.rerere.rikkahub.ui.theme.extendColors
 
 @Composable
 internal fun DocSteps(
@@ -77,7 +78,8 @@ private fun DocTimelineStepItem(
     isLast: Boolean,
     renderChildren: @Composable (List<ExamDocsSegment>) -> Unit,
 ) {
-    val lineColor = MaterialTheme.colorScheme.outlineVariant
+    val extendColors = MaterialTheme.extendColors
+    val lineColor = extendColors.gray3
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -94,12 +96,17 @@ private fun DocTimelineStepItem(
     ) {
         Surface(
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            color = extendColors.gray2,
+            contentColor = extendColors.gray9,
+            border = BorderStroke(1.dp, extendColors.gray3),
             modifier = Modifier.size(30.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Text(number.toString(), style = MaterialTheme.typography.labelMedium)
+                Text(
+                    number.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
         }
         Column(

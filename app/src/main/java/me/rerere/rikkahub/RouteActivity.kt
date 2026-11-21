@@ -147,6 +147,8 @@ import me.rerere.rikkahub.ui.pages.agent.AgentPage
 import me.rerere.rikkahub.ui.pages.agent.AgentSettingPage
 import me.rerere.rikkahub.ui.pages.agent.AgentWorkflowPage
 import me.rerere.rikkahub.ui.pages.home.HomePage
+import me.rerere.rikkahub.ui.pages.update.ApkDownloadsPage
+import me.rerere.rikkahub.data.update.usesAntigravityUpdates
 import me.rerere.rikkahub.ui.pages.workflow.WorkflowPage
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import me.rerere.rikkahub.utils.CrashHandler
@@ -634,6 +636,10 @@ class RouteActivity : ComponentActivity() {
                                 HomePage()
                             }
 
+                            entry<Screen.ApkDownloads> {
+                                if (usesAntigravityUpdates) ApkDownloadsPage()
+                            }
+
                             entry<Screen.Agent>(
                                 metadata = NavDisplay.transitionSpec { fadeIn() togetherWith fadeOut() }
                                     + NavDisplay.popTransitionSpec { fadeIn() togetherWith fadeOut() }
@@ -657,6 +663,18 @@ class RouteActivity : ComponentActivity() {
                                 me.rerere.rikkahub.ui.pages.examdocs.ExamDocsPage(
                                     initialUrl = key.initialUrl,
                                 )
+                            }
+
+                            entry<Screen.ExamDocsSettings> {
+                                me.rerere.rikkahub.ui.pages.examdocs.ExamDocsSettingsPage()
+                            }
+
+                            entry<Screen.ExamDocsSiteSettings> {
+                                me.rerere.rikkahub.ui.pages.examdocs.ExamDocsSiteSettingsPage()
+                            }
+
+                            entry<Screen.ExamDocsUISettings> {
+                                me.rerere.rikkahub.ui.pages.examdocs.ExamDocsUISettingsPage()
                             }
                         }
                     )
@@ -892,6 +910,9 @@ sealed interface Screen : NavKey {
     data object Home : Screen
 
     @Serializable
+    data object ApkDownloads : Screen
+
+    @Serializable
     data class Agent(val id: String) : Screen
 
     @Serializable
@@ -905,4 +926,13 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class ExamDocs(val initialUrl: String? = null) : Screen
+
+    @Serializable
+    data object ExamDocsSettings : Screen
+
+    @Serializable
+    data object ExamDocsSiteSettings : Screen
+
+    @Serializable
+    data object ExamDocsUISettings : Screen
 }

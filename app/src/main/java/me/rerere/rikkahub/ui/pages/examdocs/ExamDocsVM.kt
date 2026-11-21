@@ -8,6 +8,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -18,6 +20,7 @@ import me.rerere.rikkahub.data.examdocs.ExamDocsDocument
 import me.rerere.rikkahub.data.examdocs.ExamDocsLink
 import me.rerere.rikkahub.data.examdocs.ExamDocsRepository
 import me.rerere.rikkahub.data.examdocs.ExamDocsSite
+import me.rerere.rikkahub.data.examdocs.ExamDocsUiSettings
 import me.rerere.rikkahub.data.examdocs.builtInDocsSites
 import me.rerere.rikkahub.data.examdocs.getExamDocsLink
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -27,6 +30,7 @@ data class ExamDocsUiState(
     val sites: List<ExamDocsSite> = builtInDocsSites,
     val activeSite: ExamDocsSite = builtInDocsSites.first(),
     val sitesReady: Boolean = false,
+    val uiSettings: ExamDocsUiSettings = ExamDocsUiSettings(),
     val isLoadingTree: Boolean = true,
     val treeError: String? = null,
     val modules: List<ExamDocNode.Folder> = emptyList(),
@@ -57,10 +61,28 @@ class ExamDocsVM(
 
     init {
         viewModelScope.launch {
-            val settings = withContext(Dispatchers.IO) { repository.loadSiteSettings() }
+            val (settings, uiSettings) = withContext(Dispatchers.IO) {
+                repository.siteSettingsFlow.value to repository.uiSettingsFlow.value
+            }
             val target = initialUrl?.let { getExamDocsLink(settings.active.baseUrl, "/docs", it) }
-            _uiState.value = ExamDocsUiState(sites = settings.sites, activeSite = settings.active, sitesReady = true)
+            _uiState.value = ExamDocsUiState(
+                sites = settings.sites,
+                activeSite = settings.active,
+                sitesReady = true,
+                uiSettings = uiSettings,
+            )
             loadTree(target = target)
+
+            launch {
+                repository.uiSettingsFlow.drop(1).collectLatest { updatedUi ->
+                    _uiState.update { it.copy(uiSettings = updatedUi) }
+                }
+            }
+            launch {
+                repository.siteSettingsFlow.drop(1).collectLatest { updatedSites ->
+                    applySiteSettings(updatedSites.sites, updatedSites.active)
+                }
+            }
         }
     }
 
@@ -100,37 +122,22 @@ class ExamDocsVM(
     }
 
     fun switchSite(site: ExamDocsSite) {
-        val state = _uiState.value
-        if (site == state.activeSite) return
-        applySiteSettings(state.sites, site)
+        repository.switchSite(site)
     }
 
-    fun saveSite(original: ExamDocsSite?, name: String, rawUrl: String): String? {
-        val baseUrl = ExamDocsRepository.parseBaseUrl(rawUrl) ?: return "请输入有效的 HTTP 或 HTTPS 站点地址"
-        val state = _uiState.value
-        if (state.sites.any { it != original && it.baseUrl == baseUrl }) return "这个站点已经添加"
-        val site = ExamDocsSite(name.trim().ifBlank { baseUrl.toHttpUrl().host }, baseUrl)
-        val sites = if (original == null) state.sites + site else state.sites.map { if (it == original) site else it }
-        applySiteSettings(sites, if (original == null || original == state.activeSite) site else state.activeSite)
-        return null
-    }
+    fun saveSite(original: ExamDocsSite?, name: String, rawUrl: String): String? =
+        repository.saveSite(original, name, rawUrl)
 
     fun removeSite(site: ExamDocsSite) {
-        val state = _uiState.value
-        if (state.sites.size <= 1) return
-        val sites = state.sites - site
-        applySiteSettings(sites, state.activeSite.takeUnless { it == site } ?: sites.first())
+        repository.removeSite(site)
     }
 
     fun restoreDefaultSites() {
-        val state = _uiState.value
-        val merged = (state.sites + builtInDocsSites).distinctBy(ExamDocsSite::baseUrl)
-        applySiteSettings(merged, state.activeSite)
+        repository.restoreDefaultSites()
     }
 
     private fun applySiteSettings(sites: List<ExamDocsSite>, active: ExamDocsSite) {
         val state = _uiState.value
-        repository.saveSiteSettings(sites, active)
         if (state.activeSite.baseUrl == active.baseUrl) {
             _uiState.update { it.copy(sites = sites, activeSite = active) }
             return
@@ -141,6 +148,7 @@ class ExamDocsVM(
             sites = sites,
             activeSite = active,
             sitesReady = true,
+            uiSettings = state.uiSettings,
             searchQuery = state.searchQuery,
         )
         loadTree()
