@@ -2,99 +2,113 @@ name: Antigravity Debug APK
 
 on:
   workflow_dispatch:
+    inputs:
+      build_number:
+        description: Antigravity build number published from main
+        type: string
+        required: true
+      commit:
+        description: Commit that produced the release
+        type: string
+        required: true
 
 permissions:
   contents: read
 
+env:
+  UPDATE_URL: https://downloads.any1.tech/antigravity-updates
+  TARGET_BUILD: ${{ inputs.build_number }}
+  TARGET_COMMIT: ${{ inputs.commit }}
+
 jobs:
-  bootstrap:
-    name: Prepare the initial signed R2 update catalog
+  bundle:
+    name: Sign and verify update bundle
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-      - name: Verify the published source and target APKs
+      - name: Verify the published APKs
         env:
           GH_TOKEN: ${{ github.token }}
           DEBUG_KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$TARGET_BUILD" =~ ^[1-9][0-9]{1,5}$ ]]
+          [[ "$TARGET_COMMIT" =~ ^[a-f0-9]{40}$ ]]
           test -n "$DEBUG_KEYSTORE"
           keystore_path="$RUNNER_TEMP/rikkahub-debug.keystore"
           umask 077
           printf '%s' "$DEBUG_KEYSTORE" | base64 --decode > "$keystore_path"
           echo "RIKKA_DEBUG_KEYSTORE=$keystore_path" >> "$GITHUB_ENV"
 
-          target_tag=antigravity-118-1
-          for attempt in {1..40}; do
-            if gh release view "$target_tag" --json targetCommitish --jq '.targetCommitish' > "$RUNNER_TEMP/target-commit"; then
+          tag="antigravity-$TARGET_BUILD-1"
+          for attempt in {1..48}; do
+            if gh release view "$tag" --json targetCommitish --jq '.targetCommitish' > "$RUNNER_TEMP/target-commit"; then
               break
             fi
             sleep 15
           done
-          test "$(cat "$RUNNER_TEMP/target-commit")" = df1b6c09861b8828d15caffc411acd939ca28724
+          test "$(cat "$RUNNER_TEMP/target-commit")" = "$TARGET_COMMIT"
+          gh release download "$tag" --pattern '*-debug.apk' --pattern SHA256SUMS.txt --dir "$RUNNER_TEMP/release"
           signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
           aapt_tool=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -n 1)
           cert=$(keytool -exportcert -keystore "$keystore_path" -storepass android -alias androiddebugkey | sha256sum | cut -d ' ' -f 1)
-          for build in 116 118; do
-            gh release download "antigravity-$build-1" --pattern '*-debug.apk' --pattern SHA256SUMS.txt --dir "$RUNNER_TEMP/releases/$build"
-            if [[ "$build" == 116 ]]; then
-              version_code=197
-            else
-              version_code=$((100000 + build))
-            fi
-            (
-              cd "$RUNNER_TEMP/releases/$build"
-              sha256sum -c SHA256SUMS.txt
-              for apk in *.apk; do
-                "$signer" verify --print-certs "$apk" > "$RUNNER_TEMP/signature"
-                grep -Fi "$cert" "$RUNNER_TEMP/signature"
-                "$aapt_tool" dump badging "$apk" > "$RUNNER_TEMP/badging"
-                grep -F "name='me.rerere.rikkahub.debug'" "$RUNNER_TEMP/badging"
-                grep -F "versionCode='$version_code'" "$RUNNER_TEMP/badging"
-                grep -F "versionName='3.3.0'" "$RUNNER_TEMP/badging"
-              done
-            )
+          cd "$RUNNER_TEMP/release"
+          sha256sum -c SHA256SUMS.txt
+          for apk in *.apk; do
+            "$signer" verify --print-certs "$apk" > "$RUNNER_TEMP/signature"
+            grep -Fi "$cert" "$RUNNER_TEMP/signature"
+            "$aapt_tool" dump badging "$apk" > "$RUNNER_TEMP/badging"
+            grep -F "name='me.rerere.rikkahub.debug'" "$RUNNER_TEMP/badging"
+            grep -F "versionCode='$((100000 + TARGET_BUILD))'" "$RUNNER_TEMP/badging"
+            grep -F "versionName='3.3.0'" "$RUNNER_TEMP/badging"
           done
 
-      - name: Generate, verify, and sign the R2 bundle
+      - name: Generate and sign the bundle against the public catalog
         shell: bash
         run: |
           bash tools/antigravity/install-hdiffpatch.sh "$RUNNER_TEMP/hdiffpatch"
           PYTHONPATH=tools/antigravity python3 - <<'PY'
           import os
           import shutil
+          import subprocess
           from pathlib import Path
           from types import SimpleNamespace
 
-          from publish_updates import ABIS, PACKAGE_NAME, apk_key, digest, json_bytes, publish, read_signed_catalog, sign
+          from publish_updates import PACKAGE_NAME, json_bytes, publish, read_signed_catalog, sign
 
           temp = Path(os.environ["RUNNER_TEMP"])
+          base_url = os.environ["UPDATE_URL"]
+          build_number = int(os.environ["TARGET_BUILD"])
+          version_code = 100000 + build_number
+
+          def fetch(key, destination):
+              subprocess.run([
+                  "curl", "--fail", "--silent", "--show-error", "--retry", "3",
+                  "--max-time", "90", "--user-agent", "okhttp/5.3.0",
+                  "--output", str(destination), f"{base_url}/{key}",
+              ], check=True)
 
           class BundleStore:
               def __init__(self, root):
                   self.root = root
-                  self.legacy_files = {}
-                  self.legacy_apks = []
-                  for abi in ABIS:
-                      (path,) = (temp / "releases" / "116").glob(f"*-{abi}-debug.apk")
-                      apk = {"abi": abi, "sha256": digest(path), "size": path.stat().st_size}
-                      self.legacy_files[apk_key(197, apk)] = path
-                      self.legacy_apks.append(apk)
+                  self.root.mkdir()
+                  previous = self.root / "previous-catalog.json"
+                  fetch("catalog.json", previous)
+                  self.previous = read_signed_catalog(previous.read_bytes())
+                  if not self.previous or self.previous[0]["versionCode"] >= version_code:
+                      raise ValueError("The public catalog already contains this version or a newer one")
 
               def read_catalog(self):
-                  catalog = self.root / "catalog.json"
-                  if catalog.exists():
-                      return read_signed_catalog(catalog.read_bytes()), None
-                  return [{"versionCode": 197, "apks": self.legacy_apks}], None
+                  return self.previous, None
 
               def get_file(self, key, destination):
-                  shutil.copyfile(self.legacy_files[key], destination)
+                  fetch(key, destination)
 
               def put_file(self, key, path, content_type):
                   destination = self.root / key
@@ -102,8 +116,7 @@ jobs:
                   shutil.copyfile(path, destination)
 
               def write_catalog(self, builds, etag):
-                  current_builds = [build for build in builds if build["versionCode"] >= 100001]
-                  payload = json_bytes({"schemaVersion": 1, "packageName": PACKAGE_NAME, "builds": current_builds})
+                  payload = json_bytes({"schemaVersion": 1, "packageName": PACKAGE_NAME, "builds": builds})
                   (self.root / "catalog.json").write_bytes(sign(payload))
 
               def prune(self, builds):
@@ -111,23 +124,74 @@ jobs:
 
           store = BundleStore(temp / "r2-bundle")
           publish(store, SimpleNamespace(
-              apk_dir=temp / "releases" / "118",
+              apk_dir=temp / "release",
               hdiff_tools=temp / "hdiffpatch",
               work_dir=temp,
-              build_number=118,
-              version_code=100118,
+              build_number=build_number,
+              version_code=version_code,
               version_name="3.3.0",
-              commit="df1b6c09861b8828d15caffc411acd939ca28724",
+              commit=os.environ["TARGET_COMMIT"],
           ))
-          builds, _ = store.read_catalog()
-          assert [build["buildNumber"] for build in builds] == [118]
-          assert any(patch["baseVersionCode"] == 197 for apk in builds[0]["apks"] for patch in apk["patches"])
+          new_builds = read_signed_catalog((store.root / "catalog.json").read_bytes())
+          assert new_builds[0]["versionCode"] == version_code
+          assert new_builds[1:] == store.previous[:9]
+          for apk in new_builds[0]["apks"]:
+              assert any(patch["baseVersionCode"] == 100118 for patch in apk["patches"]), apk["abi"]
           PY
 
       - uses: actions/upload-artifact@v7
         with:
-          name: signed-r2-bootstrap-118
+          name: signed-r2-update-${{ inputs.build_number }}
           path: ${{ runner.temp }}/r2-bundle
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
+
+  live-update:
+    name: Upgrade Build 118 from the live update screen
+    needs: bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait for the public update
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import time
+          from urllib.request import Request, urlopen
+
+          public_catalog = Request(os.environ["UPDATE_URL"] + "/catalog.json", headers={"User-Agent": "okhttp/5.3.0"})
+          for attempt in range(48):
+              try:
+                  with urlopen(public_catalog, timeout=10) as response:
+                      envelope = json.load(response)
+                  latest = json.loads(base64.b64decode(envelope["payload"]))["builds"][0]
+                  if latest["commit"] == os.environ["TARGET_COMMIT"]:
+                      break
+              except (OSError, ValueError) as error:
+                  print(error, flush=True)
+              time.sleep(10)
+          else:
+              raise SystemExit("The target build never reached the public catalog")
+          PY
+      - name: Download the existing signed Build 118
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download antigravity-118-1 --pattern '*-x86_64-debug.apk' --output "$RUNNER_TEMP/base.apk"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Download and install the update in the Android app
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: python3 tools/antigravity/check_live_update.py
