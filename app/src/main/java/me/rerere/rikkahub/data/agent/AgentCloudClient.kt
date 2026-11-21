@@ -28,6 +28,7 @@ import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.MessageNode
 import me.rerere.rikkahub.data.workflow.DEFAULT_REMOTE_API_URL
+import me.rerere.rikkahub.data.workflow.WorkflowApiException
 import me.rerere.rikkahub.data.workflow.WorkflowRepository
 import me.rerere.rikkahub.data.workflow.WorkflowSession
 import me.rerere.rikkahub.utils.JsonInstant
@@ -368,9 +369,11 @@ class PocketBaseAgentCloudClient(
             )
         } else {
             val ancestors = fetchAncestors(session, job)
-            val ancestorParts = ancestors.filter { (it.streamRevision ?: 0) > 0 }.associate { ancestor ->
-                ancestor.id to drainParts(session, ancestor.job, ancestor.id, startCursor = 0).first
-            }
+            val ancestorParts = ancestors.mapNotNull { (ancestorJob, ancestor) ->
+                if (ancestor.streamRevision == 0) null else {
+                    ancestor.id to drainParts(session, ancestorJob.id, ancestor.id, startCursor = 0).first
+                }
+            }.toMap()
             buildConversationNodes(job, message, parts, ancestors, ancestorParts)
         }
         RemoteThreadConversation(
@@ -799,62 +802,46 @@ class PocketBaseAgentCloudClient(
         job: RemoteGeminiJob,
         currentMessage: RemoteGeminiMessage?,
         currentParts: List<RemoteAgentPart>,
-        ancestors: List<RemoteGeminiMessage>,
+        ancestors: List<Pair<RemoteGeminiJob, RemoteGeminiMessage>>,
         ancestorParts: Map<String, List<RemoteAgentPart>>,
-    ): List<MessageNode> {
-        val nodes = mutableListOf<MessageNode>()
-        val turns = job.history
-        var i = 0
-        while (i < turns.size) {
-            val userTurn = turns[i]
-            val assistantTurn = turns.getOrNull(i + 1)
-            val priorIndex = (turns.size / 2) - 1 - (i / 2)
-            val prior = ancestors.getOrNull(priorIndex)
-
-            var userText = userTurn.text
-            val userParts = mutableListOf<UIMessagePart>()
-            if (prior != null && prior.sourceId.endsWith(".md") && prior.inputText.isNotBlank() && userText.endsWith(prior.inputText)) {
-                userText = userText.removeSuffix(prior.inputText).trimEnd()
-                userParts += UIMessagePart.Document(
-                    url = prior.sourceId,
-                    fileName = prior.sourceName.ifBlank { "document.md" },
-                    mime = "text/markdown",
-                )
-            }
-            val (cleanTurnText, turnImages) = extractImageUrlsAndStripMarker(userText)
-            turnImages.forEach { url ->
-                userParts += UIMessagePart.Image(url = url)
-            }
-            if (cleanTurnText.isNotBlank() || userParts.isEmpty()) {
-                userParts.add(0, UIMessagePart.Text(cleanTurnText))
-            }
-            val userMsg = UIMessage(
-                id = stableUuid("aw-user:${prior?.id ?: "${job.id}-h-$i"}"),
-                role = MessageRole.USER,
-                parts = userParts,
-                createdAt = parseLocalDateTime(prior?.startedAt ?: job.created),
+    ): List<MessageNode> = buildList {
+        // Prompt history can omit empty model replies. Its user entries still identify turns
+        // for legacy history whose parent records are unavailable.
+        val firstLoadedTurn = job.history.indices
+            .filter { job.history[it].role == "user" }
+            .takeLast(ancestors.size)
+            .firstOrNull() ?: job.history.size
+        job.history.take(firstLoadedTurn).forEachIndexed { index, turn ->
+            val user = turn.role == "user"
+            val id = "${job.id}-h-$index"
+            val (text, images) = extractImageUrlsAndStripMarker(turn.text)
+            val message = UIMessage(
+                id = stableUuid(if (user) "aw-user:$id" else "aw-asst:$id"),
+                role = if (user) MessageRole.USER else MessageRole.ASSISTANT,
+                parts = listOf(UIMessagePart.Text(text)) + images.map { UIMessagePart.Image(url = it) },
+                createdAt = parseLocalDateTime(job.created),
+                modelSnapshot = if (user) null else ModelSnapshot(
+                    displayName = "Antigravity Agent",
+                    modelId = job.model.ifBlank { "Antigravity" },
+                ),
             )
-            nodes += MessageNode(id = stableUuid("aw-node-u:${prior?.id ?: "${job.id}-h-$i"}"), messages = listOf(userMsg), selectIndex = 0)
-
-            val assistantMsg = if (prior != null) {
-                buildAssistantUIMessage(
-                    messageId = stableUuid("aw-asst:${prior.id}"),
-                    job = job,
-                    message = prior,
-                    parts = ancestorParts[prior.id].orEmpty(),
-                )
-            } else {
-                UIMessage(
-                    id = stableUuid("aw-asst:${job.id}-h-${i + 1}"),
-                    role = MessageRole.ASSISTANT,
-                    parts = listOf(UIMessagePart.Text(assistantTurn?.text.orEmpty())),
-                    modelSnapshot = ModelSnapshot(displayName = "Antigravity Agent", modelId = job.model.ifBlank { "Antigravity" }),
-                )
-            }
-            nodes += MessageNode(id = stableUuid("aw-node-a:${prior?.id ?: "${job.id}-h-$i"}"), messages = listOf(assistantMsg), selectIndex = 0)
-            i += 2
+            add(MessageNode(
+                id = stableUuid(if (user) "aw-node-u:$id" else "aw-node-a:$id"),
+                messages = listOf(message),
+                selectIndex = 0,
+            ))
         }
+        for ((ancestorJob, ancestor) in ancestors) {
+            addAll(buildTurnNodes(ancestorJob, ancestor, ancestorParts[ancestor.id].orEmpty()))
+        }
+        addAll(buildTurnNodes(job, currentMessage, currentParts))
+    }
 
+    private fun buildTurnNodes(
+        job: RemoteGeminiJob,
+        currentMessage: RemoteGeminiMessage?,
+        currentParts: List<RemoteAgentPart>,
+    ): List<MessageNode> {
         val currentId = currentMessage?.id ?: job.id
         val currentUserParts = mutableListOf<UIMessagePart>()
         val source = job.sources.firstOrNull { it.id == currentMessage?.sourceId || it.name == currentMessage?.sourceName }
@@ -883,7 +870,6 @@ class PocketBaseAgentCloudClient(
             parts = currentUserParts,
             createdAt = parseLocalDateTime(job.created),
         )
-        nodes += MessageNode(id = stableUuid("aw-node-u:$currentId"), messages = listOf(currentUserMsg), selectIndex = 0)
 
         val currentAssistantMsg = buildAssistantUIMessage(
             messageId = stableUuid("aw-asst:$currentId"),
@@ -891,8 +877,10 @@ class PocketBaseAgentCloudClient(
             message = currentMessage,
             parts = currentParts,
         )
-        nodes += MessageNode(id = stableUuid("aw-node-a:$currentId"), messages = listOf(currentAssistantMsg), selectIndex = 0)
-        return nodes
+        return listOf(
+            MessageNode(id = stableUuid("aw-node-u:$currentId"), messages = listOf(currentUserMsg), selectIndex = 0),
+            MessageNode(id = stableUuid("aw-node-a:$currentId"), messages = listOf(currentAssistantMsg), selectIndex = 0),
+        )
     }
 
     private suspend fun fetchConfigBestEffort(session: WorkflowSession): RemoteAgentConfig {
@@ -971,34 +959,37 @@ class PocketBaseAgentCloudClient(
         return collected.sortedBy { it.sequence } to cursor
     }
 
-    private suspend fun fetchAncestors(session: WorkflowSession, job: RemoteGeminiJob): List<RemoteGeminiMessage> {
-        val ancestors = mutableListOf<RemoteGeminiMessage>()
+    private suspend fun fetchAncestors(
+        session: WorkflowSession,
+        job: RemoteGeminiJob,
+    ): List<Pair<RemoteGeminiJob, RemoteGeminiMessage>> {
+        val ancestors = mutableListOf<Pair<RemoteGeminiJob, RemoteGeminiMessage>>()
         val visited = HashSet<String>()
         var parentId = job.parentMessage
-        val limit = (job.history.size / 2).coerceAtMost(20)
-        while (parentId.isNotBlank() && ancestors.size < limit && visited.add(parentId)) {
-            val msgObj = runCatching {
-                workflowRepository.executeJsonCancellable(
+        // PocketBase caps prompt history at 40 entries. A failed turn can have only a user entry.
+        while (parentId.isNotBlank() && ancestors.size < 40 && visited.add(parentId)) {
+            try {
+                val message = parseMessage(workflowRepository.executeJsonCancellable(
                     baseUrl = session.baseUrl,
                     path = "/api/collections/$MESSAGES_COLLECTION/records/$parentId",
                     method = "GET",
                     token = session.token,
-                ).jsonObject
-            }.getOrNull() ?: break
-            val msg = parseMessage(msgObj)
-            ancestors += msg
-            val parentJobObj = runCatching {
-                workflowRepository.executeJsonCancellable(
+                ).jsonObject)
+                val parentJob = parseJob(workflowRepository.executeJsonCancellable(
                     baseUrl = session.baseUrl,
-                    path = "/api/collections/$JOBS_COLLECTION/records/${msg.job}",
+                    path = "/api/collections/$JOBS_COLLECTION/records/${message.job}",
                     method = "GET",
-                    query = mapOf("fields" to "id,parentMessage"),
+                    query = mapOf("fields" to "id,parentMessage,prompt,model,status,error,created,updated,sources,images"),
                     token = session.token,
-                ).jsonObject
-            }.getOrNull() ?: break
-            parentId = parentJobObj.str("parentMessage")
+                ).jsonObject)
+                ancestors += parentJob to message
+                parentId = parentJob.parentMessage
+            } catch (error: WorkflowApiException) {
+                if (error.statusCode != 404) throw error
+                break
+            }
         }
-        return ancestors
+        return ancestors.asReversed()
     }
 
     private suspend fun wakeConverterBestEffort(session: WorkflowSession) {

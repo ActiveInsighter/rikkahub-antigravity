@@ -664,6 +664,18 @@ class RouteActivity : ComponentActivity() {
                                     initialUrl = key.initialUrl,
                                 )
                             }
+
+                            entry<Screen.ExamDocsSettings> {
+                                me.rerere.rikkahub.ui.pages.examdocs.ExamDocsSettingsPage()
+                            }
+
+                            entry<Screen.ExamDocsSiteSettings> {
+                                me.rerere.rikkahub.ui.pages.examdocs.ExamDocsSiteSettingsPage()
+                            }
+
+                            entry<Screen.ExamDocsUISettings> {
+                                me.rerere.rikkahub.ui.pages.examdocs.ExamDocsUISettingsPage()
+                            }
                         }
                     )
                     if (BuildConfig.DEBUG) {

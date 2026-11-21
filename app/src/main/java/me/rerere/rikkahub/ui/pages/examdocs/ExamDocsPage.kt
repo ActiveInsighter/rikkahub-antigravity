@@ -86,7 +86,6 @@ import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 import me.rerere.rikkahub.data.examdocs.getExamDocsLink
 import me.rerere.rikkahub.data.examdocs.resolveExamDocsUrl
 import me.rerere.rikkahub.ui.components.ai.ChatTopBarCapsule
-import me.rerere.rikkahub.ui.components.nav.ProvideHazeMenuHost
 import me.rerere.rikkahub.ui.components.nav.TopBarMenuItem
 import me.rerere.rikkahub.ui.components.nav.TopBarMoreMenu
 import me.rerere.rikkahub.ui.components.richtext.SelectableContent
@@ -154,156 +153,152 @@ fun ExamDocsPage(
         color = MaterialTheme.colorScheme.background,
         modifier = Modifier.fillMaxSize(),
     ) {
-        ProvideHazeMenuHost {
-            AssistantBackground(setting = settings, modifier = Modifier.hazeSource(hazeState))
-            Scaffold(
-                containerColor = Color.Transparent,
-                topBar = {
-                    TopAppBar(
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                        navigationIcon = {
-                            ChatTopBarCapsule(
-                                hazeState = hazeState,
-                                displaySetting = docsDisplaySetting,
-                                showBackground = listScrolledUnderTopBar,
-                                modifier = Modifier.padding(start = 8.dp, end = 4.dp),
+        AssistantBackground(setting = settings, modifier = Modifier.hazeSource(hazeState))
+        Scaffold(
+            containerColor = Color.Transparent,
+            topBar = {
+                TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                    navigationIcon = {
+                        ChatTopBarCapsule(
+                            hazeState = hazeState,
+                            displaySetting = docsDisplaySetting,
+                            showBackground = listScrolledUnderTopBar,
+                            modifier = Modifier.padding(start = 8.dp, end = 4.dp),
+                        ) {
+                            IconButton(
+                                onClick = { sheet = ReaderSheet.Directory },
+                                enabled = state.sitesReady,
                             ) {
-                                IconButton(
-                                    onClick = { sheet = ReaderSheet.Directory },
-                                    enabled = state.sitesReady,
-                                ) {
-                                    Icon(HugeIcons.LeftToRightListBullet, "文档目录")
-                                }
+                                Icon(HugeIcons.LeftToRightListBullet, "文档目录")
                             }
-                        },
-                        title = {
-                            Surface(
-                                onClick = { if (state.sitesReady) sheet = ReaderSheet.Directory },
-                                color = Color.Transparent,
-                                shape = RoundedCornerShape(16.dp),
-                            ) {
-                                Column(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+                        }
+                    },
+                    title = {
+                        Surface(
+                            onClick = { if (state.sitesReady) sheet = ReaderSheet.Directory },
+                            color = Color.Transparent,
+                            shape = RoundedCornerShape(16.dp),
+                        ) {
+                            Column(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+                                Text(
+                                    page?.name ?: state.activeSite.name,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                if (page != null) {
+                                    val subtitle = remember(state.activeSite.name, state.currentBreadcrumb) {
+                                        (listOf(state.activeSite.name) + state.currentBreadcrumb).joinToString(" / ")
+                                    }
                                     Text(
-                                        page?.name ?: state.activeSite.name,
+                                        subtitle,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Medium,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
                                     )
-                                    if (page != null) {
-                                        val subtitle = remember(state.activeSite.name, state.currentBreadcrumb) {
-                                            (listOf(state.activeSite.name) + state.currentBreadcrumb).joinToString(" / ")
-                                        }
-                                        Text(
-                                            subtitle,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
-                                        )
-                                    }
                                 }
                             }
-                        },
-                        actions = {
-                            ChatTopBarCapsule(
-                                hazeState = hazeState,
-                                displaySetting = docsDisplaySetting,
-                                showBackground = listScrolledUnderTopBar,
-                                modifier = Modifier.padding(start = 4.dp, end = 8.dp),
+                        }
+                    },
+                    actions = {
+                        ChatTopBarCapsule(
+                            hazeState = hazeState,
+                            displaySetting = docsDisplaySetting,
+                            showBackground = listScrolledUnderTopBar,
+                            modifier = Modifier.padding(start = 4.dp, end = 8.dp),
+                        ) {
+                            IconButton(
+                                onClick = { sheet = ReaderSheet.Outline },
+                                enabled = !document?.headings.isNullOrEmpty(),
                             ) {
-                                IconButton(
-                                    onClick = { sheet = ReaderSheet.Outline },
-                                    enabled = !document?.headings.isNullOrEmpty(),
-                                ) {
-                                    Icon(HugeIcons.Book02, "本页大纲")
-                                }
-                                TopBarMoreMenu(
-                                    listOf(
-                                        TopBarMenuItem(
-                                            "重新加载",
-                                            HugeIcons.Refresh03,
-                                            vm::reload,
-                                            state.sitesReady && !state.isLoadingTree,
-                                        ),
-                                        TopBarMenuItem(
-                                            "复制链接",
-                                            HugeIcons.Copy01,
-                                            onClick = {
-                                                document?.sourceUrl?.let { url ->
-                                                    scope.launch {
-                                                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Link", url)))
-                                                        toaster.show("已复制链接", type = ToastType.Success)
-                                                    }
-                                                }
-                                            },
-                                            enabled = document != null,
-                                        ),
-                                    ),
-                                    listOf(
-                                        TopBarMenuItem(
-                                            "设置",
-                                            HugeIcons.Settings03,
-                                            { navController.navigate(Screen.ExamDocsSettings) },
-                                            state.sitesReady,
-                                        ),
-                                    ),
-                                    hazeState = hazeState,
-                                    displaySetting = docsDisplaySetting,
-                                )
+                                Icon(HugeIcons.Book02, "本页大纲")
                             }
-                        },
-                    )
-                },
-            ) { innerPadding ->
-                Box(
-                    Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val treeError = state.treeError
-                    val contentError = state.contentError
-                    when {
-                        state.isLoadingTree && (page == null || document == null) ->
-                            Box(Modifier.padding(innerPadding)) { ReaderLoading("正在获取文档目录…") }
-                        treeError != null -> Box(Modifier.padding(innerPadding)) {
-                            ErrorStateView(
-                                title = "无法获取文档目录",
-                                message = treeError,
-                                onRetry = vm::reload,
-                                onSecondaryAction = { navController.navigate(Screen.ExamDocsSettings) },
-                                secondaryLabel = "设置",
+                            TopBarMoreMenu(
+                                listOf(
+                                    TopBarMenuItem(
+                                        "重新加载",
+                                        HugeIcons.Refresh03,
+                                        vm::reload,
+                                        state.sitesReady && !state.isLoadingTree,
+                                    ),
+                                    TopBarMenuItem(
+                                        "复制链接",
+                                        HugeIcons.Copy01,
+                                        onClick = {
+                                            document?.sourceUrl?.let { url ->
+                                                scope.launch {
+                                                    clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Link", url)))
+                                                    toaster.show("已复制链接", type = ToastType.Success)
+                                                }
+                                            }
+                                        },
+                                        enabled = document != null,
+                                    ),
+                                ),
+                                listOf(
+                                    TopBarMenuItem(
+                                        "设置",
+                                        HugeIcons.Settings03,
+                                        { navController.navigate(Screen.ExamDocsSettings) },
+                                        state.sitesReady,
+                                    ),
+                                ),
                             )
                         }
-                        state.isLoadingContent || (document != null && !canRenderDocument) ->
-                            Box(Modifier.padding(innerPadding)) { ReaderLoading("正在加载文档…") }
-                        contentError != null -> Box(Modifier.padding(innerPadding)) {
-                            ErrorStateView(
-                                title = "文档加载失败",
-                                message = contentError,
-                                onRetry = vm::reload,
-                                onSecondaryAction = { sheet = ReaderSheet.Directory },
-                                secondaryLabel = "打开目录",
-                            )
-                        }
-                        document != null && page != null -> CompositionLocalProvider(LocalSettings provides docsSettings) {
-                            ExamDocsArticle(
-                                document = document,
-                                listState = listState,
-                                baseUrl = state.activeSite.baseUrl,
-                                pageUrl = page.url,
-                                hazeState = hazeState,
-                                topPadding = innerPadding.calculateTopPadding(),
-                                bottomPadding = innerPadding.calculateBottomPadding(),
-                                fontSizeRatio = state.uiSettings.fontSizeRatio,
-                                previous = state.prevPage,
-                                next = state.nextPage,
-                                onPage = vm::openPage,
-                                onLink = vm::openLink,
-                            )
-                        }
-                        else -> Box(Modifier.padding(innerPadding)) {
-                            Button(onClick = { sheet = ReaderSheet.Directory }) { Text("浏览文档目录") }
-                        }
+                    },
+                )
+            },
+        ) { innerPadding ->
+            Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                val treeError = state.treeError
+                val contentError = state.contentError
+                when {
+                    state.isLoadingTree && (page == null || document == null) ->
+                        Box(Modifier.padding(innerPadding)) { ReaderLoading("正在获取文档目录…") }
+                    treeError != null -> Box(Modifier.padding(innerPadding)) {
+                        ErrorStateView(
+                            title = "无法获取文档目录",
+                            message = treeError,
+                            onRetry = vm::reload,
+                            onSecondaryAction = { navController.navigate(Screen.ExamDocsSettings) },
+                            secondaryLabel = "设置",
+                        )
+                    }
+                    state.isLoadingContent || (document != null && !canRenderDocument) ->
+                        Box(Modifier.padding(innerPadding)) { ReaderLoading("正在加载文档…") }
+                    contentError != null -> Box(Modifier.padding(innerPadding)) {
+                        ErrorStateView(
+                            title = "文档加载失败",
+                            message = contentError,
+                            onRetry = vm::reload,
+                            onSecondaryAction = { sheet = ReaderSheet.Directory },
+                            secondaryLabel = "打开目录",
+                        )
+                    }
+                    document != null && page != null -> CompositionLocalProvider(LocalSettings provides docsSettings) {
+                        ExamDocsArticle(
+                            document = document,
+                            listState = listState,
+                            baseUrl = state.activeSite.baseUrl,
+                            pageUrl = page.url,
+                            hazeState = hazeState,
+                            topPadding = innerPadding.calculateTopPadding(),
+                            bottomPadding = innerPadding.calculateBottomPadding(),
+                            fontSizeRatio = state.uiSettings.fontSizeRatio,
+                            previous = state.prevPage,
+                            next = state.nextPage,
+                            onPage = vm::openPage,
+                            onLink = vm::openLink,
+                        )
+                    }
+                    else -> Box(Modifier.padding(innerPadding)) {
+                        Button(onClick = { sheet = ReaderSheet.Directory }) { Text("浏览文档目录") }
                     }
                 }
             }

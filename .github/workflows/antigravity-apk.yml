@@ -10,7 +10,7 @@ on:
         type: boolean
         default: true
       reader_smoke:
-        description: Exercise document reader interactions on the Android emulator
+        description: Exercise document reader, settings navigation, and Agent history on Android
         type: boolean
         default: false
 
@@ -105,7 +105,7 @@ jobs:
           disable-animations: true
           script: >-
             ./gradlew :app:connectedGithubDebugAndroidTest
-            -Pandroid.testInstrumentationRunnerArguments.class=me.rerere.rikkahub.ui.pages.examdocs.ExamDocsReaderTest
+            -Pandroid.testInstrumentationRunnerArguments.class=me.rerere.rikkahub.ui.pages.examdocs.ExamDocsReaderTest,me.rerere.rikkahub.ui.pages.examdocs.ExamDocsSettingsNavigationTest,me.rerere.rikkahub.data.agent.AgentContinuationTest
             --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8'
       - name: Verify APK signatures and prepare downloads
         run: |
