@@ -9,8 +9,12 @@ import json
 import os
 from pathlib import Path
 import re
+from shutil import copyfileobj
 import subprocess
 import tempfile
+from urllib.error import HTTPError
+from urllib.parse import urlencode, urlsplit
+from urllib.request import Request, urlopen
 
 PACKAGE_NAME = "me.rerere.rikkahub.debug"
 ABIS = ("arm64-v8a", "x86_64", "universal")
@@ -62,6 +66,35 @@ def delta_key(version, apk, patch):
     return f"builds/{version}/{apk['sha256']}/{apk['abi']}-from-{patch['baseSha256']}-{patch['sha256']}.hdiff"
 
 
+def catalog_envelope(builds):
+    payload = json_bytes({"schemaVersion": 1, "packageName": PACKAGE_NAME, "builds": builds})
+    envelope = sign(payload)
+    if len(envelope) > CATALOG_LIMIT:
+        raise ValueError("Update catalog exceeds the size limit")
+    return envelope
+
+
+def obsolete_keys(builds, keys):
+    newest_version = builds[0]["versionCode"]
+    retained = set()
+    for build in builds:
+        version = build["versionCode"]
+        for apk in build["apks"]:
+            retained.add(PREFIX + apk_key(version, apk))
+            for patch in apk["patches"]:
+                retained.add(PREFIX + delta_key(version, apk, patch))
+    for key in keys:
+        if key in retained:
+            continue
+        match = re.fullmatch(
+            PREFIX + r"builds/([0-9]{1,10})/[a-f0-9]{64}/(?:arm64-v8a|x86_64|universal)"
+            r"(?:\.apk|-from-[a-f0-9]{64}-[a-f0-9]{64}\.hdiff)", key,
+        )
+        # Leave objects from a newer publisher alone, even if it is still uploading.
+        if match and int(match[1]) <= newest_version:
+            yield key
+
+
 def generate_patch(tools, base, target, patch, rebuilt, *, min_savings=10):
     subprocess.run(
         [str(tools / "hdiffz"), "-s-64", "-p-1", "-c-zlib-6", "-d", str(base), str(target), str(patch)],
@@ -107,43 +140,83 @@ class R2Store:
         })
 
     def write_catalog(self, builds, etag):
-        payload = json_bytes({"schemaVersion": 1, "packageName": PACKAGE_NAME, "builds": builds})
-        envelope = sign(payload)
-        if len(envelope) > CATALOG_LIMIT:
-            raise ValueError("Update catalog exceeds the size limit")
         condition = {"IfMatch": etag} if etag else {"IfNoneMatch": "*"}
-        self.client.put_object(Bucket=self.bucket, Key=PREFIX + "catalog.json", Body=envelope,
+        self.client.put_object(Bucket=self.bucket, Key=PREFIX + "catalog.json", Body=catalog_envelope(builds),
                                ContentType="application/json", CacheControl="no-store", **condition)
 
     def prune(self, builds):
-        # Leave objects from a newer publisher alone, even if it is still uploading.
-        newest_version = builds[0]["versionCode"]
-        retained_keys = set()
-        for build in builds:
-            version = build["versionCode"]
-            for apk in build["apks"]:
-                retained_keys.add(PREFIX + apk_key(version, apk))
-                for patch in apk["patches"]:
-                    retained_keys.add(PREFIX + delta_key(version, apk, patch))
-        prefix = PREFIX + "builds/"
-        old_keys = []
-        for page in self.client.get_paginator("list_objects_v2").paginate(Bucket=self.bucket, Prefix=prefix):
-            for item in page.get("Contents", []):
-                key = item["Key"]
-                if key in retained_keys:
-                    continue
-                match = re.fullmatch(
-                    r"([0-9]{1,10})/[a-f0-9]{64}/(?:arm64-v8a|x86_64|universal)"
-                    r"(?:\.apk|-from-[a-f0-9]{64}-[a-f0-9]{64}\.hdiff)", key[len(prefix):],
-                )
-                if match and int(match[1]) <= newest_version:
-                    old_keys.append({"Key": key})
+        pages = self.client.get_paginator("list_objects_v2").paginate(Bucket=self.bucket, Prefix=PREFIX + "builds/")
+        keys = (item["Key"] for page in pages for item in page.get("Contents", []))
+        old_keys = [{"Key": key} for key in obsolete_keys(builds, keys)]
         for start in range(0, len(old_keys), 1000):
             response = self.client.delete_objects(
                 Bucket=self.bucket, Delete={"Objects": old_keys[start:start + 1000], "Quiet": True},
             )
             if response.get("Errors"):
                 raise RuntimeError(f"R2 retention failed: {response['Errors']}")
+        print(f"Pruned {len(old_keys)} obsolete objects")
+
+
+class WorkerR2Store:
+    def __init__(self, endpoint, token):
+        url = urlsplit(endpoint)
+        if not (url.scheme == "https" and url.hostname and not url.username
+                and not url.password and not url.query and not url.fragment):
+            raise ValueError("Invalid R2 publisher URL")
+        self.endpoint = endpoint.rstrip("/")
+        self.token = token
+
+    def request(self, method, path, *, data=None, headers=None):
+        request = Request(f"{self.endpoint}/{path}", method=method, data=data, headers=headers or {})
+        request.add_unredirected_header("Authorization", f"Bearer {self.token}")
+        request.add_header("User-Agent", "RikkaHub-APK-Publisher/1.0")
+        return urlopen(request, timeout=90)
+
+    def read_catalog(self):
+        try:
+            with self.request("GET", "catalog.json") as response:
+                envelope = response.read(CATALOG_LIMIT + 1)
+                etag = response.headers["ETag"]
+        except HTTPError as error:
+            if error.code == 404:
+                return [], None
+            raise
+        if not etag or len(envelope) > CATALOG_LIMIT:
+            raise ValueError("Invalid existing update catalog headers or size")
+        return read_signed_catalog(envelope), etag
+
+    def get_file(self, key, destination):
+        with self.request("GET", key) as response, destination.open("wb") as output:
+            copyfileobj(response, output)
+
+    def put_file(self, key, path, content_type):
+        with path.open("rb") as source:
+            with self.request("PUT", key, data=source, headers={
+                "Content-Type": content_type,
+                "Content-Length": str(path.stat().st_size),
+            }):
+                pass
+
+    def write_catalog(self, builds, etag):
+        headers = {"If-Match": etag} if etag else {"If-None-Match": "*"}
+        with self.request("PUT", "catalog.json", data=catalog_envelope(builds), headers=headers):
+            pass
+
+    def list_keys(self):
+        path = "builds/"
+        while True:
+            with self.request("GET", path) as response:
+                page = json.load(response)
+            yield from page["keys"]
+            if not page["cursor"]:
+                return
+            path = "builds/?" + urlencode({"cursor": page["cursor"]})
+
+    def prune(self, builds):
+        old_keys = list(obsolete_keys(builds, self.list_keys()))
+        for key in old_keys:
+            with self.request("DELETE", key.removeprefix(PREFIX)):
+                pass
         print(f"Pruned {len(old_keys)} obsolete objects")
 
 
@@ -223,6 +296,10 @@ def main():
     if not (100_001 <= options.version_code <= 2_100_000_000 and options.build_number > 0
             and 1 <= len(options.version_name) <= 80 and re.fullmatch("[0-9a-f]{40}", options.commit)):
         parser.error("Invalid catalog build metadata")
+
+    if os.environ.get("R2_UPDATE_PUBLISH_URL"):
+        publish(WorkerR2Store(os.environ["R2_UPDATE_PUBLISH_URL"], os.environ["R2_UPDATE_PUBLISH_TOKEN"]), options)
+        return
 
     import boto3
     from botocore.config import Config

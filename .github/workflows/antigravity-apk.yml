@@ -213,20 +213,35 @@ jobs:
         if: github.ref == 'refs/heads/main'
         env:
           R2_UPDATE_PUBLIC_URL: ${{ vars.R2_UPDATE_PUBLIC_URL }}
+          R2_UPDATE_PUBLISH_URL: ${{ vars.R2_UPDATE_PUBLISH_URL }}
+          R2_UPDATE_PUBLISH_TOKEN: ${{ secrets.R2_UPDATE_PUBLISH_TOKEN }}
           R2_UPDATE_ACCOUNT_ID: ${{ vars.R2_UPDATE_ACCOUNT_ID }}
           R2_UPDATE_BUCKET: ${{ vars.R2_UPDATE_BUCKET }}
           R2_UPDATE_ACCESS_KEY_ID: ${{ secrets.R2_UPDATE_ACCESS_KEY_ID }}
           R2_UPDATE_SECRET_ACCESS_KEY: ${{ secrets.R2_UPDATE_SECRET_ACCESS_KEY }}
         run: |
-          if [[ -z "$R2_UPDATE_PUBLIC_URL" || -z "$R2_UPDATE_ACCOUNT_ID" || -z "$R2_UPDATE_BUCKET" ||
-                -z "$R2_UPDATE_ACCESS_KEY_ID" || -z "$R2_UPDATE_SECRET_ACCESS_KEY" ]]; then
-            echo 'R2 APK update publishing is disabled until the R2 variables and secrets are configured.' >> "$GITHUB_STEP_SUMMARY"
+          if [[ -z "$R2_UPDATE_PUBLIC_URL" ]]; then
+            echo 'R2 APK updates are disabled because R2_UPDATE_PUBLIC_URL is unset.' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          publisher=python3
+          if [[ -n "$R2_UPDATE_PUBLISH_URL" ]]; then
+            if [[ -z "$R2_UPDATE_PUBLISH_TOKEN" ]]; then
+              echo '::error::R2_UPDATE_PUBLISH_URL is set, but R2_UPDATE_PUBLISH_TOKEN is missing.'
+              exit 1
+            fi
+          else
+            if [[ -z "$R2_UPDATE_ACCOUNT_ID" || -z "$R2_UPDATE_BUCKET" ||
+                  -z "$R2_UPDATE_ACCESS_KEY_ID" || -z "$R2_UPDATE_SECRET_ACCESS_KEY" ]]; then
+              echo '::error::R2 updates are enabled, but neither the Worker publisher nor the S3 credentials are configured.'
+              exit 1
+            fi
+            python3 -m venv "$RUNNER_TEMP/update-publisher"
+            "$RUNNER_TEMP/update-publisher/bin/pip" install 'boto3==1.42.66'
+            publisher="$RUNNER_TEMP/update-publisher/bin/python"
+          fi
           bash tools/antigravity/install-hdiffpatch.sh "$RUNNER_TEMP/hdiffpatch"
-          python3 -m venv "$RUNNER_TEMP/update-publisher"
-          "$RUNNER_TEMP/update-publisher/bin/pip" install 'boto3==1.42.66'
-          "$RUNNER_TEMP/update-publisher/bin/python" tools/antigravity/publish_updates.py \
+          "$publisher" tools/antigravity/publish_updates.py \
             --apk-dir artifacts --hdiff-tools "$RUNNER_TEMP/hdiffpatch" --work-dir "$RUNNER_TEMP" \
             --version-code "$RIKKA_ANTIGRAVITY_VERSION_CODE" --version-name "$RIKKA_VERSION_NAME" \
             --build-number "$GITHUB_RUN_NUMBER" --commit "$GITHUB_SHA"

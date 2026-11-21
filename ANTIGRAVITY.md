@@ -99,6 +99,8 @@ GitHub 渠道的 Antigravity Debug APK 在首页右上角提供「下载与更�
 
 [R2 S3 凭据配置](https://developers.cloudflare.com/r2/api/tokens/) · [R2 自定义域名](https://developers.cloudflare.com/r2/buckets/public-buckets/)
 
+也可通过仓库的 `.github/r2-publisher/deploy.sh` 部署绑定现有桶的 Worker。将脚本输出的 HTTPS 地址保存为 Actions Variable `R2_UPDATE_PUBLISH_URL`，将部署时使用的同一发布令牌保存为 Actions Secret `R2_UPDATE_PUBLISH_TOKEN`。配置 Worker 后，工作流通过它发布。应用继续从 `R2_UPDATE_PUBLIC_URL` 下载。
+
 `Antigravity Debug APK` 工作流在 `main` 成功构建后写入桶的 `antigravity-updates/` 前缀。它先上传三种 ABI 的完整安装包和可节省至少 10% 的补丁，再写入签名后的 `catalog.json`，最后清理超出保留范围的对象。如果自定义域配置了缓存规则，请让 `/antigravity-updates/catalog.json` 遵循对象的 `Cache-Control: no-store`。APK 和补丁可按其内容哈希缓存。R2 凭据仅用于 Actions，客户端只读取公网索引和文件。
 
 配置完成后，从 `main` 新启动一次工作流。第一次发布会建立全量基线，随后每次发布会为留存版本生成可用的直达补丁。公网地址随 APK 构建写入。此前未配置地址的 APK，需要从 GitHub 手动覆盖安装一次支持该地址的新版。构建以 `100000 + GITHUB_RUN_NUMBER` 作为 Android 版本号。同一次运行的重试沿用原版本号，R2 保留已经发布的内容。要重发请启动新的运行。
