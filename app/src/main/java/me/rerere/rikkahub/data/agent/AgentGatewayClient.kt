@@ -21,8 +21,10 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
+import me.rerere.ai.provider.TextGenerationResult
 import me.rerere.ai.provider.providers.google.GoogleProvider
 import me.rerere.ai.ui.StreamChunk
+import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.utils.JsonInstant
@@ -45,12 +47,57 @@ data class GatewayAgentDispatchResponse(
     val ref: String,
 )
 
+internal suspend fun collectAgentChatReply(
+    initialReply: UIMessage,
+    chunks: Flow<StreamChunk>,
+    onReply: suspend (UIMessage) -> Unit,
+    retry: suspend () -> TextGenerationResult,
+) {
+    val handler = StreamChunkHandler()
+    var reply = initialReply
+    var finishReason: String? = null
+    chunks.collect { chunk ->
+        if (chunk is StreamChunk.Finish) finishReason = chunk.finishReason
+        reply = handler.handle(listOf(reply), chunk).single()
+        onReply(reply)
+    }
+    if (reply.hasChatOutput()) return
+
+    // An empty stream can end without a finish reason. Honor explicit upstream blocks.
+    check(finishReason == null || finishReason == "STOP" || finishReason == "MAX_TOKENS") {
+        "Gemini 未返回正文（$finishReason）"
+    }
+    val result = retry()
+    check(result.message.hasChatOutput()) {
+        "Gemini 重试后仍未返回正文" + (result.finishReason?.let { "（$it）" } ?: "")
+    }
+
+    // Replace the partial reply as a unit so its thought signatures match the answer on replay.
+    val recovered = initialReply.copy(
+        parts = result.message.parts,
+        annotations = result.message.annotations,
+        usage = result.usage,
+    )
+    onReply(handler.handle(
+        listOf(recovered),
+        StreamChunk.Finish(result.finishReason, result.id, result.model),
+    ).single())
+}
+
+private fun UIMessage.hasChatOutput(): Boolean = parts.any { part ->
+    when (part) {
+        is UIMessagePart.Text -> part.text.isNotBlank()
+        is UIMessagePart.Reasoning, is UIMessagePart.Notice -> false
+        else -> true
+    }
+}
+
 class AgentGatewayClient(
     private val okHttpClient: OkHttpClient,
 ) {
     private val googleProvider = GoogleProvider(okHttpClient)
 
-    suspend fun streamChat(
+    internal suspend fun streamChat(
         modelEntity: AgentModelEntity,
         messages: List<UIMessage>,
         systemPrompt: String,
@@ -58,7 +105,9 @@ class AgentGatewayClient(
         temperature: Float?,
         fallbackBaseUrl: String,
         fallbackApiKey: String,
-    ): Flow<StreamChunk> {
+        initialReply: UIMessage,
+        onReply: suspend (UIMessage) -> Unit,
+    ) {
         val baseUrl = resolveGeminiBaseUrl(modelEntity.baseUrl, fallbackBaseUrl)
         val apiKey = modelEntity.apiKey.ifBlank { fallbackApiKey }.trim()
         val cleanModelId = modelEntity.modelId.trim().removePrefix("models/")
@@ -77,15 +126,16 @@ class AgentGatewayClient(
             useInteractionsApi = false,
         )
 
-        val effectiveMessages = if (systemPrompt.isNotBlank() && messages.none { it.role == MessageRole.SYSTEM }) {
+        val history = messages.filterNot { it.role == MessageRole.ASSISTANT && !it.hasChatOutput() }
+        val effectiveMessages = if (systemPrompt.isNotBlank() && history.none { it.role == MessageRole.SYSTEM }) {
             listOf(
                 UIMessage(
                     role = MessageRole.SYSTEM,
                     parts = listOf(UIMessagePart.Text(systemPrompt.trim())),
                 )
-            ) + messages
+            ) + history
         } else {
-            messages
+            history
         }
 
         val params = TextGenerationParams(
@@ -94,7 +144,12 @@ class AgentGatewayClient(
             reasoningLevel = reasoningLevel,
         )
 
-        return googleProvider.streamText(providerSetting, effectiveMessages, params)
+        collectAgentChatReply(
+            initialReply = initialReply,
+            chunks = googleProvider.streamText(providerSetting, effectiveMessages, params),
+            onReply = onReply,
+            retry = { googleProvider.generateText(providerSetting, effectiveMessages, params) },
+        )
     }
 
     suspend fun callDecision(

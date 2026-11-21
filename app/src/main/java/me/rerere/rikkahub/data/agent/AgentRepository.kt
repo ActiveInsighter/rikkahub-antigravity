@@ -22,9 +22,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
-import me.rerere.ai.provider.Model
 import me.rerere.ai.ui.ModelSnapshot
-import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.AppScope
@@ -925,15 +923,9 @@ class AgentRepository(
             )
         }
         val historyMessages = historyOverride ?: baseConversation.messageNodes.map { it.currentMessage }
-        val handler = StreamChunkHandler(
-            Model(
-                modelId = modelEntity.modelId,
-                displayName = displayName,
-            )
-        )
 
         launchLocalGeneration(initialConv) { startedAt ->
-            var workingMessages = historyMessages + placeholderMsg
+            var workingReply = placeholderMsg
             var workingConv = initialConv
             var lastDbFlushAt = SystemClock.elapsedRealtime()
             try {
@@ -948,12 +940,10 @@ class AgentRepository(
                         temperature = temperature,
                         fallbackBaseUrl = fallbackBaseUrl,
                         fallbackApiKey = fallbackApiKey,
-                    ).collect { chunk ->
-                        workingMessages = handler.handle(workingMessages, chunk)
-                        val updatedAssistant = workingMessages.last().copy(
-                            modelSnapshot = placeholderMsg.modelSnapshot,
-                        )
-                        workingConv = workingConv.upsertMessage(nodeId, updatedAssistant)
+                        initialReply = placeholderMsg,
+                    ) { reply ->
+                        workingReply = reply
+                        workingConv = workingConv.upsertMessage(nodeId, reply)
                         _localGenerations.update { it + (convId to LocalGenerationState(workingConv, startedAt)) }
                         val now = SystemClock.elapsedRealtime()
                         if (now - lastDbFlushAt >= 2_000L) {
@@ -981,11 +971,9 @@ class AgentRepository(
             } catch (e: Exception) {
                 val msg = e.message ?: "Chat 流式请求失败"
                 onError?.invoke(msg)
-                val errAssistant = workingMessages.lastOrNull()?.let { currentMsg ->
-                    currentMsg.copy(
-                        parts = currentMsg.parts + UIMessagePart.Notice(title = "请求失败", text = msg),
-                    )
-                } ?: placeholderMsg.copy(parts = listOf(UIMessagePart.Notice(title = "请求失败", text = msg)))
+                val errAssistant = workingReply.copy(
+                    parts = workingReply.parts + UIMessagePart.Notice(title = "请求失败", text = msg),
+                )
                 val failedConv = workingConv.upsertMessage(nodeId, errAssistant)
                 withContext(NonCancellable) {
                     saveConversation(failedConv)
