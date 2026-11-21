@@ -69,7 +69,7 @@ internal fun rememberExamDocsRenderer(
         }
     }
     val inlineMath: (String) -> BetterInline = remember(cache, painter) {
-        { formula -> LatexInline(cache.get(formula, display = false), painter) }
+        { formula -> LatexInline(cache.get(formula, display = false), painter, 1.12f) }
     }
 
     if (LocalSettings.current.displaySetting.enableLatexRendering) {

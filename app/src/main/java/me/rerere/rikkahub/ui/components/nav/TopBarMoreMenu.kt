@@ -90,16 +90,30 @@ internal val LocalHazeMenuHost = compositionLocalOf<HazeMenuHostState?> { null }
 internal fun ProvideHazeMenuHost(content: @Composable () -> Unit) {
     val hostState = remember { HazeMenuHostState() }
     val active = hostState.activeMenu
+    var displayed by remember { mutableStateOf<HazeMenuOverlayData?>(null) }
     val visibleState = remember { MutableTransitionState(false) }
 
     LaunchedEffect(active) {
-        visibleState.targetState = active != null
+        if (active != null) {
+            displayed = active
+            visibleState.targetState = true
+        } else {
+            visibleState.targetState = false
+        }
     }
+
+    LaunchedEffect(visibleState.isIdle, visibleState.currentState) {
+        if (visibleState.isIdle && !visibleState.currentState) {
+            displayed = null
+        }
+    }
+
+    val menuData = active ?: displayed
 
     CompositionLocalProvider(LocalHazeMenuHost provides hostState) {
         Box(Modifier.fillMaxSize()) {
             content()
-            if (active != null && (visibleState.currentState || visibleState.targetState)) {
+            if (menuData != null && (visibleState.currentState || visibleState.targetState)) {
                 BackHandler { hostState.activeMenu = null }
                 Box(
                     modifier = Modifier
@@ -111,13 +125,13 @@ internal fun ProvideHazeMenuHost(content: @Composable () -> Unit) {
                 ) {
                     val density = LocalDensity.current
                     val containerSize = LocalWindowInfo.current.containerSize
-                    var menuSize by remember(active) { mutableStateOf(IntSize.Zero) }
+                    var menuSize by remember(menuData) { mutableStateOf(IntSize.Zero) }
                     val marginPx = with(density) { 12.dp.roundToPx() }
                     val gapPx = with(density) { 6.dp.roundToPx() }
 
-                    val x = (active.anchorBounds.right.roundToInt() - menuSize.width)
+                    val x = (menuData.anchorBounds.right.roundToInt() - menuSize.width)
                         .coerceIn(marginPx, (containerSize.width - menuSize.width - marginPx).coerceAtLeast(marginPx))
-                    val y = (active.anchorBounds.bottom.roundToInt() + gapPx)
+                    val y = (menuData.anchorBounds.bottom.roundToInt() + gapPx)
                         .coerceIn(marginPx, (containerSize.height - menuSize.height - marginPx).coerceAtLeast(marginPx))
 
                     AnimatedVisibility(
@@ -141,8 +155,8 @@ internal fun ProvideHazeMenuHost(content: @Composable () -> Unit) {
                                 .widthIn(min = 168.dp, max = 240.dp)
                                 .clip(shape)
                                 .chatInputHaze(
-                                    hazeState = active.hazeState,
-                                    displaySetting = active.displaySetting,
+                                    hazeState = menuData.hazeState,
+                                    displaySetting = menuData.displaySetting,
                                     containerColor = containerColor,
                                     shape = shape,
                                 ),
@@ -156,7 +170,7 @@ internal fun ProvideHazeMenuHost(content: @Composable () -> Unit) {
                             Column(
                                 modifier = Modifier.padding(vertical = 6.dp),
                             ) {
-                                active.groups.forEachIndexed { groupIndex, items ->
+                                menuData.groups.forEachIndexed { groupIndex, items ->
                                     if (groupIndex > 0) {
                                         HorizontalDivider(
                                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
