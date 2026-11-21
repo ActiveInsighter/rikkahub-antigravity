@@ -1,235 +1,121 @@
 name: Antigravity Debug APK
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
-    inputs:
-      publish_release:
-        description: Publish the signed APKs as a downloadable release
-        type: boolean
-        default: true
-      reader_smoke:
-        description: Exercise document reader, settings navigation, and Agent history on Android
-        type: boolean
-        default: false
-
-      updates_smoke:
-        description: Reconstruct a signed APK via an Android emulator
-        type: boolean
-        default: false
-
-concurrency:
-  group: antigravity-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
 
 jobs:
-  build:
+  bootstrap:
+    name: Prepare the initial signed R2 update catalog
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    env:
-      RIKKA_UPDATE_BASE_URL: ${{ vars.R2_UPDATE_PUBLIC_URL }}
-    permissions:
-      contents: write
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-      - name: Configure preinstalled Android SDK
-        run: |
-          SDK_MANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          "$SDK_MANAGER" --version
-          # yes exits with SIGPIPE after sdkmanager finishes reading its input.
-          set +o pipefail
-          yes | "$SDK_MANAGER" --licenses > /dev/null
-      - name: Install Android SDK components
-        run: sdkmanager 'platforms;android-37.2' 'cmake;3.22.1'
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: pnpm
-          cache-dependency-path: web-ui/pnpm-lock.yaml
-      - name: Install web UI dependencies
-        working-directory: web-ui
-        run: pnpm install --frozen-lockfile
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          cache-read-only: false
-          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-      - name: Prepare debug Firebase configuration
-        run: python3 tools/antigravity/prepare-debug.py
-      - name: Restore persistent debug signing key
+      - name: Verify the published source and target APKs
         env:
+          GH_TOKEN: ${{ github.token }}
           DEBUG_KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        shell: bash
         run: |
-          test -n "$DEBUG_KEYSTORE" || { echo 'Missing ANDROID_DEBUG_KEYSTORE_BASE64 repository secret'; exit 1; }
-          KEYSTORE_PATH="$RUNNER_TEMP/rikkahub-debug.keystore"
-          printf '%s' "$DEBUG_KEYSTORE" | base64 --decode > "$KEYSTORE_PATH"
-          chmod 600 "$KEYSTORE_PATH"
-          echo "RIKKA_DEBUG_KEYSTORE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
-      - name: Set Android build version
-        run: echo "RIKKA_ANTIGRAVITY_VERSION_CODE=$((100000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
-      - name: Run unit tests and build signed debug APKs
-        run: >-
-          ./gradlew :ai:testDebugUnitTest
-          --tests me.rerere.ai.provider.providers.google.InteractionsApiTest
-          --tests me.rerere.ai.util.RequestLogRedactionTest
-          :app:testGithubDebugUnitTest --tests 'me.rerere.rikkahub.data.agent.*'
-          --tests 'me.rerere.rikkahub.data.examdocs.*'
-          --tests 'me.rerere.rikkahub.data.update.*'
-          :app:assembleGithubDebug
-          --no-daemon --max-workers=2
-          '-Dorg.gradle.jvmargs=-Xmx5g -Dfile.encoding=UTF-8'
-      - name: Enable KVM for Android smoke tests
-        if: github.event_name == 'workflow_dispatch' && (inputs.reader_smoke || inputs.updates_smoke)
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      - name: Exercise the reader on Android
-        if: github.event_name == 'workflow_dispatch' && inputs.reader_smoke
-        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
-        with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          disable-animations: true
-          script: >-
-            ./gradlew :app:connectedGithubDebugAndroidTest
-            -Pandroid.testInstrumentationRunnerArguments.class=me.rerere.rikkahub.ui.pages.examdocs.ExamDocsReaderTest,me.rerere.rikkahub.ui.pages.examdocs.ExamDocsSettingsNavigationTest,me.rerere.rikkahub.data.agent.AgentContinuationTest
-            --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8'
-      - name: Verify APK signatures and prepare downloads
-        run: |
-          VERSION_NAME=$(python3 -c 'import json; print(json.load(open("app/build/outputs/apk/github/debug/output-metadata.json"))["elements"][0]["versionName"])')
-          [[ "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+([a-zA-Z0-9.+-]*)$ ]]
-          echo "RIKKA_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
-          APK_PREFIX="RikkaHub-${VERSION_NAME}-antigravity"
-          echo "APK_PREFIX=$APK_PREFIX" >> "$GITHUB_ENV"
-          mkdir -p artifacts
-          APK_SIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
-          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -n 1)
-          EXPECTED_CERT=$(keytool -exportcert -keystore "$RIKKA_DEBUG_KEYSTORE" -storepass android -alias androiddebugkey | sha256sum | cut -d ' ' -f 1)
-          for apk in app/build/outputs/apk/github/debug/*.apk; do
-            "$AAPT" dump badging "$apk" > "$RUNNER_TEMP/apk-badging.txt"
-            grep -F "name='me.rerere.rikkahub.debug'" "$RUNNER_TEMP/apk-badging.txt"
-            grep -F "versionCode='$RIKKA_ANTIGRAVITY_VERSION_CODE'" "$RUNNER_TEMP/apk-badging.txt"
-            grep -F "versionName='$VERSION_NAME'" "$RUNNER_TEMP/apk-badging.txt"
-            "$APK_SIGNER" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/apk-signature.txt"
-            cat "$RUNNER_TEMP/apk-signature.txt"
-            grep -Fi -- "$EXPECTED_CERT" "$RUNNER_TEMP/apk-signature.txt"
-            name=$(basename "$apk")
-            cp "$apk" "artifacts/$APK_PREFIX-${name#app-github-}"
-          done
-          cd artifacts
-          sha256sum *.apk > SHA256SUMS.txt
-          {
-            echo '### APK SHA-256'
-            echo '~~~text'
-            cat SHA256SUMS.txt
-            echo '~~~'
-          } >> "$GITHUB_STEP_SUMMARY"
-      # Match the filename in each name input so overwrite can replace earlier attempts.
-      - name: Upload arm64-v8a APK
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ env.APK_PREFIX }}-arm64-v8a-debug.apk
-          path: artifacts/${{ env.APK_PREFIX }}-arm64-v8a-debug.apk
-          archive: false
-          overwrite: true
-          if-no-files-found: error
-          retention-days: 90
-      - name: Upload x86_64 APK
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ env.APK_PREFIX }}-x86_64-debug.apk
-          path: artifacts/${{ env.APK_PREFIX }}-x86_64-debug.apk
-          archive: false
-          overwrite: true
-          if-no-files-found: error
-          retention-days: 90
-      - name: Upload universal APK
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ env.APK_PREFIX }}-universal-debug.apk
-          path: artifacts/${{ env.APK_PREFIX }}-universal-debug.apk
-          archive: false
-          overwrite: true
-          if-no-files-found: error
-          retention-days: 90
-      - name: Publish downloadable APK release
-        if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "antigravity-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}" artifacts/* \
-            --target "$GITHUB_SHA" --prerelease \
-            --title "RikkaHub ${RIKKA_VERSION_NAME} Antigravity · Build ${GITHUB_RUN_NUMBER}" \
-            --notes-file docs/ANTIGRAVITY-RELEASE.md
-      - name: Prepare an incremental update for Android smoke testing
-        if: github.event_name == 'workflow_dispatch' && inputs.updates_smoke
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          bash tools/antigravity/install-hdiffpatch.sh "$RUNNER_TEMP/hdiffpatch"
-          mkdir -p app/src/androidTest/assets/apk-update
-          gh release download antigravity-109-1 --repo "$GITHUB_REPOSITORY" \
-            --pattern '*-x86_64-debug.apk' --output app/src/androidTest/assets/apk-update/base.apk
-          PYTHONPATH=tools/antigravity python3 - <<'PY_TEST'
-          import os
-          from pathlib import Path
-          from publish_updates import digest, generate_patch
+          set -euo pipefail
+          test -n "$DEBUG_KEYSTORE"
+          keystore_path="$RUNNER_TEMP/rikkahub-debug.keystore"
+          umask 077
+          printf '%s' "$DEBUG_KEYSTORE" | base64 --decode > "$keystore_path"
+          echo "RIKKA_DEBUG_KEYSTORE=$keystore_path" >> "$GITHUB_ENV"
 
-          assets = Path("app/src/androidTest/assets/apk-update")
-          tools = Path(os.environ["RUNNER_TEMP"]) / "hdiffpatch"
-          target = Path("artifacts") / (os.environ["APK_PREFIX"] + "-x86_64-debug.apk")
-          generate_patch(tools, assets / "base.apk", target, assets / "update.hdiff",
-                         assets / "rebuilt.apk", min_savings=None)
-          (assets / "expected.txt").write_text(f"{target.stat().st_size}\n{digest(target)}\n")
-          size = (assets / "update.hdiff").stat().st_size
-          print(f"Signed APK round-trip: {size:,} patch bytes vs. {target.stat().st_size:,} full bytes")
-          PY_TEST
-      - name: Exercise the incremental update engine on Android
-        if: github.event_name == 'workflow_dispatch' && inputs.updates_smoke
-        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
-        with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          disable-animations: true
-          script: |
-            adb install app/src/androidTest/assets/apk-update/base.apk
-            adb install -r "artifacts/$APK_PREFIX-x86_64-debug.apk"
-            ./gradlew :app:connectedGithubDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=me.rerere.rikkahub.data.update.ApkPatchSmokeTest -Pandroid.testInstrumentationRunnerArguments.apkPatchFixture=required --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8'
-      - name: Publish APK update catalog to R2
-        if: github.ref == 'refs/heads/main'
-        env:
-          R2_UPDATE_PUBLIC_URL: ${{ vars.R2_UPDATE_PUBLIC_URL }}
-          R2_UPDATE_ACCOUNT_ID: ${{ vars.R2_UPDATE_ACCOUNT_ID }}
-          R2_UPDATE_BUCKET: ${{ vars.R2_UPDATE_BUCKET }}
-          R2_UPDATE_ACCESS_KEY_ID: ${{ secrets.R2_UPDATE_ACCESS_KEY_ID }}
-          R2_UPDATE_SECRET_ACCESS_KEY: ${{ secrets.R2_UPDATE_SECRET_ACCESS_KEY }}
+          target_tag=antigravity-118-1
+          for attempt in {1..40}; do
+            if gh release view "$target_tag" --json targetCommitish --jq '.targetCommitish' > "$RUNNER_TEMP/target-commit"; then
+              break
+            fi
+            sleep 15
+          done
+          test "$(cat "$RUNNER_TEMP/target-commit")" = df1b6c09861b8828d15caffc411acd939ca28724
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+          aapt_tool=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -n 1)
+          cert=$(keytool -exportcert -keystore "$keystore_path" -storepass android -alias androiddebugkey | sha256sum | cut -d ' ' -f 1)
+          for build in 116 118; do
+            gh release download "antigravity-$build-1" --pattern '*-debug.apk' --pattern SHA256SUMS.txt --dir "$RUNNER_TEMP/releases/$build"
+            (
+              cd "$RUNNER_TEMP/releases/$build"
+              sha256sum -c SHA256SUMS.txt
+              for apk in *.apk; do
+                "$signer" verify --print-certs "$apk" > "$RUNNER_TEMP/signature"
+                grep -Fi "$cert" "$RUNNER_TEMP/signature"
+                "$aapt_tool" dump badging "$apk" > "$RUNNER_TEMP/badging"
+                grep -F "name='me.rerere.rikkahub.debug'" "$RUNNER_TEMP/badging"
+                grep -F "versionCode='$((100000 + build))'" "$RUNNER_TEMP/badging"
+                grep -F "versionName='3.3.0'" "$RUNNER_TEMP/badging"
+              done
+            )
+          done
+
+      - name: Generate, verify, and sign the R2 bundle
+        shell: bash
         run: |
-          if [[ -z "$R2_UPDATE_PUBLIC_URL" || -z "$R2_UPDATE_ACCOUNT_ID" || -z "$R2_UPDATE_BUCKET" ||
-                -z "$R2_UPDATE_ACCESS_KEY_ID" || -z "$R2_UPDATE_SECRET_ACCESS_KEY" ]]; then
-            echo 'R2 APK update publishing is disabled until the R2 variables and secrets are configured.' >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
           bash tools/antigravity/install-hdiffpatch.sh "$RUNNER_TEMP/hdiffpatch"
-          python3 -m venv "$RUNNER_TEMP/update-publisher"
-          "$RUNNER_TEMP/update-publisher/bin/pip" install 'boto3==1.42.66'
-          "$RUNNER_TEMP/update-publisher/bin/python" tools/antigravity/publish_updates.py \
-            --apk-dir artifacts --hdiff-tools "$RUNNER_TEMP/hdiffpatch" --work-dir "$RUNNER_TEMP" \
-            --version-code "$RIKKA_ANTIGRAVITY_VERSION_CODE" --version-name "$RIKKA_VERSION_NAME" \
-            --build-number "$GITHUB_RUN_NUMBER" --commit "$GITHUB_SHA"
-      - name: Remove signing key from runner
-        if: always()
-        run: rm -f "$RUNNER_TEMP/rikkahub-debug.keystore"
+          PYTHONPATH=tools/antigravity python3 - <<'PY'
+          import os
+          import shutil
+          from pathlib import Path
+          from types import SimpleNamespace
+
+          from publish_updates import PACKAGE_NAME, json_bytes, publish, read_signed_catalog, sign
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+
+          class BundleStore:
+              def __init__(self, root):
+                  self.root = root
+
+              def read_catalog(self):
+                  catalog = self.root / "catalog.json"
+                  return (read_signed_catalog(catalog.read_bytes()), None) if catalog.exists() else ([], None)
+
+              def get_file(self, key, destination):
+                  shutil.copyfile(self.root / key, destination)
+
+              def put_file(self, key, path, content_type):
+                  destination = self.root / key
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copyfile(path, destination)
+
+              def write_catalog(self, builds, etag):
+                  payload = json_bytes({"schemaVersion": 1, "packageName": PACKAGE_NAME, "builds": builds})
+                  (self.root / "catalog.json").write_bytes(sign(payload))
+
+              def prune(self, builds):
+                  pass
+
+          store = BundleStore(temp / "r2-bundle")
+          for build, commit in (
+              (116, "7eeb4bcceff71de1c4fa48b41792010b69a2300e"),
+              (118, "df1b6c09861b8828d15caffc411acd939ca28724"),
+          ):
+              publish(store, SimpleNamespace(
+                  apk_dir=temp / "releases" / str(build),
+                  hdiff_tools=temp / "hdiffpatch",
+                  work_dir=temp,
+                  build_number=build,
+                  version_code=100000 + build,
+                  version_name="3.3.0",
+                  commit=commit,
+              ))
+          builds, _ = store.read_catalog()
+          assert [build["buildNumber"] for build in builds] == [118, 116]
+          PY
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: signed-r2-bootstrap-118
+          path: ${{ runner.temp }}/r2-bundle
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
