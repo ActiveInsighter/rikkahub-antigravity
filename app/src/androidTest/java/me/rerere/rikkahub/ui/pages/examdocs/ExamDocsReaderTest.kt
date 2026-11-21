@@ -67,9 +67,8 @@ class ExamDocsReaderTest {
             modifier = Modifier.height(IntrinsicSize.Min),
         )
         compose.onNodeWithText("A").performClick()
-        compose.onNodeWithText("核对答案").performClick()
         compose.onNodeWithText("回答正确").assertIsDisplayed()
-        compose.onNodeWithText("查看解析").performClick()
+        compose.onNodeWithContentDescription("查看解答").performClick()
         compose.onNodeWithText("本题解析").assertIsDisplayed()
         compose.onNodeWithText("检查连续性").assertIsDisplayed()
         compose.onNodeWithText("对照参考条件").assertIsDisplayed()
@@ -89,6 +88,7 @@ class ExamDocsReaderTest {
         )
         compose.onNodeWithContentDescription("查看 measure 的详细释义和例句").performClick()
         compose.onNodeWithText("Measure the distance.").assertIsDisplayed()
+        compose.onNodeWithText("Measure the distance.").performClick()
         compose.onNodeWithText("测量距离。").assertIsDisplayed()
         compose.onNodeWithContentDescription("下一个单词").performClick()
         compose.onNodeWithText("Measure the distance.").assertDoesNotExist()
