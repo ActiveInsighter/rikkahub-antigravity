@@ -24,6 +24,8 @@ import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ModelType
+import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.ModelSnapshot
 import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.UIMessage
@@ -41,7 +43,13 @@ import me.rerere.rikkahub.data.agent.AgentUiSettings
 import me.rerere.rikkahub.data.agent.DEFAULT_AGENT_MODELS
 import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
 import me.rerere.rikkahub.data.agent.RemoteAgentSourceInput
+import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_PROVIDER_ID
+import me.rerere.rikkahub.data.datastore.CODEX_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
+import me.rerere.rikkahub.data.datastore.SettingsStore
+import me.rerere.rikkahub.data.datastore.TOP_AGENT_PROVIDER_IDS
+import me.rerere.rikkahub.data.datastore.findModelById
+import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
@@ -58,6 +66,7 @@ class AgentVM(
     id: String,
     private val repository: AgentRepository,
     private val settingsStore: AgentSettingsStore,
+    private val globalSettingsStore: SettingsStore,
     private val workflowRepository: WorkflowRepository,
     private val gatewayClient: AgentGatewayClient,
 ) : ViewModel() {
@@ -172,72 +181,51 @@ class AgentVM(
     val uiSettings: StateFlow<AgentUiSettings> = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current)
 
-    val localModels: StateFlow<List<AgentModelEntity>> = repository.observeModels()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    private val allowedModelTypes = setOf(ModelType.CHAT, ModelType.AGENT, ModelType.DECISION)
 
-    val selectedModelEntity: StateFlow<AgentModelEntity?> = combine(
-        localModels,
-        settingsStore.settingsFlow,
-    ) { models, settings ->
-        models.firstOrNull { it.id == settings.selectedAgentModelId }
-            ?: models.firstOrNull { it.modelId.equals(settings.selectedAgentModel, ignoreCase = true) }
-            ?: models.firstOrNull()
+    val resolvedChatModel: StateFlow<Model?> = combine(
+        _agentAssistant,
+        globalSettingsStore.settingsFlow,
+        _selectedModel,
+    ) { assistant, settings, manual ->
+        val byAssistant = assistant.chatModelId?.let { id ->
+            settings.providers.findModelById(id)?.takeIf { it.type in allowedModelTypes }
+        }
+        val byManual = manual?.let { m ->
+            settings.providers.findModelById(m.id)?.takeIf { it.type in allowedModelTypes }
+        }
+        val fallback = settings.providers
+            .asSequence()
+            .filter { it.enabled }
+            .sortedBy { provider ->
+                val topIdx = TOP_AGENT_PROVIDER_IDS.indexOf(provider.id)
+                if (topIdx >= 0) topIdx else Int.MAX_VALUE
+            }
+            .flatMap { it.models.asSequence() }
+            .firstOrNull { it.type in allowedModelTypes }
+        byAssistant ?: byManual ?: fallback
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    val selectedAgentModelName: StateFlow<String> = combine(
-        selectedModelEntity,
-        settingsStore.settingsFlow,
-    ) { entity, settings ->
-        entity?.displayName?.ifBlank { entity.modelId }
-            ?: settings.selectedAgentModel.ifBlank { "Antigravity" }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current.selectedAgentModel.ifBlank { "Antigravity" })
+    val selectedModelProvider: StateFlow<ProviderSetting?> = combine(
+        resolvedChatModel,
+        globalSettingsStore.settingsFlow,
+    ) { model, settings ->
+        model?.findProvider(providers = settings.providers, checkOverwrite = false)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    val selectedModelCategory: StateFlow<AgentModelCategory> = combine(
-        selectedModelEntity,
-        selectedAgentModelName,
-    ) { entity, name ->
-        entity?.modelCategory ?: AgentModelCategory.inferFromModelId(name)
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, AgentModelCategory.AGENT)
-
-    val resolvedChatModel: StateFlow<Model> = combine(
-        selectedModelEntity,
-        selectedAgentModelName,
-        _selectedModel,
-    ) { entity, name, manual ->
-        val modelId = entity?.modelId ?: manual?.modelId ?: name
-        val displayName = entity?.displayName?.ifBlank { modelId } ?: manual?.displayName ?: name
-        Model(
-            modelId = modelId,
-            displayName = displayName,
-            abilities = if (
-                AgentModelCategory.inferFromModelId(modelId) == AgentModelCategory.AGENT &&
-                !isCodexAgentModel(modelId)
-            ) {
-                emptyList()
-            } else {
-                listOf(ModelAbility.REASONING)
-            },
-        )
-    }.stateIn(
-        viewModelScope,
-        SharingStarted.Eagerly,
-        Model(modelId = "Antigravity", displayName = "Antigravity"),
-    )
-
-    val antigravitySubModel: StateFlow<String> = settingsStore.settingsFlow
-        .map { it.antigravitySubModel }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current.antigravitySubModel)
-
-    val codexSubModel: StateFlow<String> = settingsStore.settingsFlow
-        .map { it.codexSubModel }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current.codexSubModel)
+    val selectedModelCategory: StateFlow<AgentModelCategory> = resolvedChatModel
+        .map { model ->
+            when (model?.type) {
+                ModelType.AGENT -> AgentModelCategory.AGENT
+                ModelType.DECISION -> AgentModelCategory.DECISION
+                ModelType.CHAT -> AgentModelCategory.CHAT
+                else -> AgentModelCategory.AGENT
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AgentModelCategory.AGENT)
 
     private val _decisionSchemaJson = MutableStateFlow("")
     val decisionSchemaJson: StateFlow<String> = _decisionSchemaJson.asStateFlow()
-
-    val customGeminiModels: StateFlow<List<String>> = settingsStore.settingsFlow
-        .map { it.customGeminiModels }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current.customGeminiModels)
 
     val availableAgentModels: StateFlow<List<String>> = settingsStore.settingsFlow
         .map { (DEFAULT_AGENT_MODELS + it.customGeminiModels).distinct() }
@@ -294,64 +282,6 @@ class AgentVM(
         }
     }
 
-    fun selectLocalModel(model: AgentModelEntity) {
-        settingsStore.update {
-            it.copy(
-                selectedAgentModelId = model.id,
-                selectedAgentModel = model.modelId,
-            )
-        }
-    }
-
-    fun saveLocalModel(
-        id: String? = null,
-        modelId: String,
-        displayName: String,
-        category: AgentModelCategory,
-        baseUrl: String,
-        apiKey: String,
-        selectAfterSave: Boolean = true,
-    ) {
-        val cleanModelId = modelId.trim()
-        if (cleanModelId.isEmpty()) return
-        viewModelScope.launch {
-            val now = System.currentTimeMillis()
-            val existing = id?.let { targetId -> localModels.value.firstOrNull { it.id == targetId } }
-            val entity = AgentModelEntity(
-                id = existing?.id ?: "local-${Uuid.random()}",
-                modelId = cleanModelId,
-                displayName = displayName.trim().ifBlank { cleanModelId },
-                category = category.name,
-                providerType = "GEMINI",
-                baseUrl = baseUrl.trim().ifBlank { DEFAULT_GEMINI_GATEWAY_URL },
-                apiKey = apiKey.trim(),
-                isBuiltin = existing?.isBuiltin ?: false,
-                sortOrder = existing?.sortOrder ?: (localModels.value.size + 10),
-                createdAt = existing?.createdAt ?: now,
-                updatedAt = now,
-            )
-            val saved = repository.saveLocalModel(entity)
-            if (selectAfterSave) {
-                selectLocalModel(saved)
-            }
-        }
-    }
-
-    fun deleteLocalModel(id: String) {
-        viewModelScope.launch {
-            repository.deleteLocalModel(id)
-            if (settingsStore.current.selectedAgentModelId == id) {
-                val fallback = localModels.value.firstOrNull { it.id != id }
-                settingsStore.update {
-                    it.copy(
-                        selectedAgentModelId = fallback?.id.orEmpty(),
-                        selectedAgentModel = fallback?.modelId ?: "Antigravity",
-                    )
-                }
-            }
-        }
-    }
-
     fun updateDecisionSchemaJson(schema: String) {
         _decisionSchemaJson.value = schema
     }
@@ -365,58 +295,11 @@ class AgentVM(
         }
     }
 
-    fun selectAgentModel(modelName: String) {
-        val normalized = modelName.trim()
-        if (normalized.isEmpty()) return
-        val matched = localModels.value.firstOrNull {
-            it.modelId.equals(normalized, ignoreCase = true) ||
-                it.displayName.equals(normalized, ignoreCase = true)
-        }
-        if (matched != null) {
-            selectLocalModel(matched)
-        } else {
-            settingsStore.update { it.copy(selectedAgentModel = normalized) }
-        }
-    }
-
-    fun addCustomGeminiModel(modelName: String) {
-        val normalized = modelName.trim()
-        if (normalized.isEmpty()) return
-        saveLocalModel(
-            modelId = normalized,
-            displayName = normalized,
-            category = AgentModelCategory.inferFromModelId(normalized),
-            baseUrl = settingsStore.current.gatewayBaseUrl,
-            apiKey = settingsStore.current.gatewayApiKey,
-            selectAfterSave = true,
-        )
-    }
-
-    fun removeCustomGeminiModel(modelName: String) {
-        val matched = localModels.value.firstOrNull {
-            !it.isBuiltin && it.modelId.equals(modelName, ignoreCase = true)
-        }
-        if (matched != null) {
-            deleteLocalModel(matched.id)
-        }
-    }
-
     fun updateAgentModel(model: Model) {
         _selectedModel.value = model
         val updated = _agentAssistant.value.copy(chatModelId = model.id)
         _agentAssistant.value = updated
         persistAssistant(updated)
-    }
-
-    fun updateAgentSubModel(isCodex: Boolean, subModel: String) {
-        val clean = subModel.trim()
-        settingsStore.update { current ->
-            if (isCodex) {
-                current.copy(codexSubModel = clean)
-            } else {
-                current.copy(antigravitySubModel = clean)
-            }
-        }
     }
 
     fun updateAgentAssistant(assistant: Assistant) {
@@ -507,17 +390,30 @@ class AgentVM(
     }
 
     private fun currentOrFallbackModelEntity(): AgentModelEntity {
-        val selected = selectedModelEntity.value
-        if (selected != null) return selected
+        val model = resolvedChatModel.value
+        val settings = globalSettingsStore.settingsFlow.value
+        val effectiveProvider = model?.findProvider(providers = settings.providers, checkOverwrite = true)
+        val apiKeyProvider = effectiveProvider as? ProviderSetting.ApiKey
+        val baseUrl = apiKeyProvider?.baseUrl?.ifBlank { null }
+            ?: settingsStore.current.gatewayBaseUrl.ifBlank { DEFAULT_GEMINI_GATEWAY_URL }
+        val apiKey = apiKeyProvider?.apiKey?.ifBlank { null }
+            ?: settingsStore.current.gatewayApiKey
         val now = System.currentTimeMillis()
-        val name = selectedAgentModelName.value.ifBlank { "Antigravity" }
+        val modelId = model?.modelId?.ifBlank { null } ?: "Antigravity"
+        val displayName = model?.displayName?.ifBlank { modelId } ?: modelId
+        val category = when (model?.type) {
+            ModelType.AGENT -> AgentModelCategory.AGENT
+            ModelType.DECISION -> AgentModelCategory.DECISION
+            ModelType.CHAT -> AgentModelCategory.CHAT
+            else -> AgentModelCategory.inferFromModelId(modelId)
+        }
         return AgentModelEntity(
-            id = "fallback-$name",
-            modelId = name,
-            displayName = name,
-            category = AgentModelCategory.inferFromModelId(name).name,
-            baseUrl = settingsStore.current.gatewayBaseUrl.ifBlank { DEFAULT_GEMINI_GATEWAY_URL },
-            apiKey = settingsStore.current.gatewayApiKey,
+            id = model?.id?.toString() ?: "fallback-$modelId",
+            modelId = modelId,
+            displayName = displayName,
+            category = category.name,
+            baseUrl = baseUrl,
+            apiKey = apiKey,
             createdAt = now,
             updatedAt = now,
         )
@@ -816,18 +712,31 @@ class AgentVM(
         title: String,
         targetNodeId: Uuid?,
     ) {
-        val modelName = selectedModelEntity.value?.modelId?.ifBlank { null }
-            ?: selectedAgentModelName.value.ifBlank { "Antigravity" }
+        val selectedModel = resolvedChatModel.value
+        val rawProvider = selectedModelProvider.value
+        val rawModelId = selectedModel?.modelId?.ifBlank { null } ?: "Antigravity"
+        val isCodex = rawProvider?.id == CODEX_PROVIDER_ID ||
+            rawProvider?.name.equals("Codex", ignoreCase = true) ||
+            isCodexAgentModel(rawModelId)
+        val isAntigravity = rawProvider?.id == ANTIGRAVITY_PROVIDER_ID ||
+            rawProvider?.name.equals("Antigravity", ignoreCase = true) ||
+            isAntigravityAgentModel(rawModelId)
+        val modelName = when {
+            isCodex -> "Codex"
+            isAntigravity -> "Antigravity"
+            else -> rawModelId
+        }
         val agentModel = when {
-            isCodexAgentModel(modelName) -> settingsStore.current.codexSubModel.trim()
-            isAntigravityAgentModel(modelName) -> settingsStore.current.antigravitySubModel.trim()
+            isCodex && !rawModelId.equals("Codex", ignoreCase = true) -> rawModelId.trim()
+            isAntigravity && !rawModelId.equals("Antigravity", ignoreCase = true) -> rawModelId.trim()
             else -> null
         }
+        val displayLabel = selectedModel?.displayName?.ifBlank { rawModelId } ?: modelName
         val reasoningLevel = _agentAssistant.value.reasoningLevel
         val thinkingLevel = when {
-            isCodexAgentModel(modelName) && reasoningLevel in listOf(ReasoningLevel.XHIGH, ReasoningLevel.MAX) -> "xhigh"
-            isCodexAgentModel(modelName) && reasoningLevel == ReasoningLevel.OFF -> "off"
-            modelName.isManagedAgentModel() -> ""
+            isCodex && reasoningLevel in listOf(ReasoningLevel.XHIGH, ReasoningLevel.MAX) -> "xhigh"
+            isCodex && reasoningLevel == ReasoningLevel.OFF -> "off"
+            isAntigravity -> ""
             else -> reasoningLevel.toGeminiThinkingLevel()
         }
         val systemPrompt = _agentAssistant.value.systemPrompt.takeIf { it.isNotBlank() }
@@ -838,8 +747,8 @@ class AgentVM(
             role = MessageRole.ASSISTANT,
             parts = listOf(UIMessagePart.Text("")),
             modelSnapshot = ModelSnapshot(
-                displayName = modelName,
-                modelId = modelName,
+                displayName = displayLabel,
+                modelId = rawModelId,
             ),
         )
 

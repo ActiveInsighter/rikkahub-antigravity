@@ -8,15 +8,201 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import me.rerere.ai.provider.Modality
+import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.QuotaQuery
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import kotlin.uuid.Uuid
 
 val DEFAULT_AUTO_MODEL_ID = Uuid.parse("b7055fb4-39f9-4042-a88a-0d80ed76cf08")
 
+val CHAT_GATEWAY_PROVIDER_ID = Uuid.parse("a1000001-0000-4000-8000-000000000001")
+val CODEX_PROVIDER_ID = Uuid.parse("a1000002-0000-4000-8000-000000000002")
+val ANTIGRAVITY_PROVIDER_ID = Uuid.parse("a1000003-0000-4000-8000-000000000003")
+val DECISION_PROVIDER_ID = Uuid.parse("a1000004-0000-4000-8000-000000000004")
+
+val TOP_AGENT_PROVIDER_IDS = listOf(
+    CHAT_GATEWAY_PROVIDER_ID,
+    CODEX_PROVIDER_ID,
+    ANTIGRAVITY_PROVIDER_ID,
+    DECISION_PROVIDER_ID,
+)
+
 val DEFAULT_PROVIDERS = listOf(
+    ProviderSetting.Google(
+        id = CHAT_GATEWAY_PROVIDER_ID,
+        name = "Chat",
+        baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
+        apiKey = "",
+        enabled = true,
+        builtIn = true,
+        models = listOf(
+            Model(
+                id = Uuid.parse("b1000001-0000-4000-8000-000000000001"),
+                modelId = "gemini-2.5-flash",
+                displayName = "Gemini 2.5 Flash",
+                type = ModelType.CHAT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.REASONING, ModelAbility.TOOL),
+            ),
+            Model(
+                id = Uuid.parse("b1000001-0000-4000-8000-000000000002"),
+                modelId = "gemini-2.5-pro",
+                displayName = "Gemini 2.5 Pro",
+                type = ModelType.CHAT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.REASONING, ModelAbility.TOOL),
+            ),
+            Model(
+                id = Uuid.parse("b1000001-0000-4000-8000-000000000003"),
+                modelId = "gemini-3-flash-preview",
+                displayName = "Gemini 3 Flash Preview",
+                type = ModelType.CHAT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.REASONING, ModelAbility.TOOL),
+            ),
+            Model(
+                id = Uuid.parse("b1000001-0000-4000-8000-000000000004"),
+                modelId = "gemini-3-pro-preview",
+                displayName = "Gemini 3 Pro Preview",
+                type = ModelType.CHAT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.REASONING, ModelAbility.TOOL),
+            ),
+        ),
+        shortDescription = {
+            Text("any1.tech 普通对话模型")
+        },
+    ),
+    ProviderSetting.Google(
+        id = CODEX_PROVIDER_ID,
+        name = "Codex",
+        baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
+        apiKey = "",
+        enabled = true,
+        builtIn = true,
+        models = listOf(
+            Model(
+                id = Uuid.parse("b1000002-0000-4000-8000-000000000001"),
+                modelId = "gpt-6.1-terra",
+                displayName = "gpt-6.1-terra",
+                type = ModelType.AGENT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.REASONING),
+            ),
+            Model(
+                id = Uuid.parse("b1000002-0000-4000-8000-000000000002"),
+                modelId = "gpt-6.1-sol",
+                displayName = "gpt-6.1-sol",
+                type = ModelType.AGENT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.REASONING),
+            ),
+            Model(
+                id = Uuid.parse("b1000002-0000-4000-8000-000000000003"),
+                modelId = "gpt-6-astra",
+                displayName = "gpt-6-astra",
+                type = ModelType.AGENT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.REASONING),
+            ),
+            Model(
+                id = Uuid.parse("b1000002-0000-4000-8000-000000000004"),
+                modelId = "gpt-6-sol",
+                displayName = "gpt-6-sol",
+                type = ModelType.AGENT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.REASONING),
+            ),
+            Model(
+                id = Uuid.parse("b1000002-0000-4000-8000-000000000005"),
+                modelId = "gpt-6-luna",
+                displayName = "gpt-6-luna",
+                type = ModelType.AGENT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.REASONING),
+            ),
+            Model(
+                id = Uuid.parse("b1000002-0000-4000-8000-000000000006"),
+                modelId = "Codex",
+                displayName = "Codex (服务端默认)",
+                type = ModelType.AGENT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.REASONING),
+            ),
+        ),
+        shortDescription = {
+            Text("Codex 智能体 (any1.tech)")
+        },
+    ),
+    ProviderSetting.Google(
+        id = ANTIGRAVITY_PROVIDER_ID,
+        name = "Antigravity",
+        baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
+        apiKey = "",
+        enabled = true,
+        builtIn = true,
+        models = listOf(
+            Model(
+                id = Uuid.parse("b1000003-0000-4000-8000-000000000001"),
+                modelId = "gemini-4-hydrogen",
+                displayName = "gemini-4-hydrogen",
+                type = ModelType.AGENT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = emptyList(),
+            ),
+            Model(
+                id = Uuid.parse("b1000003-0000-4000-8000-000000000002"),
+                modelId = "Antigravity",
+                displayName = "Antigravity (服务端默认)",
+                type = ModelType.AGENT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = emptyList(),
+            ),
+        ),
+        shortDescription = {
+            Text("Antigravity 智能体 (any1.tech)")
+        },
+    ),
+    ProviderSetting.Google(
+        id = DECISION_PROVIDER_ID,
+        name = "Decision",
+        baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
+        apiKey = "",
+        enabled = true,
+        builtIn = true,
+        models = listOf(
+            Model(
+                id = Uuid.parse("b1000004-0000-4000-8000-000000000001"),
+                modelId = "gemini-decision",
+                displayName = "谷歌决策模型1",
+                type = ModelType.DECISION,
+                inputModalities = listOf(Modality.TEXT),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.REASONING),
+            ),
+        ),
+        shortDescription = {
+            Text("Decision 决策模型 (any1.tech)")
+        },
+    ),
     ProviderSetting.OpenAI(
         id = Uuid.parse("1eeea727-9ee5-4cae-93e6-6fb01a4d051e"),
         name = "OpenAI",

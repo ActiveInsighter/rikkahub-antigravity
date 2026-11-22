@@ -110,6 +110,9 @@ import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.account.preserveCredential
+import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_PROVIDER_ID
+import me.rerere.rikkahub.data.datastore.CODEX_PROVIDER_ID
+import me.rerere.rikkahub.data.datastore.DECISION_PROVIDER_ID
 import me.rerere.rikkahub.ui.components.ai.ExtensionEmptyState
 import me.rerere.rikkahub.ui.components.ai.ModelAbilityTag
 import me.rerere.rikkahub.ui.components.ai.ModelModalityTag

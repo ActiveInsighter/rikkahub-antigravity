@@ -153,6 +153,7 @@ fun ChatInput(
     alwaysShowReasoningButton: Boolean = false,
     showReasoningButton: Boolean = true,
     showAsrButton: Boolean = true,
+    modelTypes: Set<ModelType> = setOf(ModelType.CHAT),
     overrideModelId: String? = null,
     onModelSelectorClick: (() -> Unit)? = null,
 ) {
@@ -172,7 +173,7 @@ fun ChatInput(
     val modelListState = rememberModelListState(
         modelId = chatModel?.id,
         providers = settings.providers,
-        type = ModelType.CHAT,
+        types = modelTypes,
     )
 
     fun sendMessage() {

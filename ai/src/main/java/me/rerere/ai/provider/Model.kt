@@ -41,6 +41,8 @@ enum class ModelType {
     CHAT,
     IMAGE,
     EMBEDDING,
+    AGENT,
+    DECISION,
 }
 
 @Serializable

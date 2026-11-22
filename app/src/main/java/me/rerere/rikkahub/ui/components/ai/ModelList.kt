@@ -102,7 +102,7 @@ import kotlin.uuid.Uuid
 class ModelListState internal constructor(
     modelId: Uuid?,
     providers: List<ProviderSetting>,
-    type: ModelType,
+    types: Set<ModelType>,
 ) {
     var modelId by mutableStateOf(modelId)
         private set
@@ -110,7 +110,7 @@ class ModelListState internal constructor(
     var providers by mutableStateOf(providers)
         private set
 
-    var type by mutableStateOf(type)
+    var types by mutableStateOf(types)
         private set
 
     var visible by mutableStateOf(false)
@@ -121,7 +121,7 @@ class ModelListState internal constructor(
 
     val filteredProviders: List<ProviderSetting>
         get() = providers.fastFilter { provider ->
-            provider.enabled && provider.models.fastAny { model -> model.type == type }
+            provider.enabled && provider.models.fastAny { model -> model.type in types }
         }
 
     fun open() {
@@ -135,11 +135,11 @@ class ModelListState internal constructor(
     internal fun update(
         modelId: Uuid?,
         providers: List<ProviderSetting>,
-        type: ModelType,
+        types: Set<ModelType>,
     ) {
         this.modelId = modelId
         this.providers = providers
-        this.type = type
+        this.types = types
     }
 }
 
@@ -148,18 +148,29 @@ fun rememberModelListState(
     modelId: Uuid?,
     providers: List<ProviderSetting>,
     type: ModelType,
+): ModelListState = rememberModelListState(
+    modelId = modelId,
+    providers = providers,
+    types = setOf(type),
+)
+
+@Composable
+fun rememberModelListState(
+    modelId: Uuid?,
+    providers: List<ProviderSetting>,
+    types: Set<ModelType>,
 ): ModelListState {
     return remember {
         ModelListState(
             modelId = modelId,
             providers = providers,
-            type = type,
+            types = types,
         )
     }.also {
         it.update(
             modelId = modelId,
             providers = providers,
-            type = type,
+            types = types,
         )
     }
 }

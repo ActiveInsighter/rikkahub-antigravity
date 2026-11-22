@@ -125,6 +125,7 @@ val viewModelModule = module {
             id = params.get(),
             repository = get(),
             settingsStore = get(),
+            globalSettingsStore = get(),
             workflowRepository = get(),
             gatewayClient = get(),
         )

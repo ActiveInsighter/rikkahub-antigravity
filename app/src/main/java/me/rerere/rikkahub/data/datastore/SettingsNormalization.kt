@@ -7,6 +7,12 @@ internal fun Settings.normalized(): Settings =
 // 补齐缺失的内置提供商/助手/TTS，内置提供商和推荐提供商的描述信息始终以代码里的为准
 internal fun Settings.withBuiltInDefaults(): Settings {
     var providers = this.providers.ifEmpty { DEFAULT_PROVIDERS }.toMutableList()
+    val missingTopProviders = DEFAULT_PROVIDERS.filter { dp ->
+        dp.id in TOP_AGENT_PROVIDER_IDS && providers.none { it.id == dp.id }
+    }.map { it.copyProvider() }
+    if (missingTopProviders.isNotEmpty()) {
+        providers.addAll(0, missingTopProviders)
+    }
     DEFAULT_PROVIDERS.forEach { defaultProvider ->
         if (providers.none { it.id == defaultProvider.id }) {
             providers.add(defaultProvider.copyProvider())

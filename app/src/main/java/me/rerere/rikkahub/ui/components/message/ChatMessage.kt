@@ -456,7 +456,12 @@ private fun MessagePartsBlock(
                                     )
                                 }
                             } else {
-                                if (settings.displaySetting.showAssistantBubble) {
+                                val parsedDecision = remember(part.text) {
+                                    parseDecisionResultMarkdown(part.text)
+                                }
+                                if (parsedDecision != null) {
+                                    DecisionResultCard(parsed = parsedDecision)
+                                } else if (settings.displaySetting.showAssistantBubble) {
                                     val content = part.text.replaceRegexes(
                                         assistant = assistant,
                                         scope = AssistantAffectScope.ASSISTANT,
