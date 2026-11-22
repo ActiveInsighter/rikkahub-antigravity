@@ -895,7 +895,7 @@ private fun BooleanTile(
         ChoiceFeedback.Answer -> tone!!.container.copy(alpha = 0.65f)
         ChoiceFeedback.Selected -> scheme.primaryContainer
         ChoiceFeedback.Dimmed -> scheme.surfaceContainer.copy(alpha = 0.55f)
-        ChoiceFeedback.Idle -> scheme.surfaceContainer
+        ChoiceFeedback.Missed, ChoiceFeedback.Idle -> scheme.surfaceContainer
     }
     val targetBorder = when {
         tone != null -> tone.border
