@@ -18,8 +18,8 @@ import me.rerere.rikkahub.data.examdocs.DocsAttempt
 import me.rerere.rikkahub.data.examdocs.DocsProgressRepository
 import me.rerere.rikkahub.data.examdocs.DocsRecord
 import me.rerere.rikkahub.data.examdocs.ExamDocNode
+import me.rerere.rikkahub.data.examdocs.ExamDocsDirectory
 import me.rerere.rikkahub.data.examdocs.ExamDocsRepository
-import me.rerere.rikkahub.data.examdocs.ExamDocsTree
 import me.rerere.rikkahub.data.examdocs.docsJson
 import me.rerere.rikkahub.data.examdocs.supportsCloudProgress
 import java.time.Instant
@@ -60,7 +60,7 @@ internal class ExamDocsStatsVM(
     accountRepository: DocsAccountRepository,
 ) : ViewModel() {
 
-    private val treeFlow = MutableStateFlow<Pair<String, ExamDocsTree?>>( "" to null)
+    private val treeFlow = MutableStateFlow<Pair<String, ExamDocsDirectory?>>("" to null)
 
     private val siteAndAccount = combine(
         examDocsRepository.siteSettingsFlow.map { it.active },
@@ -75,7 +75,7 @@ internal class ExamDocsStatsVM(
             examDocsRepository.siteSettingsFlow
                 .map { it.active }
                 .collect { site ->
-                    val tree = runCatching { examDocsRepository.loadTree(site) }.getOrNull()
+                    val tree = runCatching { examDocsRepository.fetchSourceTree(site, refresh = false) }.getOrNull()
                     treeFlow.value = site.baseUrl to tree
                 }
         }
@@ -101,7 +101,7 @@ internal class ExamDocsStatsVM(
     private fun buildStats(
         siteName: String,
         records: List<DocsRecord>,
-        tree: ExamDocsTree?,
+        tree: ExamDocsDirectory?,
     ): ExamDocsStatsUiState {
         val zone = ZoneId.systemDefault()
         val answers = mutableListOf<Pair<DocsRecord, DocsAnswer>>()

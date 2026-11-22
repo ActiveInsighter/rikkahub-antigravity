@@ -148,60 +148,44 @@ internal fun ExamDocsStatsPage(vm: ExamDocsStatsVM = koinViewModel()) {
                         )
                     }
                     item {
-                        CardGroup(
-                            items = state.recentPages,
-                            key = { _, item -> item.path },
-                        ) { item, shape ->
-                            Surface(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(shape)
-                                    .clickable {
+                        CardGroup {
+                            state.recentPages.forEach { item ->
+                                val subtitle = listOfNotNull(
+                                    item.moduleName,
+                                    formatRelativeDay(item.lastTimestamp),
+                                ).joinToString(" · ")
+                                item(
+                                    onClick = {
                                         navController.navigate(Screen.ExamDocs(initialUrl = item.path))
                                     },
-                                shape = shape,
-                                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                                    ) {
-                                        Text(
-                                            text = item.title,
-                                            style = MaterialTheme.typography.titleSmallEmphasized,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        val subtitle = listOfNotNull(
-                                            item.moduleName,
-                                            formatRelativeDay(item.lastTimestamp),
-                                        ).joinToString(" · ")
-                                        if (subtitle.isNotEmpty()) {
+                                    supportingContent = subtitle.takeIf { it.isNotEmpty() }?.let {
+                                        {
                                             Text(
-                                                text = subtitle,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                text = it,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
                                             )
                                         }
-                                    }
-                                    Surface(
-                                        shape = MaterialTheme.shapes.small,
-                                        color = MaterialTheme.colorScheme.secondaryContainer,
-                                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    ) {
-                                        Text(
-                                            text = "${item.answeredCount} 题",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                        )
-                                    }
+                                    },
+                                    trailingContent = {
+                                        Surface(
+                                            shape = MaterialTheme.shapes.small,
+                                            color = MaterialTheme.colorScheme.secondaryContainer,
+                                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        ) {
+                                            Text(
+                                                text = "${item.answeredCount} 题",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                            )
+                                        }
+                                    },
+                                ) {
+                                    Text(
+                                        text = item.title,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 }
                             }
                         }

@@ -858,10 +858,9 @@ private fun incorrectAnswerColors(): Pair<Color, Color> {
 }
 
 @Composable
-private fun missedAnswerColors(): Pair<Color, Color> = if (LocalDarkMode.current) {
-    Color(0xFF3D321B) to Color(0xFFF4DB9C)
-} else {
-    Color(0xFFFFF0C5) to Color(0xFF604700)
+private fun missedAnswerColors(): Pair<Color, Color> {
+    val scheme = MaterialTheme.colorScheme
+    return lerp(scheme.tertiaryContainer, scheme.surfaceContainerHigh, 0.25f) to scheme.onTertiaryContainer
 }
 
 @OptIn(ExperimentalLayoutApi::class)
