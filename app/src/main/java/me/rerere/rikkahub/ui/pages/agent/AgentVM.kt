@@ -757,8 +757,8 @@ class AgentVM(
         val displayLabel = selectedModel?.displayName?.ifBlank { rawModelId } ?: modelName
         val reasoningLevel = _agentAssistant.value.reasoningLevel
         val thinkingLevel = when {
-            isAntigravityCli && reasoningLevel == ReasoningLevel.MAX -> "max"
-            isAntigravityCli && reasoningLevel == ReasoningLevel.XHIGH -> "xhigh"
+            isAntigravityCli && agentModel != null && reasoningLevel == ReasoningLevel.MAX -> "max"
+            isAntigravityCli && agentModel != null && reasoningLevel == ReasoningLevel.XHIGH -> "xhigh"
             isAntigravityCli -> reasoningLevel.toGeminiThinkingLevel()
             isCodex && reasoningLevel in listOf(ReasoningLevel.XHIGH, ReasoningLevel.MAX) -> "xhigh"
             isCodex && reasoningLevel == ReasoningLevel.OFF -> "off"
