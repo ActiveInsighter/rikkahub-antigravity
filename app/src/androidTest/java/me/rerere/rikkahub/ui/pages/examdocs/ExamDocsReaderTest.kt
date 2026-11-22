@@ -8,12 +8,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -73,11 +80,54 @@ class ExamDocsReaderTest {
         )
         compose.onNodeWithText("A").performClick()
         compose.onNodeWithText("回答正确").assertIsDisplayed()
-        compose.onNodeWithContentDescription("查看解答").performClick()
+        compose.onNodeWithText("查看解答").performClick()
         compose.onNodeWithText("本题解析").assertIsDisplayed()
         compose.onNodeWithText("检查连续性").assertIsDisplayed()
         compose.onNodeWithText("对照参考条件").assertIsDisplayed()
         compose.onNodeWithText("可积").assertExists()
+    }
+
+    @Test
+    fun multipleChoiceShowsMissedAnswersAndResetsInDarkTheme() {
+        render(
+            """
+            :::question {id="multi" type="multiple"}
+            选择所有质数。
+
+            :::option {label="A" correct="true"}
+            质数 2
+            :::
+
+            :::option {label="B"}
+            合数 4
+            :::
+
+            :::option {label="C" correct="true"}
+            质数 5
+            :::
+            :::
+            """.trimIndent(),
+            dark = true,
+        )
+        val first = compose.onNodeWithText("A")
+        val submit = compose.onNodeWithText("提交答案")
+        submit.assertIsNotEnabled()
+        first.performClick()
+        first.assertIsOn()
+        submit.assertIsEnabled().performClick()
+        compose.onNodeWithText("漏选").assertIsDisplayed()
+        compose.onNodeWithText("部分正确，有漏选").assertIsDisplayed()
+        first.assertIsNotEnabled()
+
+        compose.onNodeWithText("重做").performClick()
+        first.assertIsOff().assertIsEnabled()
+        submit.assertIsNotEnabled()
+        compose.onNodeWithText("漏选").assertDoesNotExist()
+
+        compose.onNodeWithText("B").performClick()
+        submit.performClick()
+        compose.onNodeWithContentDescription("选错").assertIsDisplayed()
+        compose.onNodeWithText("回答错误").assertIsDisplayed()
     }
 
     @Test
@@ -122,11 +172,11 @@ class ExamDocsReaderTest {
         }
     }
 
-    private fun render(markdown: String, modifier: Modifier = Modifier.fillMaxSize()) {
+    private fun render(markdown: String, modifier: Modifier = Modifier.fillMaxSize(), dark: Boolean = false) {
         val document = prepareExamDocsDocument(markdown, "https://example.test/android/docs/sample.md", legacy = false)
         val registry = ExamDocsComponentRegistry()
         compose.setContent {
-            MaterialTheme {
+            MaterialExpressiveTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
                 CompositionLocalProvider(LocalSettings provides Settings.dummy()) {
                     val renderer = rememberExamDocsRenderer(document, rememberLazyListState(), {}, { it })
                     SharedTransitionLayout(Modifier.fillMaxSize().padding(12.dp)) {
