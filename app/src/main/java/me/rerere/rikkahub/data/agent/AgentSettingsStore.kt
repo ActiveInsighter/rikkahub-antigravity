@@ -16,11 +16,28 @@ import me.rerere.rikkahub.utils.JsonInstant
 
 val DEFAULT_AGENT_MODELS: List<String> = listOf(
     "Antigravity",
+    "Codex",
     "gemini-3.5-flash-lite",
     "gemini-3-flash-preview",
     "gemini-3-pro-preview",
     "gemini-2.5-pro",
     "gemini-2.5-flash",
+)
+
+val DEFAULT_ANTIGRAVITY_SUB_MODELS: List<String> = listOf(
+    "",
+    "gemini-4-hydrogen",
+    "gemini-4-carbon",
+    "antigravity-preview-09-2026",
+)
+
+val DEFAULT_CODEX_SUB_MODELS: List<String> = listOf(
+    "",
+    "gpt-5.4",
+    "gpt-5.3-codex",
+    "gpt-5.2-codex",
+    "gpt-5.1-codex-max",
+    "o3",
 )
 
 @Serializable
@@ -78,6 +95,8 @@ data class AgentUiSettings(
     val conversationSortOrder: ConversationSortOrder = ConversationSortOrder.UPDATE_TIME,
     val selectedAgentModel: String = "Antigravity",
     val selectedAgentModelId: String = "",
+    val antigravitySubModel: String = "",
+    val codexSubModel: String = "",
     val gatewayBaseUrl: String = DEFAULT_GEMINI_GATEWAY_URL,
     val gatewayApiKey: String = "",
     val customGeminiModels: List<String> = emptyList(),

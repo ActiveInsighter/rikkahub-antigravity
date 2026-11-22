@@ -114,7 +114,11 @@ import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.agent.AgentModelCategory
 import me.rerere.rikkahub.data.agent.AgentModelEntity
+import me.rerere.rikkahub.data.agent.DEFAULT_ANTIGRAVITY_SUB_MODELS
+import me.rerere.rikkahub.data.agent.DEFAULT_CODEX_SUB_MODELS
 import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
+import me.rerere.rikkahub.data.agent.isAntigravityAgentModel
+import me.rerere.rikkahub.data.agent.isCodexAgentModel
 import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
 import me.rerere.rikkahub.ui.components.ai.AgentFilesPicker
 import me.rerere.rikkahub.ui.components.ai.ChatInput
@@ -154,6 +158,8 @@ fun AgentPage(id: Uuid) {
     val selectedModelEntity by vm.selectedModelEntity.collectAsStateWithLifecycle()
     val selectedModelCategory by vm.selectedModelCategory.collectAsStateWithLifecycle()
     val selectedAgentModelName by vm.selectedAgentModelName.collectAsStateWithLifecycle()
+    val antigravitySubModel by vm.antigravitySubModel.collectAsStateWithLifecycle()
+    val codexSubModel by vm.codexSubModel.collectAsStateWithLifecycle()
     val decisionSchemaJson by vm.decisionSchemaJson.collectAsStateWithLifecycle()
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     val isSyncing by vm.isSyncing.collectAsStateWithLifecycle()
@@ -264,6 +270,7 @@ fun AgentPage(id: Uuid) {
 
     var showRenameDialog by remember { mutableStateOf(false) }
     var showModelPickerSheet by remember { mutableStateOf(false) }
+    var showSubModelPickerDialog by rememberSaveable { mutableStateOf(false) }
     var showImageLibrarySheet by remember { mutableStateOf(false) }
     val toaster = LocalToaster.current
     var renameText by remember { mutableStateOf("") }
@@ -346,14 +353,27 @@ fun AgentPage(id: Uuid) {
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
+                                    val activeRawModelId = selectedModelEntity?.modelId?.ifBlank { null } ?: selectedAgentModelName
+                                    val isCodexSelected = isCodexAgentModel(activeRawModelId)
+                                    val isAntigravitySelected = isAntigravityAgentModel(activeRawModelId)
+                                    val activeSubModel = when {
+                                        isCodexSelected -> codexSubModel
+                                        isAntigravitySelected -> antigravitySubModel
+                                        else -> ""
+                                    }
+                                    val modelLabel = if (activeSubModel.isNotBlank()) {
+                                        "$selectedAgentModelName ($activeSubModel)"
+                                    } else {
+                                        selectedAgentModelName
+                                    }
                                     val subtitleText = when {
                                         isGenerating && !activeStatusText.isNullOrBlank() -> "运行中 · $activeStatusText"
                                         !activeStatusText.isNullOrBlank() -> activeStatusText!!
                                         isSyncing -> "正在同步…"
                                         selectedModelCategory == AgentModelCategory.CHAT -> "Chat 流式 · $selectedAgentModelName"
                                         selectedModelCategory == AgentModelCategory.DECISION -> "Decision 决策 · $selectedAgentModelName"
-                                        session == null -> "Agent Action · $selectedAgentModelName"
-                                        else -> "Agent · $selectedAgentModelName"
+                                        session == null -> "Agent Action · $modelLabel"
+                                        else -> "Agent · $modelLabel"
                                     }
                                     Text(
                                         text = subtitleText,
@@ -403,6 +423,9 @@ fun AgentPage(id: Uuid) {
                         )
                     },
                     bottomBar = {
+                        val activeRawModelId = selectedModelEntity?.modelId?.ifBlank { null } ?: selectedAgentModelName
+                        val isCodexSelected = isCodexAgentModel(activeRawModelId)
+                        val isAntigravitySelected = isAntigravityAgentModel(activeRawModelId)
                         Column(modifier = Modifier.fillMaxWidth()) {
                             if (selectedModelCategory == AgentModelCategory.DECISION) {
                                 DecisionSchemaBar(
@@ -410,10 +433,17 @@ fun AgentPage(id: Uuid) {
                                     onUpdateSchema = vm::updateDecisionSchemaJson,
                                 )
                             }
+                            if (selectedModelCategory == AgentModelCategory.AGENT && (isCodexSelected || isAntigravitySelected)) {
+                                AgentSubModelBar(
+                                    isCodex = isCodexSelected,
+                                    currentSubModel = if (isCodexSelected) codexSubModel else antigravitySubModel,
+                                    onClick = { showSubModelPickerDialog = true },
+                                )
+                            }
                             val inputPlaceholder = when (selectedModelCategory) {
                                 AgentModelCategory.CHAT -> "输入对话内容（流式输出）…"
                                 AgentModelCategory.DECISION -> "输入决策问题（返回结构化 JSON）…"
-                                AgentModelCategory.AGENT -> "输入 Agent 任务指令…"
+                                AgentModelCategory.AGENT -> if (isCodexSelected) "输入 Codex 任务指令…" else "输入 Agent 任务指令…"
                             }
                             ChatInput(
                                 state = inputState,
@@ -424,7 +454,7 @@ fun AgentPage(id: Uuid) {
                                 hazeState = hazeState,
                                 placeholderText = inputPlaceholder,
                                 alwaysShowReasoningButton = true,
-                                showReasoningButton = selectedModelCategory != AgentModelCategory.AGENT,
+                                showReasoningButton = selectedModelCategory != AgentModelCategory.AGENT || isCodexSelected,
                                 showAsrButton = false,
                                 overrideModelId = selectedAgentModelName,
                                 onModelSelectorClick = { showModelPickerSheet = true },
@@ -591,6 +621,21 @@ fun AgentPage(id: Uuid) {
                 vm.deleteLocalModel(id)
             },
             onDismiss = { showModelPickerSheet = false },
+        )
+    }
+
+    if (showSubModelPickerDialog) {
+        val activeRawModelId = selectedModelEntity?.modelId?.ifBlank { null } ?: selectedAgentModelName
+        val isCodexSelected = isCodexAgentModel(activeRawModelId)
+        val currentSubModel = if (isCodexSelected) codexSubModel else antigravitySubModel
+        AgentSubModelPickerDialog(
+            isCodex = isCodexSelected,
+            currentSubModel = currentSubModel,
+            onSelectSubModel = { chosen ->
+                vm.updateAgentSubModel(isCodex = isCodexSelected, subModel = chosen)
+                showSubModelPickerDialog = false
+            },
+            onDismiss = { showSubModelPickerDialog = false },
         )
     }
 
@@ -1455,7 +1500,7 @@ private fun AgentModelEditSheet(
                 Text(
                     text = when (category) {
                         AgentModelCategory.CHAT -> "普通对话模式：通过网关流式输出并支持思考过程"
-                        AgentModelCategory.AGENT -> "Agent 模式：派发任务到 GitHub Actions 异步执行"
+                        AgentModelCategory.AGENT -> "Agent 模式：通过 PocketBase 派发到后端服务执行（支持 Antigravity 与 Codex，且可选底层模型）"
                         AgentModelCategory.DECISION -> "决策模式：通过 /v1/decision 返回结构化 JSON"
                     },
                     style = MaterialTheme.typography.bodySmall,
@@ -1557,4 +1602,126 @@ private fun AgentModelEditSheet(
         }
     }
 }
+
+@Composable
+private fun AgentSubModelBar(
+    isCodex: Boolean,
+    currentSubModel: String,
+    onClick: () -> Unit,
+) {
+    val label = if (isCodex) "Codex 模型" else "Antigravity 模型"
+    val displayValue = currentSubModel.ifBlank { "服务端默认" }
+
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clickable(onClick = onClick),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        ) {
+            Tag(type = TagType.INFO) {
+                Text(label)
+            }
+            Text(
+                text = displayValue,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onClick) {
+                Text("切换模型")
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentSubModelPickerDialog(
+    isCodex: Boolean,
+    currentSubModel: String,
+    onSelectSubModel: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val presets = if (isCodex) DEFAULT_CODEX_SUB_MODELS else DEFAULT_ANTIGRAVITY_SUB_MODELS
+    var draftModel by remember(currentSubModel, isCodex) { mutableStateOf(currentSubModel) }
+    val title = if (isCodex) "选择 Codex 底层模型" else "选择 Antigravity 底层模型"
+    val placeholderText = if (isCodex) {
+        "留空则使用服务端默认（例如 gpt-5.3-codex）"
+    } else {
+        "留空则使用服务端默认（例如 gemini-4-hydrogen）"
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    text = if (isCodex) {
+                        "将在服务器上通过 Codex App Server 执行；可选择预设或输入自定义模型 ID。"
+                    } else {
+                        "将随任务派发到后端 Antigravity Agent；可选择预设或输入自定义模型 ID。"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    FilterChip(
+                        selected = draftModel.trim().isEmpty(),
+                        onClick = { draftModel = "" },
+                        label = { Text("服务端默认") },
+                    )
+                    presets.forEach { preset ->
+                        FilterChip(
+                            selected = draftModel.trim() == preset,
+                            onClick = { draftModel = preset },
+                            label = { Text(preset) },
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = draftModel,
+                    onValueChange = { draftModel = it },
+                    label = { Text("自定义模型 ID（可选）") },
+                    placeholder = { Text(placeholderText) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSelectSubModel(draftModel.trim()) },
+            ) {
+                Text("确定")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
 

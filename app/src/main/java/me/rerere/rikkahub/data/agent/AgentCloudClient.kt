@@ -224,6 +224,7 @@ interface AgentCloudClient {
         replacesMessageId: String? = null,
         title: String = "",
         modelOverride: String? = null,
+        agentModelOverride: String? = null,
         thinkingLevelOverride: String? = null,
         systemPromptOverride: String? = null,
     ): RemoteSubmittedJob
@@ -394,6 +395,7 @@ class PocketBaseAgentCloudClient(
         replacesMessageId: String?,
         title: String,
         modelOverride: String?,
+        agentModelOverride: String?,
         thinkingLevelOverride: String?,
         systemPromptOverride: String?,
     ): RemoteSubmittedJob = withContext(Dispatchers.IO) {
@@ -410,6 +412,7 @@ class PocketBaseAgentCloudClient(
             replacesMessageId = replacesMessageId,
             title = title,
             modelOverride = modelOverride,
+            agentModelOverride = agentModelOverride,
             thinkingLevelOverride = thinkingLevelOverride,
             systemPromptOverride = systemPromptOverride,
         )
@@ -787,7 +790,7 @@ class PocketBaseAgentCloudClient(
             createdAt = parseLocalDateTime(if (isHistorical) message?.startedAt?.ifBlank { job.created } ?: job.created else job.created),
             finishedAt = finishedAt,
             modelSnapshot = ModelSnapshot(
-                displayName = "Antigravity Agent",
+                displayName = if (isCodexAgentModel(job.model)) "Codex Agent" else "Antigravity Agent",
                 modelId = job.model.ifBlank { "Antigravity" },
             ),
             usage = usage,
@@ -821,7 +824,7 @@ class PocketBaseAgentCloudClient(
                 parts = listOf(UIMessagePart.Text(text)) + images.map { UIMessagePart.Image(url = it) },
                 createdAt = parseLocalDateTime(job.created),
                 modelSnapshot = if (user) null else ModelSnapshot(
-                    displayName = "Antigravity Agent",
+                    displayName = if (isCodexAgentModel(job.model)) "Codex Agent" else "Antigravity Agent",
                     modelId = job.model.ifBlank { "Antigravity" },
                 ),
             )
@@ -1260,20 +1263,21 @@ class PocketBaseAgentCloudClient(
             replacesMessageId: String? = null,
             title: String = "",
             modelOverride: String? = null,
+            agentModelOverride: String? = null,
             thinkingLevelOverride: String? = null,
             systemPromptOverride: String? = null,
         ): JsonObject {
             val selectedModel = modelOverride?.trim()?.takeIf { it.isNotBlank() } ?: if (
-                config.model.equals("antigravity", ignoreCase = true) ||
-                config.model.startsWith("antigravity-", ignoreCase = true)
+                isAntigravityAgentModel(config.model) || isCodexAgentModel(config.model)
             ) {
                 config.model
             } else {
                 "Antigravity"
             }
-            val isAntigravityModel =
-                selectedModel.equals("antigravity", ignoreCase = true) ||
-                selectedModel.startsWith("antigravity-", ignoreCase = true)
+            val isAntigravityModel = isAntigravityAgentModel(selectedModel)
+            val isCodexModel = isCodexAgentModel(selectedModel)
+            val effectiveAgentModel = agentModelOverride?.trim()?.takeIf { it.isNotBlank() }
+                ?: config.agentModel.trim().takeIf { it.isNotBlank() }
             val selectedThinkingLevel = thinkingLevelOverride ?: config.thinkingLevel
             val selectedSystemPrompt = systemPromptOverride ?: config.systemPrompt
             val cleanImages = images.map { it.trim() }.filter { it.isNotBlank() }.distinct()
@@ -1312,8 +1316,8 @@ class PocketBaseAgentCloudClient(
                 )
                 put("delimiter", config.delimiter.ifBlank { "<!-- aw:split -->" })
                 put("model", selectedModel)
-                if (isAntigravityModel && config.agentModel.isNotBlank()) {
-                    put("agentModel", config.agentModel)
+                if ((isAntigravityModel || isCodexModel) && effectiveAgentModel != null) {
+                    put("agentModel", effectiveAgentModel)
                 }
                 put("concurrency", config.concurrency.coerceIn(1, 16))
                 put("thinkingLevel", selectedThinkingLevel)

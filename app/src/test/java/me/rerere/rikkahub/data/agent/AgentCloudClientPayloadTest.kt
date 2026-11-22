@@ -89,4 +89,62 @@ class AgentCloudClientPayloadTest {
         assertEquals("high", payload["thinkingLevel"]?.jsonPrimitive?.content)
         assertNull(payload["agentModel"])
     }
+
+    @Test
+    fun `forwards Codex model with agentModelOverride and thinkingLevel`() {
+        val payload = PocketBaseAgentCloudClient.buildSubmitJobPayload(
+            jobId = "job128",
+            config = RemoteAgentConfig(
+                agentModel = "gemini-4-hydrogen",
+                model = "Antigravity",
+                thinkingLevel = "low",
+            ),
+            prompt = "fix tests",
+            sources = emptyList(),
+            modelOverride = "Codex",
+            thinkingLevelOverride = "high",
+            agentModelOverride = "gpt-5.3-codex",
+        )
+
+        assertEquals("Codex", payload["model"]?.jsonPrimitive?.content)
+        assertEquals("gpt-5.3-codex", payload["agentModel"]?.jsonPrimitive?.content)
+        assertEquals("high", payload["thinkingLevel"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `overrides Antigravity agentModel when agentModelOverride is provided`() {
+        val payload = PocketBaseAgentCloudClient.buildSubmitJobPayload(
+            jobId = "job129",
+            config = RemoteAgentConfig(
+                agentModel = "gemini-4-hydrogen",
+                model = "Antigravity",
+            ),
+            prompt = "analyze",
+            sources = emptyList(),
+            modelOverride = "Antigravity",
+            agentModelOverride = "gemini-4-carbon",
+        )
+
+        assertEquals("Antigravity", payload["model"]?.jsonPrimitive?.content)
+        assertEquals("gemini-4-carbon", payload["agentModel"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `omits agentModel for Codex when agentModelOverride is blank`() {
+        val payload = PocketBaseAgentCloudClient.buildSubmitJobPayload(
+            jobId = "job130",
+            config = RemoteAgentConfig(
+                agentModel = "gemini-4-hydrogen",
+                model = "Antigravity",
+            ),
+            prompt = "inspect",
+            sources = emptyList(),
+            modelOverride = "Codex",
+            agentModelOverride = "",
+        )
+
+        assertEquals("Codex", payload["model"]?.jsonPrimitive?.content)
+        assertNull(payload["agentModel"])
+    }
 }
+
