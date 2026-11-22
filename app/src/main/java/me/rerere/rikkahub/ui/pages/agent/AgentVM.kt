@@ -422,9 +422,24 @@ class AgentVM(
         )
     }
 
+    private fun validateAntigravityCliInput(parts: List<UIMessagePart>): Boolean {
+        val isCli = selectedModelProvider.value?.id == ANTIGRAVITY_CLI_PROVIDER_ID ||
+            resolvedChatModel.value?.modelId?.let(::isAntigravityCliModel) == true
+        if (!isCli) return true
+        _errorMessage.value = when {
+            session.value == null -> "请先连接 PocketBase 账号，再使用 Antigravity CLI。"
+            parts.any { it !is UIMessagePart.Text &&
+                !(it is UIMessagePart.Document && it.fileName.endsWith(".md", ignoreCase = true))
+            } -> "Antigravity CLI 支持文本和 Markdown 附件。"
+            else -> null
+        }
+        return _errorMessage.value == null
+    }
+
     fun sendMessage(parts: List<UIMessagePart>): Boolean {
         if (parts.isEmpty() || isBusy) return false
         _errorMessage.value = null
+        if (!validateAntigravityCliInput(parts)) return false
 
         val modelEntity = currentOrFallbackModelEntity()
         val category = modelEntity.modelCategory
@@ -539,6 +554,7 @@ class AgentVM(
         val node = current.messageNodes[nodeIndex]
         val historyBefore = current.messageNodes.take(nodeIndex).map { it.currentMessage }
         val userMsg = historyBefore.lastOrNull { it.role == MessageRole.USER } ?: return
+        if (!validateAntigravityCliInput(userMsg.parts)) return
 
         val modelEntity = currentOrFallbackModelEntity()
         val prompt = buildPromptFromParts(userMsg.parts)
@@ -828,7 +844,7 @@ class AgentVM(
                 null
             } else {
                 RemoteAgentSourceInput(
-                    id = doc.url.hashCode().toUInt().toString(16),
+                    id = java.util.UUID.nameUUIDFromBytes(doc.url.toByteArray()).toString() + ".md",
                     name = doc.fileName.ifBlank { "document.md" },
                     content = content,
                 )
