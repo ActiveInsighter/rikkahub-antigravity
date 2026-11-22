@@ -3,8 +3,11 @@ package me.rerere.rikkahub.data.examdocs
 import android.content.Context
 import android.util.LruCache
 import androidx.core.content.edit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,7 +23,11 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -102,17 +109,25 @@ data class ExamDocsDirectory(
     val pageIndexes = entries.mapIndexed { index, entry -> entry.page.url to index }.toMap()
 }
 
-class ExamDocsRepository(
+class ExamDocsRepository internal constructor(
     context: Context,
     okHttpClient: OkHttpClient,
     json: Json,
+    database: DocsDatabase,
 ) {
     private val prefs by lazy { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
     private val json = Json(from = json) { ignoreUnknownKeys = true }
     private val client = okHttpClient.newBuilder().callTimeout(30, TimeUnit.SECONDS).build()
-    private val directories = LruCache<String, ExamDocsDirectory>(4)
-    private val documents = object : LruCache<String, ExamDocsDocument>(8 * 1024 * 1024) {
-        override fun sizeOf(key: String, value: ExamDocsDocument) = value.sourceBytes
+    private val cacheDao = database.dao()
+    private val cacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val refreshing = ConcurrentHashMap.newKeySet<Pair<String, String>>()
+    private val directories = LruCache<String, CachedValue<ExamDocsDirectory>>(4)
+    private val documents = object : LruCache<String, CachedValue<ExamDocsDocument>>(8 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: CachedValue<ExamDocsDocument>) = value.value.sourceBytes
+    }
+
+    private data class CachedValue<T>(val value: T, val fetchedAt: Long) {
+        val fresh: Boolean get() = System.currentTimeMillis() - fetchedAt < TimeUnit.HOURS.toMillis(12)
     }
 
     fun loadSiteSettings(): ExamDocsSiteSettings {
@@ -223,21 +238,21 @@ class ExamDocsRepository(
     private fun lastPageKey(baseUrl: String) = "last_page:$baseUrl"
 
     suspend fun fetchSourceTree(site: ExamDocsSite, refresh: Boolean): ExamDocsDirectory {
-        if (!refresh) directories.get(site.baseUrl)?.let { return it }
-        val body = fetchText("${site.baseUrl}/doc-sources.json", "application/json")
-            ?: throw IOException("站点缺少 /doc-sources.json")
-        return withContext(Dispatchers.Default) {
+        if (!refresh) directories.get(site.baseUrl)?.takeIf { it.fresh }?.let { return it.value }
+        val url = "${site.baseUrl}/doc-sources.json"
+        val loaded = loadResource(site, "directory", refresh, fetch = {
+            url to (fetchText(url, "application/json") ?: throw IOException("站点缺少 /doc-sources.json"))
+        }) { _, body ->
             val tree = json.decodeFromString<ExamDocSourceTreeDto>(body)
             val modules = tree.modules.mapNotNull(::convertFolder)
-            val directory = ExamDocsDirectory(
+            ExamDocsDirectory(
                 modules,
                 flattenPages(modules).distinctBy { it.page.url },
                 tree.androidMarkdownVersion == ANDROID_MARKDOWN_VERSION,
             )
-            ensureActive()
-            directories.put(site.baseUrl, directory)
-            directory
         }
+        directories.put(site.baseUrl, loaded)
+        return loaded.value
     }
 
     suspend fun fetchDocument(
@@ -248,20 +263,85 @@ class ExamDocsRepository(
     ): ExamDocsDocument {
         val legacyUrl = buildMarkdownUrl(site.baseUrl, pageUrl)
         val preferredUrl = buildMarkdownUrl(site.baseUrl, pageUrl, usesAndroidMarkdown)
-        if (!refresh) documents.get(preferredUrl)?.let { return it }
-        var sourceUrl = preferredUrl
-        val accept = "text/markdown, text/plain;q=0.9, */*;q=0.5"
-        var markdown = fetchText(sourceUrl, accept)
-        if (markdown == null && sourceUrl != legacyUrl) {
-            sourceUrl = legacyUrl
-            markdown = fetchText(sourceUrl, accept)
+        if (!refresh) documents.get(preferredUrl)?.takeIf { it.fresh }?.let { return it.value }
+        val loaded = loadResource(site, preferredUrl, refresh, fetch = {
+            val accept = "text/markdown, text/plain;q=0.9, */*;q=0.5"
+            val preferred = fetchText(preferredUrl, accept)
+            if (preferred != null) preferredUrl to preferred
+            else if (preferredUrl != legacyUrl) legacyUrl to (fetchText(legacyUrl, accept) ?: throw IOException("未找到文档"))
+            else throw IOException("未找到文档")
+        }) { url, body ->
+            prepareExamDocsDocument(body, url, legacy = url == legacyUrl)
         }
-        val content = markdown ?: throw IOException("未找到文档")
-        return withContext(Dispatchers.Default) {
-            val document = prepareExamDocsDocument(content, sourceUrl, legacy = sourceUrl == legacyUrl)
-            ensureActive()
-            documents.put(preferredUrl, document)
-            document
+        documents.put(preferredUrl, loaded)
+        return loaded.value
+    }
+
+    private suspend fun <T> loadResource(
+        site: ExamDocsSite,
+        resource: String,
+        refresh: Boolean,
+        fetch: suspend () -> Pair<String, String>,
+        parse: (String, String) -> T,
+    ): CachedValue<T> = withContext(Dispatchers.IO) {
+        val stored = runCatching { cacheDao.resource(site.baseUrl, resource) }.getOrNull()
+        suspend fun readStored(): CachedValue<T>? = stored?.let { row ->
+            try {
+                val body = GZIPInputStream(row.compressed.inputStream()).bufferedReader().use { it.readText() }
+                withContext(Dispatchers.Default) { CachedValue(parse(row.sourceUrl, body), row.fetchedAt) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        suspend fun download(): CachedValue<T> {
+            val (url, body) = fetch()
+            val value = withContext(Dispatchers.Default) { parse(url, body) }
+            val fetchedAt = System.currentTimeMillis()
+            try {
+                val bytes = ByteArrayOutputStream().also { buffer ->
+                    GZIPOutputStream(buffer).use { it.write(body.toByteArray()) }
+                }.toByteArray()
+                // Keep each Room result comfortably within a CursorWindow on older devices.
+                if (bytes.size <= 1024 * 1024) {
+                    cacheDao.putResource(DocsCachedResource(site.baseUrl, resource, url, bytes, fetchedAt))
+                    if (resource != "directory") cacheDao.pruneResources()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Caching is optional for the current online read.
+            }
+            return CachedValue(value, fetchedAt)
+        }
+
+        val cached = readStored()
+        if (!refresh && cached != null) {
+            val key = site.baseUrl to resource
+            if (!cached.fresh && refreshing.add(key)) {
+                cacheScope.launch {
+                    try {
+                        download()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // The existing copy remains available offline.
+                    } finally {
+                        refreshing.remove(key)
+                    }
+                }
+            }
+            return@withContext cached
+        }
+
+        try {
+            download()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            cached ?: throw error
         }
     }
 

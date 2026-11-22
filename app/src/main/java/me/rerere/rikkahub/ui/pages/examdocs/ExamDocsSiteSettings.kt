@@ -39,6 +39,7 @@ import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Internet
 import me.rerere.hugeicons.stroke.PaintBoard
 import me.rerere.hugeicons.stroke.Refresh03
+import me.rerere.hugeicons.stroke.UserCircle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.BackgroundEffectType
@@ -84,6 +85,14 @@ fun ExamDocsSettingsPage() {
                 val containerColor = MaterialTheme.colorScheme.primaryContainer
                 val contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 CardGroup {
+                    item(
+                        onClick = { navController.navigate(Screen.ExamDocsAccount) },
+                        leadingContent = { CardGroupIcon(
+                            HugeIcons.UserCircle, containerColor = containerColor, contentColor = contentColor,
+                        ) },
+                        headlineContent = { Text("Exam Docs 登录与同步") },
+                        supportingContent = { Text("邮箱登录、同步状态和学习记录") },
+                    )
                     item(
                         onClick = { navController.navigate(Screen.ExamDocsSiteSettings) },
                         leadingContent = {

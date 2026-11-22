@@ -282,20 +282,22 @@ fun ExamDocsPage(
                         )
                     }
                     document != null && page != null -> CompositionLocalProvider(LocalSettings provides docsSettings) {
-                        ExamDocsArticle(
-                            document = document,
-                            listState = listState,
-                            baseUrl = state.activeSite.baseUrl,
-                            pageUrl = page.url,
-                            hazeState = hazeState,
-                            topPadding = innerPadding.calculateTopPadding(),
-                            bottomPadding = innerPadding.calculateBottomPadding(),
-                            fontSizeRatio = state.uiSettings.fontSizeRatio,
-                            previous = state.prevPage,
-                            next = state.nextPage,
-                            onPage = vm::openPage,
-                            onLink = vm::openLink,
-                        )
+                        ExamDocsProgressProvider(state.activeSite, page.url, document) {
+                            ExamDocsArticle(
+                                document = document,
+                                listState = listState,
+                                baseUrl = state.activeSite.baseUrl,
+                                pageUrl = page.url,
+                                hazeState = hazeState,
+                                topPadding = innerPadding.calculateTopPadding(),
+                                bottomPadding = innerPadding.calculateBottomPadding(),
+                                fontSizeRatio = state.uiSettings.fontSizeRatio,
+                                previous = state.prevPage,
+                                next = state.nextPage,
+                                onPage = vm::openPage,
+                                onLink = vm::openLink,
+                            )
+                        }
                     }
                     else -> Box(Modifier.padding(innerPadding)) {
                         Button(onClick = { sheet = ReaderSheet.Directory }) { Text("浏览文档目录") }

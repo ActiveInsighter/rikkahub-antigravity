@@ -143,6 +143,10 @@ val repositoryModule = module {
     }
 
     single {
-        me.rerere.rikkahub.data.examdocs.ExamDocsRepository(get(), get(), get())
+        me.rerere.rikkahub.data.examdocs.ExamDocsRepository(get(), get(), get(), get())
     }
+    single { me.rerere.rikkahub.data.examdocs.DocsDatabase.create(get()) }
+    single { me.rerere.rikkahub.data.examdocs.DocsCloudClient(get()) }
+    single { me.rerere.rikkahub.data.examdocs.DocsAccountRepository(get(), get()) }
+    single { me.rerere.rikkahub.data.examdocs.DocsProgressRepository(get(), get(), get(), get()) }
 }

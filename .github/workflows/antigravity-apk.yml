@@ -32,6 +32,7 @@ jobs:
     timeout-minutes: 90
     env:
       RIKKA_UPDATE_BASE_URL: ${{ vars.R2_UPDATE_PUBLIC_URL }}
+      EXAM_DOCS_PUBLISHABLE_KEY: ${{ vars.EXAM_DOCS_PUBLISHABLE_KEY }}
     permissions:
       contents: write
     steps:
@@ -105,7 +106,7 @@ jobs:
           disable-animations: true
           script: >-
             ./gradlew :app:connectedGithubDebugAndroidTest
-            -Pandroid.testInstrumentationRunnerArguments.class=me.rerere.rikkahub.ui.pages.examdocs.ExamDocsReaderTest,me.rerere.rikkahub.ui.pages.examdocs.ExamDocsSettingsNavigationTest,me.rerere.rikkahub.data.agent.AgentContinuationTest
+            -Pandroid.testInstrumentationRunnerArguments.class=me.rerere.rikkahub.data.examdocs.DocsProgressStorageTest,me.rerere.rikkahub.ui.pages.examdocs.ExamDocsReaderTest,me.rerere.rikkahub.ui.pages.examdocs.ExamDocsSettingsNavigationTest,me.rerere.rikkahub.data.agent.AgentContinuationTest
             --no-daemon --max-workers=2 '-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8'
       - name: Verify APK signatures and prepare downloads
         run: |

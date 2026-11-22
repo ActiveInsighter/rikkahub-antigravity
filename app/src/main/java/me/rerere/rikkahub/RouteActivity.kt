@@ -669,6 +669,10 @@ class RouteActivity : ComponentActivity() {
                                 me.rerere.rikkahub.ui.pages.examdocs.ExamDocsSettingsPage()
                             }
 
+                            entry<Screen.ExamDocsAccount> {
+                                me.rerere.rikkahub.ui.pages.examdocs.ExamDocsAccountPage()
+                            }
+
                             entry<Screen.ExamDocsSiteSettings> {
                                 me.rerere.rikkahub.ui.pages.examdocs.ExamDocsSiteSettingsPage()
                             }
@@ -929,6 +933,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object ExamDocsSettings : Screen
+
+    @Serializable
+    data object ExamDocsAccount : Screen
 
     @Serializable
     data object ExamDocsSiteSettings : Screen

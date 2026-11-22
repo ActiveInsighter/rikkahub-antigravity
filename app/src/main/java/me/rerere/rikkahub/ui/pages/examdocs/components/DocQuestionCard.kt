@@ -85,8 +85,12 @@ import me.rerere.hugeicons.stroke.QuillWrite01
 import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Tick02
+import me.rerere.rikkahub.data.examdocs.DocsAnswerState
+import me.rerere.rikkahub.data.examdocs.DocsSavedAnswer
+import me.rerere.rikkahub.data.examdocs.DocsWrite
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 import me.rerere.rikkahub.ui.components.ui.cardGroupItemShape
+import me.rerere.rikkahub.ui.pages.examdocs.LocalDocsReadingProgress
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 
 private enum class QuestionKind(val label: String, val icon: ImageVector) {
@@ -253,22 +257,52 @@ internal fun DocQuestionCard(
     val id = block.attrs["id"]
     val correct = remember(options) { options.filter(AnswerChoice::correct).map(AnswerChoice::label).toSet() }
 
-    // ArrayList is supported by the SavedStateRegistry, including after lazy items leave the viewport.
-    var selection by rememberSaveable(id) { mutableStateOf(arrayListOf<String>()) }
-    var blanks by rememberSaveable(id, blankCount) { mutableStateOf(ArrayList(List(blankCount) { "" })) }
-    var draft by rememberSaveable(id) { mutableStateOf("") }
-    var submitted by rememberSaveable(id) { mutableStateOf(false) }
-    var selfGradeLetter by rememberSaveable(id) { mutableStateOf<String?>(null) }
+    val reading = LocalDocsReadingProgress.current
+    val identity = reading?.identities?.get(block)
+    val stored = identity?.let { reading?.snapshot?.answers?.get(it.answerId) }
+    var optimistic by remember(id, reading?.page) { mutableStateOf<DocsSavedAnswer?>(null) }
+    val saved = optimistic?.takeIf { stored == null || it.timestamp > stored.timestamp } ?: stored
+    val answer = saved?.state ?: DocsAnswerState()
+    val selection = answer.selected
+    val blanks = List(blankCount) { answer.values.getOrElse(it) { "" } }
+    val draft = saved?.draft.orEmpty()
+    val submitted = answer.submitted
+    val selfGradeLetter = selection.firstOrNull().takeIf { submitted && kind == QuestionKind.Essay }
     var showSolution by rememberSaveable(id) { mutableStateOf(false) }
+    val ready = reading == null || reading.snapshot != null
+
+    fun save(next: DocsAnswerState, essayDraft: String = draft, write: DocsWrite = DocsWrite.Draft) {
+        if (!ready) return
+        val page = reading?.page
+        val timestamp = saved?.timestamp ?: 0
+        optimistic = if (reading != null && page != null && identity != null) {
+            reading.repository.saveAnswer(page, identity, next, essayDraft, write, timestamp)
+        } else {
+            DocsSavedAnswer(next, essayDraft, timestamp + 1)
+        }
+    }
+
+    fun submit(next: DocsAnswerState = answer) {
+        save(next.copy(submitted = true, attempt = answer.attempt + 1), write = DocsWrite.Submit)
+    }
+
+    fun selfGrade(letter: String) {
+        if (letter != selfGradeLetter) submit(answer.copy(selected = listOf(letter)))
+    }
 
     val multiple = kind == QuestionKind.Multiple
     val autoSubmitChoice = kind == QuestionKind.Single || kind == QuestionKind.Boolean
-    val canSubmit = if (blankCount > 0) blanks.all(String::isNotBlank) else selection.isNotEmpty()
+    val canSubmit = ready && if (blankCount > 0) blanks.all(String::isNotBlank) else selection.isNotEmpty()
     val pickedGrade = SelfGradeOption.entries.firstOrNull { it.letter == selfGradeLetter }
     val focusManager = LocalFocusManager.current
-    val blankMatches = remember(submitted, blankKeys, blanks) {
-        if (submitted) blanks.mapIndexed { index, value -> blankKeys.getOrNull(index)?.matches(value) }
-        else emptyList()
+    val blankMatches = remember(submitted, blankKeys, blanks, selection) {
+        if (submitted) blanks.mapIndexed { index, value ->
+            when {
+                "blank:$index:correct" in selection -> true
+                "blank:$index:incorrect" in selection -> false
+                else -> blankKeys.getOrNull(index)?.matches(value)
+            }
+        } else emptyList()
     }
     val result = when {
         pickedGrade != null -> QuestionResult(pickedGrade.result, "自评：${pickedGrade.label}")
@@ -283,7 +317,9 @@ internal fun DocQuestionCard(
                 .joinToString("；").takeIf(String::isNotEmpty)
         }
     }
-    val hasActions = result != null || multiple || blankCount > 0 || solution != null
+    val page = reading?.page
+    val showMarks = ready && page != null && identity != null
+    val hasActions = result != null || multiple || blankCount > 0 || solution != null || showMarks
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -312,15 +348,12 @@ internal fun DocQuestionCard(
                             ),
                             selected = selected,
                             multiple = multiple,
-                            enabled = !submitted,
+                            enabled = ready && !submitted,
                             onSelect = {
                                 when {
-                                    autoSubmitChoice -> {
-                                        selection = arrayListOf(option.label)
-                                        submitted = true
-                                    }
-                                    selected -> selection = ArrayList(selection - option.label)
-                                    else -> selection = ArrayList(selection + option.label)
+                                    autoSubmitChoice -> submit(answer.copy(selected = listOf(option.label)))
+                                    selected -> save(answer.copy(selected = selection - option.label))
+                                    else -> save(answer.copy(selected = selection + option.label))
                                 }
                             },
                             renderChildren = renderChildren,
@@ -335,10 +368,15 @@ internal fun DocQuestionCard(
                         val match = blankMatches.getOrNull(index)
                         QuestionAnswerField(
                             value = value,
-                            onValueChange = { updated -> blanks = ArrayList(blanks).apply { set(index, updated) } },
+                            onValueChange = { updated ->
+                                val values = blanks.mapIndexed { position, previous ->
+                                    if (position == index) updated.take(2000) else previous
+                                }
+                                save(answer.copy(values = values))
+                            },
                             label = if (blankCount > 1) "第 ${index + 1} 空" else "填写答案",
                             icon = HugeIcons.Edit01,
-                            readOnly = submitted,
+                            readOnly = submitted || !ready,
                             feedback = when (match) {
                                 true -> "与参考答案一致"
                                 false -> "请核对参考答案，等价写法可能需要自行判断"
@@ -352,15 +390,16 @@ internal fun DocQuestionCard(
             if (kind == QuestionKind.Essay) {
                 QuestionAnswerField(
                     value = draft,
-                    onValueChange = { draft = it },
+                    onValueChange = { save(answer, essayDraft = it.take(8000)) },
                     label = "作答草稿（可选）",
                     icon = HugeIcons.QuillWrite01,
                     singleLine = false,
+                    readOnly = !ready,
                 )
                 if (pickedGrade == null) {
-                    SelfGradeChoices(selfGradeLetter) {
+                    SelfGradeChoices(selfGradeLetter, enabled = ready) {
                         focusManager.clearFocus()
-                        selfGradeLetter = it
+                        selfGrade(it)
                     }
                 }
             }
@@ -390,6 +429,10 @@ internal fun DocQuestionCard(
                 }
             }
 
+            reading?.storageError?.let { message ->
+                Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+
             if (hasActions) {
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
@@ -400,7 +443,7 @@ internal fun DocQuestionCard(
                         Button(
                             onClick = {
                                 focusManager.clearFocus()
-                                submitted = true
+                                submit()
                             },
                             enabled = canSubmit,
                             shapes = ButtonDefaults.shapes(),
@@ -408,13 +451,13 @@ internal fun DocQuestionCard(
                             Text("提交答案")
                         }
                     }
+                    if (reading != null && page != null && identity != null && showMarks) {
+                        DocQuestionMark(reading, page, identity)
+                    }
                     if (result != null) {
                         TextButton(
                             onClick = {
-                                selection = arrayListOf()
-                                blanks = ArrayList(List(blankCount) { "" })
-                                submitted = false
-                                selfGradeLetter = null
+                                save(DocsAnswerState(attempt = answer.attempt), write = DocsWrite.Reset)
                             },
                             shapes = ButtonDefaults.shapes(),
                             contentPadding = PaddingValues(horizontal = 8.dp),
@@ -476,7 +519,7 @@ internal fun DocQuestionCard(
                 renderChildren(solution.blocks)
 
                 if (kind == QuestionKind.Essay) {
-                    SelfGradeChoices(selfGradeLetter) { selfGradeLetter = it }
+                    SelfGradeChoices(selfGradeLetter, enabled = ready, onSelect = ::selfGrade)
                 }
                 val extraTags = parsedTags.point + parsedTags.type
                 if (extraTags.isNotEmpty()) {
@@ -751,13 +794,14 @@ private fun missedAnswerColors(): Pair<Color, Color> = if (LocalDarkMode.current
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SelfGradeChoices(selectedLetter: String?, onSelect: (String) -> Unit) {
+private fun SelfGradeChoices(selectedLetter: String?, enabled: Boolean, onSelect: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("自评", style = MaterialTheme.typography.titleSmallEmphasized)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SelfGradeOption.entries.forEach { option ->
                 FilterChip(
                     selected = selectedLetter == option.letter,
+                    enabled = enabled,
                     onClick = { onSelect(option.letter) },
                     label = { Text(option.label) },
                     leadingIcon = {

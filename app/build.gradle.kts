@@ -26,6 +26,11 @@ if (updateBaseUrl.isNotEmpty()) {
     ) { "RIKKA_UPDATE_BASE_URL must be a public HTTPS base URL" }
 }
 
+val examDocsKey = providers.environmentVariable("EXAM_DOCS_PUBLISHABLE_KEY").orNull.orEmpty().trim()
+require(examDocsKey.isEmpty() || examDocsKey.matches(Regex("sb_publishable_[A-Za-z0-9_-]+"))) {
+    "EXAM_DOCS_PUBLISHABLE_KEY must be the public Supabase publishable key"
+}
+
 android {
     namespace = "me.rerere.rikkahub"
     compileSdk {
@@ -40,6 +45,7 @@ android {
         targetSdk = 37
         versionCode = 197
         versionName = "3.3.0"
+        buildConfigField("String", "EXAM_DOCS_PUBLISHABLE_KEY", "\"$examDocsKey\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -291,6 +297,7 @@ dependencies {
     implementation(libs.koin.android)
     implementation(libs.koin.compose)
     implementation(libs.koin.androidx.workmanager)
+    implementation(libs.androidx.work.runtime.ktx)
 
     // okhttp
     implementation(libs.okhttp)
