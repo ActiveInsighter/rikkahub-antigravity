@@ -158,13 +158,18 @@ fun DefaultToolPreview(
                 Text(stringResource(R.string.chat_message_tool_call_label, context.tool.toolName))
             }
         ) {
-            val command = (context.arguments as? JsonObject)?.get("command")?.jsonPrimitiveOrNull?.contentOrNull
-            val cwd = (context.arguments as? JsonObject)?.get("cwd")?.jsonPrimitiveOrNull?.contentOrNull
-            if (context.tool.metadata?.get("providerType")?.jsonPrimitiveOrNull?.contentOrNull == "commandExecution" && command != null) {
+            val unwrappedArgs = unwrapJsonElement(context.arguments) ?: context.arguments
+            val command = (unwrappedArgs as? JsonObject)?.get("command")?.jsonPrimitiveOrNull?.contentOrNull
+            val code = (unwrappedArgs as? JsonObject)?.get("code")?.jsonPrimitiveOrNull?.contentOrNull
+            val cwd = (unwrappedArgs as? JsonObject)?.get("cwd")?.jsonPrimitiveOrNull?.contentOrNull
+            val lang = (unwrappedArgs as? JsonObject)?.get("language")?.jsonPrimitiveOrNull?.contentOrNull
+            if (command != null) {
                 cwd?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
                 HighlightCodeBlock(code = command, language = "bash")
+            } else if (code != null) {
+                HighlightCodeBlock(code = code, language = inferCodeLanguage(languageHint = lang))
             } else {
-                HighlightCodeBlock(code = JsonInstantPretty.encodeToString(context.arguments), language = "json")
+                HighlightCodeBlock(code = JsonInstantPretty.encodeToString(unwrappedArgs), language = "json")
             }
         }
         if (context.tool.output.isNotEmpty()) {
@@ -177,12 +182,20 @@ fun DefaultToolPreview(
                     AgentToolResult(context) {
                         context.tool.output.fastForEach { part ->
                             when (part) {
-                                is UIMessagePart.Text -> HighlightCodeBlock(
-                                    code = runCatching {
-                                        JsonInstantPretty.encodeToString(JsonInstant.parseToJsonElement(part.text))
-                                    }.getOrDefault(part.text),
-                                    language = "json",
-                                )
+                                is UIMessagePart.Text -> {
+                                    val parsedJson = parseJsonTextOrNull(part.text)
+                                    if (parsedJson != null) {
+                                        HighlightCodeBlock(
+                                            code = JsonInstantPretty.encodeToString(parsedJson),
+                                            language = "json",
+                                        )
+                                    } else {
+                                        HighlightCodeBlock(
+                                            code = part.text,
+                                            language = "text",
+                                        )
+                                    }
+                                }
 
                                 is UIMessagePart.Image -> ZoomableAsyncImage(
                                     model = part.url,

@@ -315,7 +315,7 @@ fun ChatMessage(
 }
 
 // 思考链折叠时默认保留的尾部步骤数
-private const val COLLAPSED_VISIBLE_STEPS = 2
+private const val COLLAPSED_VISIBLE_STEPS = 4
 
 @OptIn(FlowPreview::class)
 @Composable
@@ -380,11 +380,13 @@ private fun MessagePartsBlock(
                     } else {
                         maxOf(COLLAPSED_VISIBLE_STEPS, block.steps.size - firstPendingIndex)
                     }
+                    var showStepsSheet by remember { mutableStateOf(false) }
                     ChainOfThought(
                         modifier = Modifier.animateContentSize(),
                         steps = block.steps,
                         collapsedVisibleCount = collapsedVisibleCount,
                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                        onExpandClick = { showStepsSheet = true },
                         cardColors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
                         ),
@@ -421,6 +423,18 @@ private fun MessagePartsBlock(
 
                             is ThinkingStep.NoticeStep -> ChatMessageNoticeStep(notice = step.notice)
                         }
+                    }
+
+                    if (showStepsSheet) {
+                        ThinkingBlockSheet(
+                            steps = block.steps,
+                            model = model,
+                            assistant = assistant,
+                            loading = loading,
+                            onToolApproval = onToolApproval,
+                            onToolAnswer = onToolAnswer,
+                            onDismissRequest = { showStepsSheet = false },
+                        )
                     }
                 }
             }

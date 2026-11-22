@@ -9,11 +9,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardColors
 import androidx.compose.material3.CardDefaults
@@ -23,6 +26,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,8 +54,8 @@ import me.rerere.rikkahub.R
  * 以时间线/步骤卡片的形式展示一组思考过程。
  *
  * 适用于承载推理步骤、工具调用步骤，或两者混合的链式内容。组件支持：
- * - 在步骤较多时自动折叠，仅展示最后若干步
- * - 点击顶部控制条展开/收起全部步骤
+ * - 在步骤较多时自动折叠，仅展示最后若干步（并支持在折叠态下上下滚动查看）
+ * - 点击顶部控制条展开/收起全部步骤，或通过 [onExpandClick] 弹出完整步骤弹窗
  * - 通过 [collapsedAdaptiveWidth] 控制折叠态是否保持自适应宽度
  *
  * @param modifier 外层卡片的修饰符
@@ -59,6 +63,7 @@ import me.rerere.rikkahub.R
  * @param steps 需要渲染的步骤数据列表
  * @param collapsedVisibleCount 折叠时保留可见的尾部步骤数
  * @param collapsedAdaptiveWidth 是否在折叠态下使用内容自适应宽度
+ * @param onExpandClick 点击顶部展开控制条时的自定义回调；为 null 时在组件内部就地展开/收起
  * @param content 每个步骤的具体 UI，由 [ChainOfThoughtScope] 提供步骤构建能力
  */
 @Composable
@@ -68,13 +73,22 @@ fun <T> ChainOfThought(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     ),
     steps: List<T>,
-    collapsedVisibleCount: Int = 2,
+    collapsedVisibleCount: Int = 4,
     collapsedAdaptiveWidth: Boolean = false,
+    onExpandClick: (() -> Unit)? = null,
     content: @Composable ChainOfThoughtScope.(T) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     val canCollapse = steps.size > collapsedVisibleCount
+    val isCollapsed = !expanded && canCollapse
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
+    val collapsedScrollState = rememberScrollState()
+
+    LaunchedEffect(steps.size, isCollapsed) {
+        if (isCollapsed) {
+            collapsedScrollState.scrollTo(collapsedScrollState.maxValue)
+        }
+    }
 
     Card(
         modifier = modifier,
@@ -88,12 +102,6 @@ fun <T> ChainOfThought(
                     animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
                 ),
         ) {
-            val visibleSteps = if (expanded || !canCollapse) {
-                steps
-            } else {
-                steps.takeLast(collapsedVisibleCount)
-            }
-
             // 显示展开/折叠按钮（统一在顶部）
             if (canCollapse) {
                 Row(
@@ -106,7 +114,13 @@ fun <T> ChainOfThought(
                             }
                         )
                         .clip(MaterialTheme.shapes.small)
-                        .clickable { expanded = !expanded }
+                        .clickable {
+                            if (onExpandClick != null) {
+                                onExpandClick()
+                            } else {
+                                expanded = !expanded
+                            }
+                        }
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -141,12 +155,19 @@ fun <T> ChainOfThought(
             }
 
             val lineColor = MaterialTheme.colorScheme.outlineVariant
+            val stepsModifier = if (isCollapsed) {
+                Modifier
+                    .heightIn(max = (collapsedVisibleCount * 52).coerceIn(180, 320).dp)
+                    .verticalScroll(collapsedScrollState)
+            } else {
+                Modifier
+            }
             // 每个步骤只绘制自己的连线分段并在节点处留空，
             // 避免使用离屏合成 + BlendMode.Clear（离屏层过大时部分设备会退化，节点区域被清成黑块）。
-            Column {
-                visibleSteps.fastForEachIndexed { index, step ->
+            Column(modifier = stepsModifier) {
+                steps.fastForEachIndexed { index, step ->
                     val isFirst = index == 0
-                    val isLast = index == visibleSteps.lastIndex
+                    val isLast = index == steps.lastIndex
                     val scope = remember(isFirst, isLast, lineColor) {
                         ChainOfThoughtScopeImpl(
                             isFirst = isFirst,
