@@ -344,6 +344,7 @@ class AgentRepository(
         replacesMessageId: String?,
         title: String,
         model: String? = null,
+        agentModel: String? = null,
         thinkingLevel: String? = null,
         systemPrompt: String? = null,
     ): Deferred<Result<Unit>> {
@@ -365,6 +366,7 @@ class AgentRepository(
                             replacesMessageId = replacesMessageId,
                             title = title,
                             modelOverride = model,
+                            agentModelOverride = agentModel,
                             thinkingLevelOverride = thinkingLevel,
                             systemPromptOverride = systemPrompt,
                         )
@@ -786,8 +788,26 @@ class AgentRepository(
 
     suspend fun ensureDefaultModels(): List<AgentModelEntity> {
         val existing = modelDao.getAll()
-        if (existing.isNotEmpty()) return existing
         val now = System.currentTimeMillis()
+        val codexDefault = AgentModelEntity(
+            id = "builtin-codex",
+            modelId = "Codex",
+            displayName = "Codex",
+            category = AgentModelCategory.AGENT.name,
+            providerType = "CODEX",
+            baseUrl = "",
+            isBuiltin = true,
+            sortOrder = 1,
+            createdAt = now,
+            updatedAt = now,
+        )
+        if (existing.isNotEmpty()) {
+            if (existing.none { it.id == "builtin-codex" || it.modelId.equals("Codex", ignoreCase = true) }) {
+                modelDao.insertAllIgnore(listOf(codexDefault))
+                return modelDao.getAll()
+            }
+            return existing
+        }
         val defaults = listOf(
             AgentModelEntity(
                 id = "builtin-antigravity",
@@ -800,6 +820,7 @@ class AgentRepository(
                 createdAt = now,
                 updatedAt = now,
             ),
+            codexDefault,
             AgentModelEntity(
                 id = "builtin-gemini-2.5-flash",
                 modelId = "gemini-2.5-flash",
@@ -807,7 +828,7 @@ class AgentRepository(
                 category = AgentModelCategory.CHAT.name,
                 baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
                 isBuiltin = true,
-                sortOrder = 1,
+                sortOrder = 2,
                 createdAt = now,
                 updatedAt = now,
             ),
@@ -818,7 +839,7 @@ class AgentRepository(
                 category = AgentModelCategory.CHAT.name,
                 baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
                 isBuiltin = true,
-                sortOrder = 2,
+                sortOrder = 3,
                 createdAt = now,
                 updatedAt = now,
             ),
@@ -829,7 +850,7 @@ class AgentRepository(
                 category = AgentModelCategory.CHAT.name,
                 baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
                 isBuiltin = true,
-                sortOrder = 3,
+                sortOrder = 4,
                 createdAt = now,
                 updatedAt = now,
             ),
@@ -840,7 +861,7 @@ class AgentRepository(
                 category = AgentModelCategory.DECISION.name,
                 baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
                 isBuiltin = true,
-                sortOrder = 4,
+                sortOrder = 5,
                 createdAt = now,
                 updatedAt = now,
             ),

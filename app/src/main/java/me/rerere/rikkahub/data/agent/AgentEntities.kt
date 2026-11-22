@@ -189,8 +189,8 @@ enum class AgentModelCategory(val label: String) {
         fun inferFromModelId(modelId: String): AgentModelCategory {
             val clean = modelId.trim().removePrefix("models/")
             return when {
-                clean.equals("Antigravity", ignoreCase = true) ||
-                    clean.startsWith("antigravity-", ignoreCase = true) ||
+                isAntigravityAgentModel(clean) ||
+                    isCodexAgentModel(clean) ||
                     clean.startsWith("deep-research", ignoreCase = true) ||
                     clean.startsWith("agent-", ignoreCase = true) -> AGENT
                 clean.contains("decision", ignoreCase = true) -> DECISION
@@ -198,6 +198,21 @@ enum class AgentModelCategory(val label: String) {
             }
         }
     }
+}
+
+fun isAntigravityAgentModel(modelId: String): Boolean {
+    val clean = modelId.trim().removePrefix("models/")
+    return clean.equals("Antigravity", ignoreCase = true) ||
+        clean.startsWith("antigravity-", ignoreCase = true)
+}
+
+fun isCodexAgentModel(modelId: String): Boolean {
+    val clean = modelId.trim().removePrefix("models/")
+    return clean.equals("Codex", ignoreCase = true) ||
+        clean.startsWith("codex-", ignoreCase = true) ||
+        clean.startsWith("codex:", ignoreCase = true) ||
+        clean.startsWith("codex/", ignoreCase = true) ||
+        clean.contains("-codex", ignoreCase = true)
 }
 
 const val DEFAULT_GEMINI_GATEWAY_URL = "https://gemini.any1.tech/v1beta"

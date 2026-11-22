@@ -33,6 +33,8 @@ import me.rerere.rikkahub.data.agent.AgentConversationSnapshot
 import me.rerere.rikkahub.data.agent.AgentGatewayClient
 import me.rerere.rikkahub.data.agent.AgentModelCategory
 import me.rerere.rikkahub.data.agent.AgentModelEntity
+import me.rerere.rikkahub.data.agent.isAntigravityAgentModel
+import me.rerere.rikkahub.data.agent.isCodexAgentModel
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
 import me.rerere.rikkahub.data.agent.AgentUiSettings
@@ -207,7 +209,10 @@ class AgentVM(
         Model(
             modelId = modelId,
             displayName = displayName,
-            abilities = if (AgentModelCategory.inferFromModelId(modelId) == AgentModelCategory.AGENT) {
+            abilities = if (
+                AgentModelCategory.inferFromModelId(modelId) == AgentModelCategory.AGENT &&
+                !isCodexAgentModel(modelId)
+            ) {
                 emptyList()
             } else {
                 listOf(ModelAbility.REASONING)
@@ -218,6 +223,14 @@ class AgentVM(
         SharingStarted.Eagerly,
         Model(modelId = "Antigravity", displayName = "Antigravity"),
     )
+
+    val antigravitySubModel: StateFlow<String> = settingsStore.settingsFlow
+        .map { it.antigravitySubModel }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current.antigravitySubModel)
+
+    val codexSubModel: StateFlow<String> = settingsStore.settingsFlow
+        .map { it.codexSubModel }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current.codexSubModel)
 
     private val _decisionSchemaJson = MutableStateFlow("")
     val decisionSchemaJson: StateFlow<String> = _decisionSchemaJson.asStateFlow()
@@ -393,6 +406,17 @@ class AgentVM(
         val updated = _agentAssistant.value.copy(chatModelId = model.id)
         _agentAssistant.value = updated
         persistAssistant(updated)
+    }
+
+    fun updateAgentSubModel(isCodex: Boolean, subModel: String) {
+        val clean = subModel.trim()
+        settingsStore.update { current ->
+            if (isCodex) {
+                current.copy(codexSubModel = clean)
+            } else {
+                current.copy(antigravitySubModel = clean)
+            }
+        }
     }
 
     fun updateAgentAssistant(assistant: Assistant) {
@@ -792,8 +816,20 @@ class AgentVM(
         title: String,
         targetNodeId: Uuid?,
     ) {
-        val modelName = selectedAgentModelName.value.ifBlank { "Antigravity" }
-        val thinkingLevel = if (modelName.isManagedAgentModel()) "" else _agentAssistant.value.reasoningLevel.toGeminiThinkingLevel()
+        val modelName = selectedModelEntity.value?.modelId?.ifBlank { null }
+            ?: selectedAgentModelName.value.ifBlank { "Antigravity" }
+        val agentModel = when {
+            isCodexAgentModel(modelName) -> settingsStore.current.codexSubModel.trim()
+            isAntigravityAgentModel(modelName) -> settingsStore.current.antigravitySubModel.trim()
+            else -> null
+        }
+        val reasoningLevel = _agentAssistant.value.reasoningLevel
+        val thinkingLevel = when {
+            isCodexAgentModel(modelName) && reasoningLevel in listOf(ReasoningLevel.XHIGH, ReasoningLevel.MAX) -> "xhigh"
+            isCodexAgentModel(modelName) && reasoningLevel == ReasoningLevel.OFF -> "off"
+            modelName.isManagedAgentModel() -> ""
+            else -> reasoningLevel.toGeminiThinkingLevel()
+        }
         val systemPrompt = _agentAssistant.value.systemPrompt.takeIf { it.isNotBlank() }
         val assistantMsgId = Uuid.random()
         val nodeId = targetNodeId ?: Uuid.random()
@@ -827,6 +863,7 @@ class AgentVM(
             replacesMessageId = replacesMessageId,
             title = title,
             model = modelName,
+            agentModel = agentModel,
             thinkingLevel = thinkingLevel,
             systemPrompt = systemPrompt,
         )
