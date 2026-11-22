@@ -60,10 +60,12 @@ import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.components.message.tools.DefaultToolPreview
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIContext
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIRegistry
+import me.rerere.rikkahub.ui.components.message.tools.unwrapJsonElement
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstant
+import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.ui.components.DotLoading
 import kotlin.time.Clock
 import kotlin.time.Duration
@@ -71,7 +73,10 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.DurationUnit
 
 @Composable
-fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool) {
+fun ChainOfThoughtScope.ChatMessageServerToolStep(
+    tool: UIMessagePart.ServerTool,
+    onShowDetails: (() -> Unit)? = null,
+) {
     val loading = !tool.isFinished
     val failed = tool.status == me.rerere.ai.ui.ServerToolStatus.FAILED
     val hasDetails = tool.input != null || tool.output != null
@@ -106,7 +111,13 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
             )
         },
         onClick = if (hasDetails) {
-            { showResult = true }
+            {
+                if (onShowDetails != null) {
+                    onShowDetails()
+                } else {
+                    showResult = true
+                }
+            }
         } else {
             null
         },
@@ -114,26 +125,6 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
     )
 
     if (showResult) {
-        val context = remember(tool, loading) {
-            val inputText = tool.input?.let { formatServerToolJson(it) } ?: "{}"
-            val outputParts = tool.output?.let { outputEl ->
-                val formatted = formatServerToolJson(outputEl)
-                if (formatted.isNotBlank()) listOf(UIMessagePart.Text(formatted)) else emptyList()
-            } ?: emptyList()
-            ToolUIContext(
-                tool = UIMessagePart.Tool(
-                    toolCallId = tool.toolCallId,
-                    toolName = tool.toolName,
-                    input = inputText,
-                    output = outputParts,
-                    metadata = tool.metadata,
-                ),
-                arguments = tool.input ?: JsonObject(emptyMap()),
-                content = tool.output,
-                loading = loading,
-                assistant = null,
-            )
-        }
         ModalBottomSheet(
             sheetState = rememberBottomSheetState(
                 initialValue = SheetValue.Hidden,
@@ -141,8 +132,51 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
             ),
             onDismissRequest = { showResult = false },
             content = {
-                DefaultToolPreview(context = context)
+                ServerToolDetailContent(tool = tool)
             },
+        )
+    }
+}
+
+@Composable
+internal fun ServerToolDetailContent(
+    tool: UIMessagePart.ServerTool,
+    modifier: Modifier? = null,
+    showTitle: Boolean = true,
+) {
+    val loading = !tool.isFinished
+    val context = remember(tool, loading) {
+        val parsedInput = unwrapJsonElement(tool.input)
+        val parsedOutput = unwrapJsonElement(tool.output)
+        val inputText = parsedInput?.let { formatServerToolJson(it) } ?: "{}"
+        val outputParts = parsedOutput?.let { outputEl ->
+            val formatted = formatServerToolJson(outputEl)
+            if (formatted.isNotBlank()) listOf(UIMessagePart.Text(formatted)) else emptyList()
+        } ?: emptyList()
+        ToolUIContext(
+            tool = UIMessagePart.Tool(
+                toolCallId = tool.toolCallId,
+                toolName = tool.toolName,
+                input = inputText,
+                output = outputParts,
+                metadata = tool.metadata,
+            ),
+            arguments = parsedInput ?: JsonObject(emptyMap()),
+            content = parsedOutput,
+            loading = loading,
+            assistant = null,
+        )
+    }
+    if (modifier != null) {
+        DefaultToolPreview(
+            context = context,
+            modifier = modifier,
+            showTitle = showTitle,
+        )
+    } else {
+        DefaultToolPreview(
+            context = context,
+            showTitle = showTitle,
         )
     }
 }
@@ -150,7 +184,7 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
 private fun formatServerToolJson(element: kotlinx.serialization.json.JsonElement): String {
     return when (element) {
         is JsonPrimitive -> element.contentOrNull ?: element.toString()
-        else -> element.toString()
+        else -> JsonInstantPretty.encodeToString(element)
     }
 }
 
@@ -192,6 +226,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     assistant: Assistant? = null,
     onToolApproval: ((toolCallId: String, approved: Boolean, reason: String) -> Unit)? = null,
     onToolAnswer: ((toolCallId: String, answer: String) -> Unit)? = null,
+    onShowDetails: (() -> Unit)? = null,
 ) {
     // ask_user 是交互式问答流程, 不走注册式渲染框架
     if (tool.toolName == ASK_USER_TOOL_NAME) {
@@ -300,7 +335,13 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         } else {
             null
         },
-        onClick = { showResult = true },
+        onClick = {
+            if (onShowDetails != null) {
+                onShowDetails()
+            } else {
+                showResult = true
+            }
+        },
         content = if (hasExtraContent) {
             {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -355,15 +396,65 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             ),
             onDismissRequest = { showResult = false },
             content = {
-                if (outputUnparsable) {
-                    DefaultToolPreview(context = context)
-                } else {
-                    renderer.Preview(
-                        context = context,
-                        onDismissRequest = { showResult = false },
-                    )
-                }
+                ToolStepDetailContent(
+                    tool = tool,
+                    loading = loading,
+                    assistant = assistant,
+                    onDismissRequest = { showResult = false },
+                )
             },
+        )
+    }
+}
+
+@Composable
+internal fun ToolStepDetailContent(
+    tool: UIMessagePart.Tool,
+    loading: Boolean,
+    assistant: Assistant?,
+    onDismissRequest: () -> Unit,
+    modifier: Modifier? = null,
+    showDefaultTitle: Boolean = true,
+) {
+    val renderer = remember(tool.toolName) { ToolUIRegistry.resolve(tool.toolName) }
+    val outputJson = remember(tool) {
+        if (tool.isExecuted) {
+            runCatching {
+                JsonInstant.parseToJsonElement(
+                    tool.output.filterIsInstance<UIMessagePart.Text>().joinToString("\n") { it.text }
+                )
+            }.getOrNull()
+        } else {
+            null
+        }
+    }
+    val outputUnparsable = tool.isExecuted && outputJson == null
+    val context = remember(tool, loading, assistant) {
+        ToolUIContext(
+            tool = tool,
+            arguments = tool.inputAsJson(),
+            content = if (tool.isExecuted) outputJson ?: JsonObject(emptyMap()) else null,
+            loading = loading,
+            assistant = assistant,
+        )
+    }
+    if (outputUnparsable) {
+        if (modifier != null) {
+            DefaultToolPreview(
+                context = context,
+                modifier = modifier,
+                showTitle = showDefaultTitle,
+            )
+        } else {
+            DefaultToolPreview(
+                context = context,
+                showTitle = showDefaultTitle,
+            )
+        }
+    } else {
+        renderer.Preview(
+            context = context,
+            onDismissRequest = onDismissRequest,
         )
     }
 }

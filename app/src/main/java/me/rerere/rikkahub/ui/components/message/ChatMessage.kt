@@ -315,7 +315,7 @@ fun ChatMessage(
 }
 
 // 思考链折叠时默认保留的尾部步骤数
-private const val COLLAPSED_VISIBLE_STEPS = 2
+private const val COLLAPSED_VISIBLE_STEPS = 4
 
 @OptIn(FlowPreview::class)
 @Composable
@@ -380,15 +380,23 @@ private fun MessagePartsBlock(
                     } else {
                         maxOf(COLLAPSED_VISIBLE_STEPS, block.steps.size - firstPendingIndex)
                     }
+                    var sheetRoute by remember { mutableStateOf<ThinkingBlockSheetRoute?>(null) }
+                    var openedFromOverview by remember { mutableStateOf(false) }
+
                     ChainOfThought(
                         modifier = Modifier.animateContentSize(),
                         steps = block.steps,
                         collapsedVisibleCount = collapsedVisibleCount,
                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                        onExpandClick = {
+                            openedFromOverview = true
+                            sheetRoute = ThinkingBlockSheetRoute.Overview
+                        },
                         cardColors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = settings.displaySetting.bubbleOpacity),
                         ),
                     ) { step ->
+                        val stepIndex = block.steps.indexOf(step)
                         when (step) {
                             is ThinkingStep.ReasoningStep -> {
                                 key(step.reasoning.createdAt) {
@@ -409,18 +417,47 @@ private fun MessagePartsBlock(
                                         assistant = assistant,
                                         onToolApproval = onToolApproval,
                                         onToolAnswer = onToolAnswer,
+                                        onShowDetails = {
+                                            if (stepIndex >= 0) {
+                                                openedFromOverview = false
+                                                sheetRoute = ThinkingBlockSheetRoute.ToolDetail(stepIndex)
+                                            }
+                                        },
                                     )
                                 }
                             }
 
                             is ThinkingStep.ServerToolStep -> {
                                 key(step.tool.toolCallId.ifBlank { step.hashCode().toString() }) {
-                                    ChatMessageServerToolStep(tool = step.tool)
+                                    ChatMessageServerToolStep(
+                                        tool = step.tool,
+                                        onShowDetails = {
+                                            if (stepIndex >= 0) {
+                                                openedFromOverview = false
+                                                sheetRoute = ThinkingBlockSheetRoute.ToolDetail(stepIndex)
+                                            }
+                                        },
+                                    )
                                 }
                             }
 
                             is ThinkingStep.NoticeStep -> ChatMessageNoticeStep(notice = step.notice)
                         }
+                    }
+
+                    sheetRoute?.let { activeRoute ->
+                        ThinkingBlockSheet(
+                            steps = block.steps,
+                            route = activeRoute,
+                            openedFromOverview = openedFromOverview,
+                            onRouteChange = { sheetRoute = it },
+                            onDismiss = { sheetRoute = null },
+                            loading = loading,
+                            model = model,
+                            assistant = assistant,
+                            onToolApproval = onToolApproval,
+                            onToolAnswer = onToolAnswer,
+                        )
                     }
                 }
             }

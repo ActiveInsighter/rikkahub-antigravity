@@ -9,11 +9,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardColors
 import androidx.compose.material3.CardDefaults
@@ -23,7 +26,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -68,13 +73,24 @@ fun <T> ChainOfThought(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     ),
     steps: List<T>,
-    collapsedVisibleCount: Int = 2,
+    collapsedVisibleCount: Int = 4,
     collapsedAdaptiveWidth: Boolean = false,
+    onExpandClick: (() -> Unit)? = null,
     content: @Composable ChainOfThoughtScope.(T) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     val canCollapse = steps.size > collapsedVisibleCount
+    val isCollapsed = canCollapse && !expanded
     val shouldFillCollapseControlWidth = expanded || !collapsedAdaptiveWidth
+    val collapsedScrollState = rememberScrollState()
+    var lastAutoScrolledCount by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(isCollapsed, steps.size, collapsedScrollState.maxValue) {
+        if (isCollapsed && steps.size != lastAutoScrolledCount && collapsedScrollState.maxValue > 0) {
+            lastAutoScrolledCount = steps.size
+            collapsedScrollState.scrollTo(collapsedScrollState.maxValue)
+        }
+    }
 
     Card(
         modifier = modifier,
@@ -88,12 +104,6 @@ fun <T> ChainOfThought(
                     animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
                 ),
         ) {
-            val visibleSteps = if (expanded || !canCollapse) {
-                steps
-            } else {
-                steps.takeLast(collapsedVisibleCount)
-            }
-
             // 显示展开/折叠按钮（统一在顶部）
             if (canCollapse) {
                 Row(
@@ -106,7 +116,13 @@ fun <T> ChainOfThought(
                             }
                         )
                         .clip(MaterialTheme.shapes.small)
-                        .clickable { expanded = !expanded }
+                        .clickable {
+                            if (onExpandClick != null) {
+                                onExpandClick()
+                            } else {
+                                expanded = !expanded
+                            }
+                        }
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -116,7 +132,11 @@ fun <T> ChainOfThought(
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
-                            imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                            imageVector = if (expanded && onExpandClick == null) {
+                                HugeIcons.ArrowUp01
+                            } else {
+                                HugeIcons.ArrowDown01
+                            },
                             contentDescription = null,
                             modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.primary,
@@ -126,7 +146,7 @@ fun <T> ChainOfThought(
                     // 右侧：文字区域（8.dp 间距后开始，和步骤 label 对齐）
                     Text(
                         modifier = Modifier.padding(start = 8.dp),
-                        text = if (expanded) {
+                        text = if (expanded && onExpandClick == null) {
                             stringResource(R.string.chain_of_thought_collapse)
                         } else {
                             stringResource(
@@ -143,10 +163,18 @@ fun <T> ChainOfThought(
             val lineColor = MaterialTheme.colorScheme.outlineVariant
             // 每个步骤只绘制自己的连线分段并在节点处留空，
             // 避免使用离屏合成 + BlendMode.Clear（离屏层过大时部分设备会退化，节点区域被清成黑块）。
-            Column {
-                visibleSteps.fastForEachIndexed { index, step ->
+            Column(
+                modifier = if (isCollapsed) {
+                    Modifier
+                        .heightIn(max = 220.dp)
+                        .verticalScroll(collapsedScrollState)
+                } else {
+                    Modifier
+                }
+            ) {
+                steps.fastForEachIndexed { index, step ->
                     val isFirst = index == 0
-                    val isLast = index == visibleSteps.lastIndex
+                    val isLast = index == steps.lastIndex
                     val scope = remember(isFirst, isLast, lineColor) {
                         ChainOfThoughtScopeImpl(
                             isFirst = isFirst,
