@@ -398,7 +398,9 @@ private fun StructuredToolArguments(
                 val diff = remember(targetContent, replacementContent, pathHint) {
                     generateUnifiedDiff(targetContent, replacementContent, pathHint ?: toolName)
                 }
-                HighlightCodeBlock(code = diff, language = "diff")
+                if (!diff.isNullOrBlank()) {
+                    HighlightCodeBlock(code = diff, language = "diff")
+                }
             }
             replacementChunks?.forEachIndexed { idx, chunk ->
                 val oldText = chunk["TargetContent"]?.jsonPrimitiveOrNull?.contentOrNull
@@ -411,7 +413,9 @@ private fun StructuredToolArguments(
                     val diff = remember(oldText, newText, pathHint) {
                         generateUnifiedDiff(oldText, newText, pathHint ?: toolName)
                     }
-                    HighlightCodeBlock(code = diff, language = "diff")
+                    if (!diff.isNullOrBlank()) {
+                        HighlightCodeBlock(code = diff, language = "diff")
+                    }
                 }
             }
             val handledKeys = setOf(
