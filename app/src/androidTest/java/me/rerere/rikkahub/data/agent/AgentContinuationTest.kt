@@ -41,8 +41,11 @@ class AgentContinuationTest {
             "/api/anyworkflow/gemini/jobs/first/messages/failed/parts" to """
                 {
                   "items":[
-                    {"key":"think","type":"reasoning_summary","sequence":1,"revision":1,"content":"分析任务"},
-                    {"key":"tool","type":"tool_call","sequence":2,"revision":2,"toolName":"list_dir"}
+                    {"key":"think","sequence":1,"revision":1,
+                     "part":{"type":"reasoning","reasoning":"分析任务","status":"completed"}},
+                    {"key":"tool","sequence":2,"revision":2,
+                     "part":{"type":"server_tool","status":"failed","toolCallId":"list-1","toolName":"list_dir",
+                             "input":{"cwd":"/workspace"},"output":{"exitCode":1}}}
                   ],
                   "nextCursor":2,"hasMore":false
                 }
@@ -72,7 +75,9 @@ class AgentContinuationTest {
             )
             assertEquals("原始任务", (messages[0].parts.single() as UIMessagePart.Text).text)
             assertEquals("分析任务", messages[1].parts.filterIsInstance<UIMessagePart.Reasoning>().single().reasoning)
-            assertEquals(1, messages[1].parts.filterIsInstance<UIMessagePart.ServerTool>().size)
+            val tool = messages[1].parts.filterIsInstance<UIMessagePart.ServerTool>().single()
+            assertEquals("list_dir", tool.toolName)
+            assertEquals("""{"exitCode":1}""", tool.output.toString())
             assertEquals("Antigravity 请求失败（HTTP 400）", messages[1].parts.filterIsInstance<UIMessagePart.Notice>().single().text)
             assertEquals("继续完成", (messages[2].parts.single() as UIMessagePart.Text).text)
 

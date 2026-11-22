@@ -6,7 +6,7 @@ import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -147,6 +147,7 @@ data class RemoteGeminiMessage(
     val usage: RemoteGeminiUsage,
     val agentSummaryJson: String? = null,
     val agentTimingsJson: String? = null,
+    val timeline: AgentTimeline? = null,
 )
 
 data class RemoteGeminiUsage(
@@ -170,19 +171,28 @@ data class RemoteGeminiUsage(
 }
 
 data class RemoteAgentPart(
-    val id: String,
-    val message: String,
     val key: String,
     val sequence: Int,
     val revision: Int,
-    val type: String,
-    val status: String,
-    val content: String,
-    val toolName: String,
-    val callId: String,
-    val providerType: String,
-    val truncated: Boolean,
+    val part: JsonObject,
 )
+
+data class AgentTimeline(
+    val parts: List<JsonObject>,
+    val annotations: JsonArray,
+    val omittedParts: Int,
+)
+
+internal fun decodeAgentTimeline(value: JsonObject?): AgentTimeline? {
+    if (value == null || (value["version"] as? JsonPrimitive)?.intOrNull != 1) return null
+    val parts = value["parts"] as? JsonArray ?: return null
+    return AgentTimeline(
+        parts = parts.mapNotNull { it as? JsonObject }
+            .sortedBy { (it["sequence"] as? JsonPrimitive)?.intOrNull ?: Int.MAX_VALUE },
+        annotations = value["annotations"] as? JsonArray ?: JsonArray(emptyList()),
+        omittedParts = (value["omittedParts"] as? JsonPrimitive)?.intOrNull ?: 0,
+    )
+}
 
 data class RemoteAgentSourceInput(
     val id: String,
@@ -351,7 +361,9 @@ class PocketBaseAgentCloudClient(
         val cached = previous?.takeIf { it.job.id == job.id && it.message?.id == message?.id }
         var cursor = cached?.partsCursor ?: 0
         var parts = cached?.parts.orEmpty()
-        if (message != null && (cached == null || message.streamRevision == null || message.streamRevision > cursor)) {
+        if (message?.timeline != null) {
+            parts = emptyList()
+        } else if (message != null && (cached == null || message.streamRevision == null || message.streamRevision > cursor)) {
             val (newParts, nextCursor) = drainParts(session, job.id, message.id, startCursor = cursor)
             val partsByKey = parts.associateByTo(LinkedHashMap()) { it.key }
             for (part in newParts) {
@@ -371,7 +383,7 @@ class PocketBaseAgentCloudClient(
         } else {
             val ancestors = fetchAncestors(session, job)
             val ancestorParts = ancestors.mapNotNull { (ancestorJob, ancestor) ->
-                if (ancestor.streamRevision == 0) null else {
+                if (ancestor.timeline != null || ancestor.streamRevision == 0) null else {
                     ancestor.id to drainParts(session, ancestorJob.id, ancestor.id, startCursor = 0).first
                 }
             }.toMap()
@@ -635,15 +647,7 @@ class PocketBaseAgentCloudClient(
         parts: List<RemoteAgentPart>,
     ): UIMessage {
         val uiParts = mutableListOf<UIMessagePart>()
-        val annotations = mutableListOf<UIMessageAnnotation>()
-
-        val toolResultsByCallId = LinkedHashMap<String, RemoteAgentPart>()
-        val consumedResultKeys = HashSet<String>()
-        for (part in parts) {
-            if (part.type == "tool_result" && part.callId.isNotBlank()) {
-                toolResultsByCallId.putIfAbsent(part.callId, part)
-            }
-        }
+        val annotations = mutableListOf<UIMessageAnnotation.UrlCitation>()
 
         val isHistorical = message != null && message.job.isNotBlank() && message.job != job.id
         val isRunning = if (isHistorical) {
@@ -661,99 +665,77 @@ class PocketBaseAgentCloudClient(
             .takeIf { it > 0L }
             ?.let { kotlin.time.Instant.fromEpochMilliseconds(it) }
 
-        var hasTextPart = false
-        for (part in parts) {
-            if (part.type == "status") continue
-            if (part.type == "tool_result" && part.key in consumedResultKeys) continue
-
-            when (part.type) {
-                "reasoning_summary" -> {
-                    if (part.content.isNotBlank()) {
-                        uiParts += UIMessagePart.Reasoning(
-                            reasoning = part.content,
-                            reasoningType = ReasoningType.SUMMARY_TEXT,
-                            createdAt = kotlin.time.Instant.fromEpochMilliseconds(baseReasoningMs + part.sequence.coerceAtLeast(0)),
-                            finishedAt = if (part.status == "running") {
-                                null
-                            } else {
-                                messageFinishedInstant
-                                    ?: messageUpdatedInstant
-                                    ?: kotlin.time.Instant.fromEpochMilliseconds(baseReasoningMs + part.sequence.coerceAtLeast(0) + 1000L)
-                            },
-                        )
-                    }
+        val timeline = message?.timeline
+        val blocks = timeline?.parts ?: parts.sortedBy { it.sequence }.map { it.part }
+        timeline?.annotations?.let { parseAnnotations(it, annotations) }
+        var hasAnswer = false
+        for ((index, part) in blocks.withIndex()) {
+            val providerType = part.str("providerType")
+            val status = part.str("status")
+            val truncated = (part["truncated"] as? JsonPrimitive)?.booleanOrNull == true
+            val metadata = buildJsonObject {
+                if (providerType.isNotBlank()) put("providerType", providerType)
+                if (truncated) put("truncated", true)
+                if (status.isNotBlank()) put("agentStatus", status)
+            }.takeIf { it.isNotEmpty() }
+            val suffix = if (truncated) "\n\n[内容过长已截断]" else ""
+            when (part.str("type")) {
+                "reasoning" -> if (part.str("reasoning").isNotBlank()) {
+                    val createdAt = kotlin.time.Instant.fromEpochMilliseconds(baseReasoningMs + index)
+                    uiParts += UIMessagePart.Reasoning(
+                        reasoning = part.str("reasoning") + suffix,
+                        reasoningType = ReasoningType.SUMMARY_TEXT,
+                        createdAt = createdAt,
+                        finishedAt = if (status == "running" && isRunning) null else
+                            messageFinishedInstant ?: messageUpdatedInstant ?: createdAt,
+                        metadata = metadata,
+                    )
                 }
                 "text" -> {
-                    val text = buildString {
-                        append(part.content)
-                        if (part.truncated) append("\n\n[内容过长已截断]")
-                    }
+                    val text = part.str("text")
+                    parseAnnotations(part["annotations"] as? JsonArray, annotations)
                     if (text.isNotBlank()) {
-                        hasTextPart = true
-                        uiParts += UIMessagePart.Text(text = text)
+                        hasAnswer = hasAnswer || providerType != "commentary"
+                        uiParts += UIMessagePart.Text(text + suffix, metadata)
                     }
                 }
-                "tool_call" -> {
-                    val pairedResult = if (part.callId.isNotBlank()) {
-                        toolResultsByCallId[part.callId]?.also { consumedResultKeys += it.key }
-                    } else null
-                    val status = when {
-                        part.status == "failed" || pairedResult?.status == "failed" -> ServerToolStatus.FAILED
-                        pairedResult != null || part.status == "completed" -> ServerToolStatus.COMPLETED
-                        else -> ServerToolStatus.IN_PROGRESS
+                "tool", "server_tool" -> {
+                    // Remote steps are read-only, including tools run by the remote client.
+                    val toolStatus = when {
+                        status in setOf("failed", "canceled") -> ServerToolStatus.FAILED
+                        status == "running" -> if (isRunning) ServerToolStatus.IN_PROGRESS else ServerToolStatus.FAILED
+                        else -> ServerToolStatus.COMPLETED
                     }
                     uiParts += UIMessagePart.ServerTool(
-                        toolCallId = part.callId.ifBlank { part.key },
-                        toolName = part.toolName.ifBlank { part.providerType.ifBlank { "tool" } },
-                        input = parseJsonOrPrimitive(part.content),
-                        output = pairedResult?.let { parseJsonOrPrimitive(it.content) },
-                        status = status,
+                        toolCallId = part.str("toolCallId"),
+                        toolName = part.str("toolName"),
+                        input = part["input"]?.takeUnless { it is JsonNull },
+                        output = part["output"]?.takeUnless { it is JsonNull },
+                        status = toolStatus,
+                        metadata = metadata,
                     )
                 }
-                "tool_result" -> {
-                    val status = if (part.status == "failed") ServerToolStatus.FAILED else ServerToolStatus.COMPLETED
-                    uiParts += UIMessagePart.ServerTool(
-                        toolCallId = part.callId.ifBlank { part.key },
-                        toolName = part.toolName.ifBlank { part.providerType.ifBlank { "tool_result" } },
-                        input = null,
-                        output = parseJsonOrPrimitive(part.content),
-                        status = status,
+                "annotations" -> parseAnnotations(part["annotations"] as? JsonArray, annotations)
+                "image" -> if (part.str("url").isNotBlank()) {
+                    uiParts += UIMessagePart.Image(url = part.str("url"), metadata = metadata)
+                }
+                "document" -> if (part.str("url").isNotBlank()) {
+                    uiParts += UIMessagePart.Document(
+                        url = part.str("url"),
+                        fileName = part.str("fileName").ifBlank { "附件" },
+                        mime = part.str("mimeType").ifBlank { "application/octet-stream" },
+                        metadata = metadata,
                     )
-                }
-                "annotations" -> {
-                    parseAnnotations(part.content, annotations)
-                }
-                "image" -> {
-                    val uri = runCatching {
-                        JsonInstant.parseToJsonElement(part.content).jsonObject.str("uri")
-                    }.getOrDefault("")
-                    if (uri.isNotBlank()) {
-                        uiParts += UIMessagePart.Image(url = uri)
-                    }
                 }
             }
         }
 
         val reply = message?.reply.orEmpty()
-        if (reply.isNotBlank()) {
-            val streamedText = uiParts.filterIsInstance<UIMessagePart.Text>().joinToString("\n\n") { it.text }
-            if (!hasTextPart || (!isRunning && streamedText.trim() != reply.trim())) {
-                uiParts.removeAll { it is UIMessagePart.Text }
-                uiParts += UIMessagePart.Text(text = reply)
-            }
+        if (reply.isNotBlank() && !hasAnswer) {
+            uiParts += UIMessagePart.Text(text = reply)
         }
-
-        // If an in-place updated text part has an earlier sequence than later tool/reasoning steps,
-        // move the final reply text after those steps so steps never appear after the final reply.
-        val lastTextIndex = uiParts.indexOfLast { it is UIMessagePart.Text && it.text.isNotBlank() }
-        if (lastTextIndex != -1 && lastTextIndex < uiParts.lastIndex) {
-            val hasTrailingSteps = uiParts.subList(lastTextIndex + 1, uiParts.size)
-                .any { it is UIMessagePart.Reasoning || it is UIMessagePart.ServerTool }
-            if (hasTrailingSteps && (!isRunning || (message != null && message.reply.isNotBlank()))) {
-                val finalText = uiParts.removeAt(lastTextIndex)
-                val insertIndex = uiParts.indexOfLast { it is UIMessagePart.Reasoning || it is UIMessagePart.ServerTool } + 1
-                uiParts.add(insertIndex, finalText)
-            }
+        if ((timeline?.omittedParts ?: 0) > 0) {
+            uiParts += UIMessagePart.Notice(title = "执行记录已截断", text = "部分内容块超过消息存储上限。")
         }
 
         val canceled = isCanceledStatus(message?.status) || (!isHistorical && isCanceledStatus(job.status))
@@ -786,7 +768,7 @@ class PocketBaseAgentCloudClient(
             id = messageId,
             role = MessageRole.ASSISTANT,
             parts = uiParts,
-            annotations = annotations,
+            annotations = annotations.distinctBy { it.url },
             createdAt = parseLocalDateTime(if (isHistorical) message?.startedAt?.ifBlank { job.created } ?: job.created else job.created),
             finishedAt = finishedAt,
             modelSnapshot = ModelSnapshot(
@@ -952,7 +934,7 @@ class PocketBaseAgentCloudClient(
             ).jsonObject
             val items = page["items"]?.jsonArray.orEmpty()
             for (el in items) {
-                collected += parsePart(el.jsonObject)
+                parsePart(el.jsonObject)?.let(collected::add)
             }
             val nextCursor = page["nextCursor"]?.jsonPrimitive?.intOrNull ?: cursor
             val hasMore = page["hasMore"]?.jsonPrimitive?.booleanOrNull ?: false
@@ -1072,6 +1054,7 @@ class PocketBaseAgentCloudClient(
             usage = usage,
             agentSummaryJson = jsonFieldString(obj, "agentSummary"),
             agentTimingsJson = jsonFieldString(obj, "agentTimings"),
+            timeline = decodeAgentTimeline(obj["timeline"] as? JsonObject),
         )
     }
 
@@ -1084,33 +1067,17 @@ class PocketBaseAgentCloudClient(
         }
     }
 
-    private fun parsePart(obj: JsonObject): RemoteAgentPart {
+    private fun parsePart(obj: JsonObject): RemoteAgentPart? {
         return RemoteAgentPart(
-            id = obj.str("id"),
-            message = obj.str("message"),
             key = obj.str("key"),
             sequence = obj["sequence"]?.jsonPrimitive?.intOrNull ?: 0,
             revision = obj["revision"]?.jsonPrimitive?.intOrNull ?: 0,
-            type = obj.str("type"),
-            status = obj.str("status"),
-            content = obj.str("content"),
-            toolName = obj.str("toolName"),
-            callId = obj.str("callId"),
-            providerType = obj.str("providerType"),
-            truncated = obj["truncated"]?.jsonPrimitive?.booleanOrNull ?: false,
+            part = obj["part"] as? JsonObject ?: return null,
         )
     }
 
-    private fun parseJsonOrPrimitive(raw: String): JsonElement? {
-        val trimmed = raw.trim()
-        if (trimmed.isEmpty()) return null
-        return runCatching { JsonInstant.parseToJsonElement(trimmed) }
-            .getOrElse { JsonPrimitive(trimmed) }
-    }
-
-    private fun parseAnnotations(raw: String, out: MutableList<UIMessageAnnotation>) {
-        val arr = runCatching { JsonInstant.parseToJsonElement(raw) as? JsonArray }.getOrNull() ?: return
-        for (item in arr) {
+    private fun parseAnnotations(arr: JsonArray?, out: MutableList<UIMessageAnnotation.UrlCitation>) {
+        for (item in arr.orEmpty()) {
             val obj = item as? JsonObject ?: continue
             val url = obj.str("url")
             if (url.startsWith("http://", ignoreCase = true) || url.startsWith("https://", ignoreCase = true)) {
