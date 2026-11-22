@@ -680,7 +680,6 @@ private fun QuestionChoice(
                     Text(checkNotNull(feedback.label), style = MaterialTheme.typography.labelMedium)
                 }
             }
-
         }
     }
 }
@@ -721,6 +720,7 @@ private fun QuestionChoiceMarker(
         ) { verdict ->
             if (verdict?.icon != null) {
                 Surface(
+                    modifier = Modifier.size(15.dp),
                     shape = CircleShape,
                     color = ink,
                     contentColor = rowColor,
