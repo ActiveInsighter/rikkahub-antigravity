@@ -75,6 +75,9 @@ internal interface DocsDao {
     @Query("SELECT * FROM DocsRecord WHERE site = :site AND account = :account")
     suspend fun records(site: String, account: String): List<DocsRecord>
 
+    @Query("SELECT * FROM DocsRecord WHERE site = :site AND account = :account")
+    fun observeRecords(site: String, account: String): Flow<List<DocsRecord>>
+
     @Query("""
         SELECT * FROM DocsRecord WHERE site = :site AND account = :account
         AND path = :path AND kind = 'answers'

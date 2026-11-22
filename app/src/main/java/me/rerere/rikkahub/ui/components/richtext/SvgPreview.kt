@@ -1,11 +1,15 @@
 package me.rerere.rikkahub.ui.components.richtext
 
+import android.content.Context
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -27,11 +31,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import coil3.annotation.ExperimentalCoilApi
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
+import coil3.request.CachePolicy
 import coil3.request.ImageRequest
+import coil3.size.Precision
+import coil3.size.Size
 import coil3.svg.SvgDecoder
 import com.jvziyaoyao.scale.image.pager.ImagePager
 import com.jvziyaoyao.scale.zoomable.pager.rememberZoomablePagerState
@@ -42,7 +50,7 @@ import me.rerere.rikkahub.R
 @Composable
 internal fun SvgArtwork(model: Any, description: String?, modifier: Modifier = Modifier) {
     AsyncImage(
-        model = rememberSvgRequest(model, vector = false),
+        model = rememberSvgRequest(model),
         contentDescription = description,
         contentScale = ContentScale.Fit,
         modifier = modifier,
@@ -64,7 +72,7 @@ internal fun SvgPreview(
     ) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             AsyncImage(
-                model = rememberSvgRequest(model, vector = false),
+                model = rememberSvgRequest(model),
                 contentDescription = description,
                 modifier = Modifier.fillMaxWidth(),
                 onSuccess = { failed = false },
@@ -89,48 +97,79 @@ internal fun SvgPreviewDialog(
     framed: Boolean = true,
 ) {
     val pagerState = rememberZoomablePagerState { 1 }
-    val painter = rememberAsyncImagePainter(rememberSvgRequest(model, vector = true))
+    val painter = rememberAsyncImagePainter(rememberSvgRequest(model, maxSizePx = 2400))
     val state by painter.state.collectAsState()
     Dialog(onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
+            modifier = if (framed) Modifier.fillMaxSize().padding(16.dp) else Modifier.fillMaxSize(),
             shape = if (framed) MaterialTheme.shapes.extraLarge else RectangleShape,
             color = if (framed) Color.White else Color.Transparent,
             contentColor = if (framed) Color(0xFF303134) else Color.White,
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 ImagePager(
-                    modifier = Modifier.fillMaxSize().padding(top = 48.dp).semantics {
+                    modifier = Modifier.fillMaxSize().semantics {
                         if (!description.isNullOrBlank()) contentDescription = description
                     },
                     pagerState = pagerState,
                     imageLoader = { Pair(painter, painter.intrinsicSize) },
                 )
-                if (framed && state is AsyncImagePainter.State.Error) {
+                if (state is AsyncImagePainter.State.Loading) {
+                    LoadingIndicator()
+                }
+                if (state is AsyncImagePainter.State.Error) {
                     Text(stringResource(R.string.svg_preview_error))
                 }
-                IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopEnd)) {
-                    Icon(
-                        HugeIcons.Cancel01,
-                        contentDescription = stringResource(R.string.update_card_close),
-                        tint = if (framed) Color(0xFF303134) else Color.White,
-                    )
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(12.dp)
+                        .zIndex(1f),
+                    shape = CircleShape,
+                    color = if (framed) {
+                        Color(0xFF303134).copy(alpha = 0.08f)
+                    } else {
+                        Color.Black.copy(alpha = 0.45f)
+                    },
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            HugeIcons.Cancel01,
+                            contentDescription = stringResource(R.string.update_card_close),
+                            tint = if (framed) Color(0xFF303134) else Color.White,
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-@OptIn(ExperimentalCoilApi::class)
 @Composable
-private fun rememberSvgRequest(model: Any, vector: Boolean): ImageRequest {
+private fun rememberSvgRequest(model: Any, maxSizePx: Int? = null): ImageRequest {
     val context = LocalContext.current
-    return remember(context, model, vector) {
-        ImageRequest.Builder(context)
-            .data(model)
-            .decoderFactory { result, options, _ ->
-                SvgDecoder(result.source, options, parser = compatibleSvgParser, renderToBitmap = !vector)
-            }
-            .build()
+    return remember(context, model, maxSizePx) {
+        buildSvgImageRequest(context, model, maxSizePx)
     }
 }
+
+@OptIn(ExperimentalCoilApi::class)
+internal fun buildSvgImageRequest(
+    context: Context,
+    model: Any,
+    maxSizePx: Int? = null,
+): ImageRequest = ImageRequest.Builder(context)
+    .data(model)
+    .diskCachePolicy(CachePolicy.ENABLED)
+    .memoryCachePolicy(CachePolicy.ENABLED)
+    .apply {
+        if (maxSizePx != null) {
+            size(Size(maxSizePx, maxSizePx))
+            precision(Precision.INEXACT)
+        }
+    }
+    .decoderFactory { result, options, _ ->
+        SvgDecoder(result.source, options, parser = compatibleSvgParser, renderToBitmap = true)
+    }
+    .build()

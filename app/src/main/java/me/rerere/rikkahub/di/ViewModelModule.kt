@@ -149,4 +149,11 @@ val viewModelModule = module {
             repository = get(),
         )
     }
+    viewModel {
+        me.rerere.rikkahub.ui.pages.examdocs.ExamDocsStatsVM(
+            examDocsRepository = get(),
+            progressRepository = get(),
+            accountRepository = get(),
+        )
+    }
 }

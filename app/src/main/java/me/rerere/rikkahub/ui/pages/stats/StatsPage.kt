@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -49,7 +51,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ChartColumn
@@ -171,7 +175,14 @@ fun StatsPage(vm: StatsVM = koinViewModel()) {
 }
 
 @Composable
-private fun HeatmapCard(requestsPerDay: Map<LocalDate, Int>, modifier: Modifier = Modifier) {
+internal fun HeatmapCard(
+    requestsPerDay: Map<LocalDate, Int>,
+    modifier: Modifier = Modifier,
+    title: String = stringResource(R.string.stats_page_heatmap_title),
+    weeksCount: Int = 53,
+    cellSize: Dp = 11.dp,
+    cellSpacing: Dp = 2.dp,
+) {
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CustomColors.cardColorsOnSurfaceContainer,
@@ -180,9 +191,14 @@ private fun HeatmapCard(requestsPerDay: Map<LocalDate, Int>, modifier: Modifier 
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(stringResource(R.string.stats_page_heatmap_title), style = MaterialTheme.typography.titleMedium)
+            Text(title, style = MaterialTheme.typography.titleMedium)
 
-            ChatHeatmap(requestsPerDay = requestsPerDay)
+            ActivityHeatmap(
+                requestsPerDay = requestsPerDay,
+                weeksCount = weeksCount,
+                cellSize = cellSize,
+                cellSpacing = cellSpacing,
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -196,7 +212,7 @@ private fun HeatmapCard(requestsPerDay: Map<LocalDate, Int>, modifier: Modifier 
                 )
                 Spacer(Modifier.width(2.dp))
                 listOf(0f, 0.25f, 0.5f, 0.75f, 1f).forEach { alpha ->
-                    HeatmapCell(alpha = alpha, sizeDp = 10)
+                    HeatmapCell(alpha = alpha, size = 10.dp)
                 }
                 Spacer(Modifier.width(2.dp))
                 Text(
@@ -210,21 +226,24 @@ private fun HeatmapCard(requestsPerDay: Map<LocalDate, Int>, modifier: Modifier 
 }
 
 @Composable
-private fun ChatHeatmap(requestsPerDay: Map<LocalDate, Int>) {
+internal fun ActivityHeatmap(
+    requestsPerDay: Map<LocalDate, Int>,
+    weeksCount: Int = 53,
+    cellSize: Dp = 11.dp,
+    cellSpacing: Dp = 2.dp,
+) {
     val today = LocalDate.now()
+    val safeWeeks = weeksCount.coerceAtLeast(1)
     val startSunday = today
         .with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))
-        .minusWeeks(52)
+        .minusWeeks((safeWeeks - 1).toLong())
 
-    val numWeeks = 53
     val activeCounts = requestsPerDay.values.filter { it > 0 }.sorted()
     val q1 = activeCounts.getOrElse((activeCounts.size * 0.25).toInt()) { 1 }
     val q2 = activeCounts.getOrElse((activeCounts.size * 0.50).toInt()) { 2 }
     val q3 = activeCounts.getOrElse((activeCounts.size * 0.75).toInt()) { 3 }
-    val cellSize = 11.dp
-    val cellSpacing = 2.dp
     // Month label row height
-    val monthLabelHeight = 14.dp
+    val monthLabelHeight = 16.dp
 
     // Day-of-week labels (only Mon/Wed/Fri to save space, Sun=0)
     val dowLabels = listOf(
@@ -240,24 +259,32 @@ private fun ChatHeatmap(requestsPerDay: Map<LocalDate, Int>) {
     // Shared scroll state so month labels + grid scroll together
     val scrollState = rememberScrollState(initial = Int.MAX_VALUE)
 
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        // Fixed left column: spacer for month label row + DOW labels
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Fixed left column: spacer for month label row + DOW labels (unclipped width & vertical overflow)
         Column(
-            modifier = Modifier.width(12.dp),
+            modifier = Modifier.widthIn(min = 16.dp),
+            horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(cellSpacing),
         ) {
             Spacer(Modifier.height(monthLabelHeight + 2.dp))
             dowLabels.forEach { label ->
                 Box(
-                    modifier = Modifier.size(cellSize),
-                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.height(cellSize),
+                    contentAlignment = Alignment.CenterEnd,
                 ) {
                     if (label.isNotEmpty()) {
                         Text(
                             text = label,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontSize = MaterialTheme.typography.labelSmall.fontSize * 0.7,
+                            modifier = Modifier
+                                .wrapContentWidth(unbounded = true)
+                                .wrapContentHeight(unbounded = true),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 9.sp,
+                                lineHeight = 10.sp,
+                            ),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            softWrap = false,
+                            maxLines = 1,
                         )
                     }
                 }
@@ -271,11 +298,19 @@ private fun ChatHeatmap(requestsPerDay: Map<LocalDate, Int>) {
         ) {
             // Month labels row
             Row(horizontalArrangement = Arrangement.spacedBy(cellSpacing)) {
-                for (weekIdx in 0 until numWeeks) {
+                for (weekIdx in 0 until safeWeeks) {
                     val weekStart = startSunday.plusDays((weekIdx * 7).toLong())
-                    val labelDate = (0..6)
+                    val firstOfMonth = (0..6)
                         .map { weekStart.plusDays(it.toLong()) }
                         .firstOrNull { it.dayOfMonth == 1 }
+                    val labelDate = when {
+                        firstOfMonth != null -> firstOfMonth
+                        weekIdx == 0 && safeWeeks <= 12 -> {
+                            val nextFirst = (7..13).map { weekStart.plusDays(it.toLong()) }.firstOrNull { it.dayOfMonth == 1 }
+                            if (nextFirst == null) weekStart else null
+                        }
+                        else -> null
+                    }
                     Box(
                         modifier = Modifier
                             .width(cellSize)
@@ -284,7 +319,7 @@ private fun ChatHeatmap(requestsPerDay: Map<LocalDate, Int>) {
                     ) {
                         if (labelDate != null) {
                             Text(
-                                text = if (labelDate.monthValue == 1) {
+                                text = if (labelDate.monthValue == 1 && firstOfMonth != null) {
                                     labelDate.year.toString()
                                 } else {
                                     labelDate.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
@@ -303,7 +338,7 @@ private fun ChatHeatmap(requestsPerDay: Map<LocalDate, Int>) {
 
             // Heatmap grid
             Row(horizontalArrangement = Arrangement.spacedBy(cellSpacing)) {
-                for (weekIdx in 0 until numWeeks) {
+                for (weekIdx in 0 until safeWeeks) {
                     Column(verticalArrangement = Arrangement.spacedBy(cellSpacing)) {
                         for (dow in 0..6) {
                             val date = startSunday.plusDays((weekIdx * 7 + dow).toLong())
@@ -317,7 +352,7 @@ private fun ChatHeatmap(requestsPerDay: Map<LocalDate, Int>) {
                                 count <= q3 -> 0.75f
                                 else -> 1f
                             }
-                            HeatmapCell(alpha = alpha, sizeDp = cellSize.value.toInt())
+                            HeatmapCell(alpha = alpha, size = cellSize)
                         }
                     }
                 }
@@ -327,7 +362,7 @@ private fun ChatHeatmap(requestsPerDay: Map<LocalDate, Int>) {
 }
 
 @Composable
-private fun HeatmapCell(alpha: Float, sizeDp: Int) {
+private fun HeatmapCell(alpha: Float, size: Dp) {
     val color = when {
         alpha < 0f -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f) // future
         alpha == 0f -> MaterialTheme.colorScheme.surfaceVariant
@@ -335,7 +370,7 @@ private fun HeatmapCell(alpha: Float, sizeDp: Int) {
     }
     Box(
         modifier = Modifier
-            .size(sizeDp.dp)
+            .size(size)
             .clip(MaterialTheme.shapes.extraSmall)
             .background(color)
     )
@@ -732,7 +767,7 @@ private fun sourceLabel(source: SourceUsage): String {
 private val SourceUsage.totalTokens get() = promptTokens + completionTokens
 
 @Composable
-private fun StatCard(
+internal fun StatCard(
     modifier: Modifier = Modifier,
     icon: ImageVector,
     label: String,

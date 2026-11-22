@@ -78,6 +78,11 @@ internal class DocsProgressRepository(
 
     fun position(userId: String) = dao.observePosition(DEFAULT_EXAM_DOCS_BASE_URL, userId)
 
+    fun observeAllRecords(site: String, account: String) = dao.observeRecords(site, account)
+        .distinctUntilChanged()
+        .flowOn(Dispatchers.IO)
+        .catch { emit(emptyList()) }
+
     fun saveAnswer(
         page: DocsPageKey,
         key: DocsQuestionKey,

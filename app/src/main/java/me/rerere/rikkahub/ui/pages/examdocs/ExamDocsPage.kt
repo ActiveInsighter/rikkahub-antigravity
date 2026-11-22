@@ -73,6 +73,7 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowLeft01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Book02
+import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Copy01
 import me.rerere.hugeicons.stroke.LeftToRightListBullet
 import me.rerere.hugeicons.stroke.Refresh03
@@ -243,6 +244,12 @@ fun ExamDocsPage(
                                         "设置",
                                         HugeIcons.Settings03,
                                         { navController.navigate(Screen.ExamDocsSettings) },
+                                        state.sitesReady,
+                                    ),
+                                    TopBarMenuItem(
+                                        "答题统计",
+                                        me.rerere.hugeicons.stroke.ChartColumn,
+                                        { navController.navigate(Screen.ExamDocsStats) },
                                         state.sitesReady,
                                     ),
                                 ),
