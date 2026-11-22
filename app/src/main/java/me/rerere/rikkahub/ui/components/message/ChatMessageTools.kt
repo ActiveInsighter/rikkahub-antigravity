@@ -126,6 +126,7 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
                     toolName = tool.toolName,
                     input = inputText,
                     output = outputParts,
+                    metadata = tool.metadata,
                 ),
                 arguments = tool.input ?: JsonObject(emptyMap()),
                 content = tool.output,

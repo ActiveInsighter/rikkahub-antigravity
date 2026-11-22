@@ -18,7 +18,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEach
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.http.jsonObjectOrNull
@@ -144,6 +148,9 @@ fun DefaultToolPreview(
                 style = MaterialTheme.typography.headlineSmall,
                 textAlign = TextAlign.Center
             )
+            if ((context.tool.metadata?.get("truncated") as? JsonPrimitive)?.booleanOrNull == true) {
+                Text("部分内容已截断", style = MaterialTheme.typography.labelMedium)
+            }
             headerActions?.invoke()
         }
         FormItem(
@@ -151,10 +158,14 @@ fun DefaultToolPreview(
                 Text(stringResource(R.string.chat_message_tool_call_label, context.tool.toolName))
             }
         ) {
-            HighlightCodeBlock(
-                code = JsonInstantPretty.encodeToString(context.arguments),
-                language = "json",
-            )
+            val command = (context.arguments as? JsonObject)?.get("command")?.jsonPrimitiveOrNull?.contentOrNull
+            val cwd = (context.arguments as? JsonObject)?.get("cwd")?.jsonPrimitiveOrNull?.contentOrNull
+            if (context.tool.metadata?.get("providerType")?.jsonPrimitiveOrNull?.contentOrNull == "commandExecution" && command != null) {
+                cwd?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
+                HighlightCodeBlock(code = command, language = "bash")
+            } else {
+                HighlightCodeBlock(code = JsonInstantPretty.encodeToString(context.arguments), language = "json")
+            }
         }
         if (context.tool.output.isNotEmpty()) {
             FormItem(
@@ -163,26 +174,69 @@ fun DefaultToolPreview(
                 }
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    context.tool.output.fastForEach { part ->
-                        when (part) {
-                            is UIMessagePart.Text -> HighlightCodeBlock(
-                                code = runCatching {
-                                    JsonInstantPretty.encodeToString(JsonInstant.parseToJsonElement(part.text))
-                                }.getOrDefault(part.text),
-                                language = "json",
-                            )
+                    AgentToolResult(context) {
+                        context.tool.output.fastForEach { part ->
+                            when (part) {
+                                is UIMessagePart.Text -> HighlightCodeBlock(
+                                    code = runCatching {
+                                        JsonInstantPretty.encodeToString(JsonInstant.parseToJsonElement(part.text))
+                                    }.getOrDefault(part.text),
+                                    language = "json",
+                                )
 
-                            is UIMessagePart.Image -> ZoomableAsyncImage(
-                                model = part.url,
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                                is UIMessagePart.Image -> ZoomableAsyncImage(
+                                    model = part.url,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
 
-                            else -> {}
+                                else -> {}
+                            }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+
+@Composable
+private fun AgentToolResult(context: ToolUIContext, fallback: @Composable () -> Unit) {
+    val type = context.tool.metadata?.get("providerType")?.jsonPrimitiveOrNull?.contentOrNull
+    val output = context.content as? JsonObject
+    if (output == null) {
+        fallback()
+        return
+    }
+    when (type) {
+        "commandExecution" -> {
+            val exitCode = output["exitCode"]?.jsonPrimitiveOrNull?.contentOrNull
+            val duration = output["durationMs"]?.jsonPrimitiveOrNull?.contentOrNull
+            val log = output["aggregatedOutput"]?.jsonPrimitiveOrNull?.contentOrNull
+            if (exitCode == null && duration == null && log == null) {
+                fallback()
+                return
+            }
+            val details = listOfNotNull(exitCode?.let { "退出码 $it" }, duration?.let { "${it} ms" })
+            if (details.isNotEmpty()) Text(details.joinToString(" · "), style = MaterialTheme.typography.labelMedium)
+            if (!log.isNullOrBlank()) HighlightCodeBlock(code = log, language = "text")
+        }
+
+        "fileChange" -> {
+            val files = (output["changes"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+            if (files.isEmpty()) {
+                fallback()
+                return
+            }
+            files.forEach { file ->
+                val path = file["path"]?.jsonPrimitiveOrNull?.contentOrNull
+                val diff = file["diff"]?.jsonPrimitiveOrNull?.contentOrNull
+                if (!path.isNullOrBlank()) Text(path, style = MaterialTheme.typography.labelMedium)
+                if (!diff.isNullOrBlank()) HighlightCodeBlock(code = diff, language = "diff")
+            }
+        }
+
+        else -> fallback()
     }
 }
