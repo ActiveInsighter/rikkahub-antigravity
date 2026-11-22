@@ -146,4 +146,19 @@ class AgentCloudClientPayloadTest {
         assertEquals("Codex", payload["model"]?.jsonPrimitive?.content)
         assertNull(payload["agentModel"])
     }
+    @Test
+    fun `routes the CLI alias and parent message without the managed Antigravity default`() {
+        val payload = PocketBaseAgentCloudClient.buildSubmitJobPayload(
+            jobId = "abcdefghijklmno",
+            prompt = "Continue",
+            sources = emptyList(),
+            config = RemoteAgentConfig(model = ANTIGRAVITY_CLI_MODEL, agentModel = "gemini-4-hydrogen"),
+            parentMessageId = "zyxwvutsrqponml",
+            thinkingLevelOverride = "xhigh",
+        )
+        assertEquals(ANTIGRAVITY_CLI_MODEL, payload["model"]?.jsonPrimitive?.content)
+        assertEquals("zyxwvutsrqponml", payload["parentMessage"]?.jsonPrimitive?.content)
+        assertEquals("xhigh", payload["thinkingLevel"]?.jsonPrimitive?.content)
+        assertNull(payload["agentModel"])
+    }
 }

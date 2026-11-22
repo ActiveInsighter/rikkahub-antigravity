@@ -200,6 +200,11 @@ enum class AgentModelCategory(val label: String) {
     }
 }
 
+const val ANTIGRAVITY_CLI_MODEL = "antigravity-cli"
+
+fun isAntigravityCliModel(modelId: String): Boolean =
+    modelId.trim().removePrefix("models/").equals(ANTIGRAVITY_CLI_MODEL, ignoreCase = true)
+
 fun isAntigravityAgentModel(modelId: String): Boolean {
     val clean = modelId.trim().removePrefix("models/")
     return clean.equals("Antigravity", ignoreCase = true) ||

@@ -15,6 +15,7 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.QuotaQuery
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.agent.ANTIGRAVITY_CLI_MODEL
 import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import kotlin.uuid.Uuid
@@ -25,11 +26,13 @@ val CHAT_GATEWAY_PROVIDER_ID = Uuid.parse("a1000001-0000-4000-8000-000000000001"
 val CODEX_PROVIDER_ID = Uuid.parse("a1000002-0000-4000-8000-000000000002")
 val ANTIGRAVITY_PROVIDER_ID = Uuid.parse("a1000003-0000-4000-8000-000000000003")
 val DECISION_PROVIDER_ID = Uuid.parse("a1000004-0000-4000-8000-000000000004")
+val ANTIGRAVITY_CLI_PROVIDER_ID = Uuid.parse("a1000005-0000-4000-8000-000000000005")
 
 val TOP_AGENT_PROVIDER_IDS = listOf(
     CHAT_GATEWAY_PROVIDER_ID,
     CODEX_PROVIDER_ID,
     ANTIGRAVITY_PROVIDER_ID,
+    ANTIGRAVITY_CLI_PROVIDER_ID,
     DECISION_PROVIDER_ID,
 )
 
@@ -179,6 +182,28 @@ val DEFAULT_PROVIDERS = listOf(
         ),
         shortDescription = {
             Text("Antigravity 智能体 (any1.tech)")
+        },
+    ),
+    ProviderSetting.Google(
+        id = ANTIGRAVITY_CLI_PROVIDER_ID,
+        name = "Antigravity CLI",
+        baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
+        apiKey = "",
+        enabled = true,
+        builtIn = true,
+        models = listOf(
+            Model(
+                id = Uuid.parse("b1000005-0000-4000-8000-000000000001"),
+                modelId = ANTIGRAVITY_CLI_MODEL,
+                displayName = "Antigravity CLI",
+                type = ModelType.AGENT,
+                inputModalities = listOf(Modality.TEXT),
+                outputModalities = listOf(Modality.TEXT),
+                abilities = listOf(ModelAbility.REASONING),
+            ),
+        ),
+        shortDescription = {
+            Text("本机 Antigravity CLI (any1.tech)")
         },
     ),
     ProviderSetting.Google(

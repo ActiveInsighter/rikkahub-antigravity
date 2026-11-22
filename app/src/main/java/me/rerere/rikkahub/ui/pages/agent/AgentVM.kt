@@ -35,7 +35,9 @@ import me.rerere.rikkahub.data.agent.AgentConversationSnapshot
 import me.rerere.rikkahub.data.agent.AgentGatewayClient
 import me.rerere.rikkahub.data.agent.AgentModelCategory
 import me.rerere.rikkahub.data.agent.AgentModelEntity
+import me.rerere.rikkahub.data.agent.ANTIGRAVITY_CLI_MODEL
 import me.rerere.rikkahub.data.agent.isAntigravityAgentModel
+import me.rerere.rikkahub.data.agent.isAntigravityCliModel
 import me.rerere.rikkahub.data.agent.isCodexAgentModel
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
@@ -43,6 +45,7 @@ import me.rerere.rikkahub.data.agent.AgentUiSettings
 import me.rerere.rikkahub.data.agent.DEFAULT_AGENT_MODELS
 import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
 import me.rerere.rikkahub.data.agent.RemoteAgentSourceInput
+import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_CLI_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.CODEX_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
@@ -715,6 +718,8 @@ class AgentVM(
         val selectedModel = resolvedChatModel.value
         val rawProvider = selectedModelProvider.value
         val rawModelId = selectedModel?.modelId?.ifBlank { null } ?: "Antigravity"
+        val isAntigravityCli = rawProvider?.id == ANTIGRAVITY_CLI_PROVIDER_ID ||
+            isAntigravityCliModel(rawModelId)
         val isCodex = rawProvider?.id == CODEX_PROVIDER_ID ||
             rawProvider?.name.equals("Codex", ignoreCase = true) ||
             isCodexAgentModel(rawModelId)
@@ -722,11 +727,13 @@ class AgentVM(
             rawProvider?.name.equals("Antigravity", ignoreCase = true) ||
             isAntigravityAgentModel(rawModelId)
         val modelName = when {
+            isAntigravityCli -> ANTIGRAVITY_CLI_MODEL
             isCodex -> "Codex"
             isAntigravity -> "Antigravity"
             else -> rawModelId
         }
         val agentModel = when {
+            isAntigravityCli -> rawModelId.takeUnless(::isAntigravityCliModel)?.trim()
             isCodex && !rawModelId.equals("Codex", ignoreCase = true) -> rawModelId.trim()
             isAntigravity && !rawModelId.equals("Antigravity", ignoreCase = true) -> rawModelId.trim()
             else -> null
@@ -734,6 +741,9 @@ class AgentVM(
         val displayLabel = selectedModel?.displayName?.ifBlank { rawModelId } ?: modelName
         val reasoningLevel = _agentAssistant.value.reasoningLevel
         val thinkingLevel = when {
+            isAntigravityCli && reasoningLevel == ReasoningLevel.MAX -> "max"
+            isAntigravityCli && reasoningLevel == ReasoningLevel.XHIGH -> "xhigh"
+            isAntigravityCli -> reasoningLevel.toGeminiThinkingLevel()
             isCodex && reasoningLevel in listOf(ReasoningLevel.XHIGH, ReasoningLevel.MAX) -> "xhigh"
             isCodex && reasoningLevel == ReasoningLevel.OFF -> "off"
             isAntigravity -> ""
