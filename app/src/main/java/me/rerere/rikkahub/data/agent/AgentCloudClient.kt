@@ -772,7 +772,7 @@ class PocketBaseAgentCloudClient(
             createdAt = parseLocalDateTime(if (isHistorical) message?.startedAt?.ifBlank { job.created } ?: job.created else job.created),
             finishedAt = finishedAt,
             modelSnapshot = ModelSnapshot(
-                displayName = if (isCodexAgentModel(job.model)) "Codex Agent" else "Antigravity Agent",
+                displayName = agentModelDisplayName(job.model),
                 modelId = job.model.ifBlank { "Antigravity" },
             ),
             usage = usage,
@@ -806,7 +806,7 @@ class PocketBaseAgentCloudClient(
                 parts = listOf(UIMessagePart.Text(text)) + images.map { UIMessagePart.Image(url = it) },
                 createdAt = parseLocalDateTime(job.created),
                 modelSnapshot = if (user) null else ModelSnapshot(
-                    displayName = if (isCodexAgentModel(job.model)) "Codex Agent" else "Antigravity Agent",
+                    displayName = agentModelDisplayName(job.model),
                     modelId = job.model.ifBlank { "Antigravity" },
                 ),
             )
@@ -1243,7 +1243,7 @@ class PocketBaseAgentCloudClient(
             }
             val isAntigravityModel = isAntigravityAgentModel(selectedModel)
             val isCodexModel = isCodexAgentModel(selectedModel)
-            val effectiveAgentModel = (agentModelOverride ?: config.agentModel.takeIf { isAntigravityModel })
+            val effectiveAgentModel = (agentModelOverride ?: config.agentModel.takeIf { isAntigravityModel && !isAntigravityCliModel(selectedModel) })
                 ?.trim()?.takeIf { it.isNotBlank() }
             val selectedThinkingLevel = thinkingLevelOverride ?: config.thinkingLevel
             val selectedSystemPrompt = systemPromptOverride ?: config.systemPrompt
@@ -1337,3 +1337,9 @@ class PocketBaseAgentCloudClient(
 
 private fun JsonObject.str(key: String): String =
     this[key]?.let { (it as? JsonPrimitive)?.contentOrNull } ?: ""
+
+private fun agentModelDisplayName(modelId: String): String = when {
+    isAntigravityCliModel(modelId) -> "Antigravity CLI"
+    isCodexAgentModel(modelId) -> "Codex Agent"
+    else -> "Antigravity Agent"
+}

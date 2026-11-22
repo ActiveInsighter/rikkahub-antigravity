@@ -35,7 +35,9 @@ import me.rerere.rikkahub.data.agent.AgentConversationSnapshot
 import me.rerere.rikkahub.data.agent.AgentGatewayClient
 import me.rerere.rikkahub.data.agent.AgentModelCategory
 import me.rerere.rikkahub.data.agent.AgentModelEntity
+import me.rerere.rikkahub.data.agent.ANTIGRAVITY_CLI_MODEL
 import me.rerere.rikkahub.data.agent.isAntigravityAgentModel
+import me.rerere.rikkahub.data.agent.isAntigravityCliModel
 import me.rerere.rikkahub.data.agent.isCodexAgentModel
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
@@ -43,6 +45,7 @@ import me.rerere.rikkahub.data.agent.AgentUiSettings
 import me.rerere.rikkahub.data.agent.DEFAULT_AGENT_MODELS
 import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
 import me.rerere.rikkahub.data.agent.RemoteAgentSourceInput
+import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_CLI_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.CODEX_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
@@ -419,9 +422,24 @@ class AgentVM(
         )
     }
 
+    private fun validateAntigravityCliInput(parts: List<UIMessagePart>): Boolean {
+        val isCli = selectedModelProvider.value?.id == ANTIGRAVITY_CLI_PROVIDER_ID ||
+            resolvedChatModel.value?.modelId?.let(::isAntigravityCliModel) == true
+        if (!isCli) return true
+        _errorMessage.value = when {
+            session.value == null -> "请先连接 PocketBase 账号，再使用 Antigravity CLI。"
+            parts.any { it !is UIMessagePart.Text &&
+                !(it is UIMessagePart.Document && it.fileName.endsWith(".md", ignoreCase = true))
+            } -> "Antigravity CLI 支持文本和 Markdown 附件。"
+            else -> null
+        }
+        return _errorMessage.value == null
+    }
+
     fun sendMessage(parts: List<UIMessagePart>): Boolean {
         if (parts.isEmpty() || isBusy) return false
         _errorMessage.value = null
+        if (!validateAntigravityCliInput(parts)) return false
 
         val modelEntity = currentOrFallbackModelEntity()
         val category = modelEntity.modelCategory
@@ -536,6 +554,7 @@ class AgentVM(
         val node = current.messageNodes[nodeIndex]
         val historyBefore = current.messageNodes.take(nodeIndex).map { it.currentMessage }
         val userMsg = historyBefore.lastOrNull { it.role == MessageRole.USER } ?: return
+        if (!validateAntigravityCliInput(userMsg.parts)) return
 
         val modelEntity = currentOrFallbackModelEntity()
         val prompt = buildPromptFromParts(userMsg.parts)
@@ -715,6 +734,8 @@ class AgentVM(
         val selectedModel = resolvedChatModel.value
         val rawProvider = selectedModelProvider.value
         val rawModelId = selectedModel?.modelId?.ifBlank { null } ?: "Antigravity"
+        val isAntigravityCli = rawProvider?.id == ANTIGRAVITY_CLI_PROVIDER_ID ||
+            isAntigravityCliModel(rawModelId)
         val isCodex = rawProvider?.id == CODEX_PROVIDER_ID ||
             rawProvider?.name.equals("Codex", ignoreCase = true) ||
             isCodexAgentModel(rawModelId)
@@ -722,11 +743,13 @@ class AgentVM(
             rawProvider?.name.equals("Antigravity", ignoreCase = true) ||
             isAntigravityAgentModel(rawModelId)
         val modelName = when {
+            isAntigravityCli -> ANTIGRAVITY_CLI_MODEL
             isCodex -> "Codex"
             isAntigravity -> "Antigravity"
             else -> rawModelId
         }
         val agentModel = when {
+            isAntigravityCli -> rawModelId.takeUnless(::isAntigravityCliModel)?.trim()
             isCodex && !rawModelId.equals("Codex", ignoreCase = true) -> rawModelId.trim()
             isAntigravity && !rawModelId.equals("Antigravity", ignoreCase = true) -> rawModelId.trim()
             else -> null
@@ -734,6 +757,9 @@ class AgentVM(
         val displayLabel = selectedModel?.displayName?.ifBlank { rawModelId } ?: modelName
         val reasoningLevel = _agentAssistant.value.reasoningLevel
         val thinkingLevel = when {
+            isAntigravityCli && agentModel != null && reasoningLevel == ReasoningLevel.MAX -> "max"
+            isAntigravityCli && agentModel != null && reasoningLevel == ReasoningLevel.XHIGH -> "xhigh"
+            isAntigravityCli -> reasoningLevel.toGeminiThinkingLevel()
             isCodex && reasoningLevel in listOf(ReasoningLevel.XHIGH, ReasoningLevel.MAX) -> "xhigh"
             isCodex && reasoningLevel == ReasoningLevel.OFF -> "off"
             isAntigravity -> ""
@@ -818,7 +844,7 @@ class AgentVM(
                 null
             } else {
                 RemoteAgentSourceInput(
-                    id = doc.url.hashCode().toUInt().toString(16),
+                    id = java.util.UUID.nameUUIDFromBytes(doc.url.toByteArray()).toString() + ".md",
                     name = doc.fileName.ifBlank { "document.md" },
                     content = content,
                 )
