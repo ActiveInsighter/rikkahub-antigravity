@@ -29,6 +29,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.examdocs.prepareExamDocsDocument
@@ -36,6 +38,7 @@ import me.rerere.rikkahub.ui.components.richtext.SvgPreview
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import org.junit.Assert.assertTrue
+import java.io.File
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -141,7 +144,13 @@ class ExamDocsReaderTest {
 
         compose.onNodeWithText("B").performClick()
         submit.performClick()
-        compose.onNodeWithContentDescription("选错").assertIsDisplayed()
+        val wrong = compose.onNodeWithContentDescription("选错", useUnmergedTree = true)
+        val optionText = compose.onNodeWithText("合数 4", useUnmergedTree = true)
+        wrong.assertIsDisplayed()
+        assertTrue(
+            "The verdict should share the leading option marker",
+            wrong.fetchSemanticsNode().boundsInRoot.right <= optionText.fetchSemanticsNode().boundsInRoot.left,
+        )
         compose.onNodeWithText("回答错误").assertIsDisplayed()
     }
 
@@ -206,13 +215,49 @@ class ExamDocsReaderTest {
         }
     }
 
-    private fun render(markdown: String, modifier: Modifier = Modifier.fillMaxSize(), dark: Boolean = false) {
+    @Test
+    fun rendersLinkedAdjacencyDiagramAtNaturalAspectRatioWithoutCaption() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val file = File.createTempFile("exam-docs-diagram", ".svg", instrumentation.targetContext.cacheDir)
+        try {
+            instrumentation.context.assets.open("examdocs/adjacency-list.svg").use { asset ->
+                file.outputStream().use { asset.copyTo(it) }
+            }
+            render("![卷三_Q07_邻接表](/img/adjacency-list.svg)", imageUrlResolver = { file.toUri().toString() })
+            val picture = compose.onNodeWithContentDescription("卷三_Q07_邻接表")
+            compose.waitUntil(timeoutMillis = 10_000) {
+                if (picture.fetchSemanticsNode().boundsInRoot.height < 1f) {
+                    false
+                } else {
+                    val pixels = picture.captureToImage().toPixelMap()
+                    (0 until pixels.height step 2).any { y ->
+                        (0 until pixels.width step 2).any { x ->
+                            val color = pixels[x, y]
+                            color.red < 0.2f && color.green < 0.2f && color.blue < 0.2f
+                        }
+                    }
+                }
+            }
+            val bounds = picture.fetchSemanticsNode().boundsInRoot
+            assertTrue("The diagram should keep its 2:1 aspect ratio", bounds.width / bounds.height in 1.94f..2.06f)
+            compose.onNodeWithText("卷三_Q07_邻接表").assertDoesNotExist()
+        } finally {
+            file.delete()
+        }
+    }
+
+    private fun render(
+        markdown: String,
+        modifier: Modifier = Modifier.fillMaxSize(),
+        dark: Boolean = false,
+        imageUrlResolver: (String) -> String = { it },
+    ) {
         val document = prepareExamDocsDocument(markdown, "https://example.test/android/docs/sample.md", legacy = false)
         val registry = ExamDocsComponentRegistry()
         compose.setContent {
             MaterialExpressiveTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
                 CompositionLocalProvider(LocalSettings provides Settings.dummy(), LocalDarkMode provides dark) {
-                    val renderer = rememberExamDocsRenderer(document, rememberLazyListState(), {}, { it })
+                    val renderer = rememberExamDocsRenderer(document, rememberLazyListState(), {}, imageUrlResolver)
                     SharedTransitionLayout(Modifier.fillMaxSize().padding(12.dp)) {
                         Column(modifier) {
                             document.blocks.forEach { ExamDocsMarkdownBlock(it, registry, renderer) }

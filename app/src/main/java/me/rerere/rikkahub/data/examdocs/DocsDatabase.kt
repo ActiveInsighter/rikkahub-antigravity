@@ -77,7 +77,7 @@ internal interface DocsDao {
 
     @Query("""
         SELECT * FROM DocsRecord WHERE site = :site AND account = :account
-        AND ((path = :path AND kind IN ('answers', 'marks')) OR kind = 'tags')
+        AND path = :path AND kind = 'answers'
     """)
     fun observePage(site: String, account: String, path: String): Flow<List<DocsRecord>>
 

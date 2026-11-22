@@ -7,7 +7,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,15 +21,14 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -37,7 +36,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -70,6 +69,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import me.rerere.bettertext.markdown.MarkdownBlock
@@ -118,11 +118,11 @@ private enum class GradeResult(val icon: ImageVector) {
 
 private enum class ChoiceFeedback(val icon: ImageVector? = null, val label: String? = null) {
     Idle,
-    Selected,
+    Selected(HugeIcons.Tick01),
     Correct(HugeIcons.Tick01, "选对"),
     Incorrect(HugeIcons.Cancel01, "选错"),
-    Missed(HugeIcons.CheckmarkCircle02, "漏选"),
-    Answer(HugeIcons.CheckmarkCircle02, "正确答案"),
+    Missed(HugeIcons.Alert02, "漏选"),
+    Answer(HugeIcons.Tick01, "正确答案"),
 }
 
 private data class QuestionResult(val grade: GradeResult, val label: String)
@@ -322,9 +322,7 @@ internal fun DocQuestionCard(
                 .joinToString("；").takeIf(String::isNotEmpty)
         }
     }
-    val page = reading?.page
-    val showMarks = ready && page != null && identity != null
-    val hasActions = result != null || multiple || blankCount > 0 || solution != null || showMarks
+    val hasActions = result != null || multiple || blankCount > 0 || solution != null
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -455,9 +453,6 @@ internal fun DocQuestionCard(
                         ) {
                             Text("提交答案")
                         }
-                    }
-                    if (reading != null && page != null && identity != null && showMarks) {
-                        DocQuestionMark(reading, page, identity)
                     }
                     if (result != null) {
                         TextButton(
@@ -674,24 +669,7 @@ private fun QuestionChoice(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (option.text == null) {
-                Box(
-                    modifier = Modifier
-                        .widthIn(min = 29.dp)
-                        .clip(MaterialTheme.shapes.small)
-                        .background(content.copy(alpha = 0.08f))
-                        .padding(horizontal = 5.dp, vertical = 3.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = option.label,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontFamily = FontFamily.Serif,
-                        fontStyle = FontStyle.Italic,
-                        maxLines = 1,
-                    )
-                }
-            }
+            QuestionChoiceMarker(option.label, selected, feedback, containerColor, content)
             Column(Modifier.weight(1f)) {
                 if (option.text != null) {
                     Text(option.text, style = MaterialTheme.typography.bodyLarge)
@@ -703,22 +681,59 @@ private fun QuestionChoice(
                 }
             }
 
-            Crossfade(
-                targetState = feedback.takeIf { it.icon != null },
-                animationSpec = motion.fastEffectsSpec(),
-                label = "option verdict",
-            ) { verdict ->
-                Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-                    when {
-                        verdict?.icon != null -> Icon(
+        }
+    }
+}
+
+@Composable
+private fun QuestionChoiceMarker(
+    label: String,
+    selected: Boolean,
+    feedback: ChoiceFeedback,
+    rowColor: Color,
+    ink: Color,
+) {
+    val effects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    val circleSize = maxOf(30.dp, with(LocalDensity.current) { 20.sp.toDp() } + 8.dp)
+    Box(Modifier.size(circleSize + 4.dp)) {
+        Surface(
+            modifier = Modifier.align(Alignment.TopStart).size(circleSize),
+            shape = CircleShape,
+            color = if (selected) ink else Color.Transparent,
+            contentColor = if (selected) rowColor else ink,
+            border = BorderStroke(1.dp, ink.copy(alpha = if (feedback == ChoiceFeedback.Idle) 0.45f else 0.8f)),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLargeEmphasized,
+                    fontFamily = FontFamily.Serif,
+                    fontStyle = FontStyle.Italic,
+                    maxLines = 1,
+                )
+            }
+        }
+        Crossfade(
+            targetState = feedback.takeIf { it.icon != null },
+            modifier = Modifier.align(Alignment.BottomEnd).size(15.dp),
+            animationSpec = effects,
+            label = "option verdict",
+        ) { verdict ->
+            if (verdict?.icon != null) {
+                Surface(
+                    shape = CircleShape,
+                    color = ink,
+                    contentColor = rowColor,
+                    border = BorderStroke(1.dp, rowColor),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
                             imageVector = verdict.icon,
                             contentDescription = verdict.label.takeIf {
                                 verdict == ChoiceFeedback.Correct || verdict == ChoiceFeedback.Incorrect
                             },
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(9.dp),
                         )
-                        multiple -> Checkbox(checked = selected, onCheckedChange = null)
-                        else -> RadioButton(selected = selected, onClick = null)
                     }
                 }
             }

@@ -5,10 +5,12 @@ import android.util.LruCache
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
@@ -23,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.platform.LocalContext
@@ -44,7 +47,7 @@ import me.rerere.bettertext.text.BetterInline
 import me.rerere.rikkahub.data.examdocs.ExamDocsDocument
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 import me.rerere.rikkahub.ui.components.richtext.RichMarkdownRenderer
-import me.rerere.rikkahub.ui.components.richtext.SvgPreview
+import me.rerere.rikkahub.ui.components.richtext.SvgArtwork
 import me.rerere.rikkahub.ui.components.richtext.SvgPreviewDialog
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.richtext.rememberRichMarkdownRenderer
@@ -100,44 +103,50 @@ internal fun rememberExamDocsRenderer(
     }
     val imageContent: @Composable (MarkdownInline.Image, String?, String) -> Unit = remember(onLinkClick) {
         { image, link, url ->
-            val colors = MaterialTheme.colorScheme
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.large,
-                color = colors.surfaceContainerLow,
-                border = BorderStroke(1.dp, colors.outlineVariant),
+            if (url.startsWith("data:image/svg+xml", ignoreCase = true) ||
+                url.toUri().path?.endsWith(".svg", ignoreCase = true) == true
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (url.startsWith("data:image/svg+xml", ignoreCase = true) ||
-                        url.toUri().path?.endsWith(".svg", ignoreCase = true) == true
-                    ) {
-                        var expanded by remember(url) { mutableStateOf(false) }
-                        SvgPreview(
-                            model = url,
-                            description = image.alt,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 600.dp)
-                                .clickable { expanded = true },
-                        )
-                        if (expanded) {
-                            SvgPreviewDialog(url, onDismiss = { expanded = false }, description = image.alt)
-                        }
-                    } else {
+                var expanded by remember(url) { mutableStateOf(false) }
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    SvgArtwork(
+                        model = url,
+                        description = image.alt,
+                        modifier = Modifier
+                            .widthIn(max = 640.dp)
+                            .heightIn(max = 520.dp)
+                            .clickable {
+                                if (link == null || link == image.url) expanded = true else onLinkClick(link)
+                            },
+                    )
+                }
+                if (expanded) {
+                    SvgPreviewDialog(url, onDismiss = { expanded = false }, description = image.alt, framed = false)
+                }
+            } else {
+                val colors = MaterialTheme.colorScheme
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.large,
+                    color = colors.surfaceContainerLow,
+                    border = BorderStroke(1.dp, colors.outlineVariant),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         ZoomableAsyncImage(
                             model = url,
                             contentDescription = image.alt,
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 480.dp),
                         )
-                    }
-                    if (!image.alt.isNullOrBlank()) {
-                        Text(
-                            text = image.alt.orEmpty(),
-                            modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.onSurfaceVariant,
-                        )
-                    }
-                    if (link != null && link != image.url) {
-                        TextButton(onClick = { onLinkClick(link) }) { Text("打开图片链接") }
+                        if (!image.alt.isNullOrBlank()) {
+                            Text(
+                                text = image.alt.orEmpty(),
+                                modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                            )
+                        }
+                        if (link != null && link != image.url) {
+                            TextButton(onClick = { onLinkClick(link) }) { Text("打开图片链接") }
+                        }
                     }
                 }
             }

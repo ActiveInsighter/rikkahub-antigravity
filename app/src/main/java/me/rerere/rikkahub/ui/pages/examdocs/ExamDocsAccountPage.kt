@@ -161,7 +161,7 @@ fun ExamDocsAccountPage() {
             if (!account.restoring && (user == null || account.needsLogin)) item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        if (accounts.configured) "用网页端同一个邮箱登录，继续同步答题、收藏和笔记。"
+                        if (accounts.configured) "用网页端同一个邮箱登录，继续同步答题记录。"
                         else "此安装包未配置 Exam Docs 云端账号，作答可保存在本机。",
                         style = MaterialTheme.typography.bodyMedium,
                     )

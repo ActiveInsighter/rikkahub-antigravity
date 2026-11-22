@@ -119,6 +119,4 @@ internal data class DocsSyncResponse(
 internal data class DocsSavedAnswer(val state: DocsAnswerState, val draft: String, val timestamp: Long)
 internal data class DocsPageProgress(
     val answers: Map<String, DocsSavedAnswer>,
-    val marks: Map<String, DocsMark>,
-    val tags: List<DocsTag>,
 )

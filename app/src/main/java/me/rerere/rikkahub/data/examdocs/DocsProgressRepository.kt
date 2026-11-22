@@ -64,20 +64,14 @@ internal class DocsProgressRepository(
 
     fun page(key: DocsPageKey) = dao.observePage(key.site, key.account, key.path).map { rows ->
         DocsPageProgress(
-            answers = rows.filter { it.kind == "answers" }.associate {
+            answers = rows.associate {
                 val answer = docsJson.decodeFromString<DocsAnswer>(it.payload)
                 it.recordId to DocsSavedAnswer(answer.state, it.draft, it.timestamp)
             },
-            marks = rows.filter { it.kind == "marks" }.associate {
-                it.recordId to docsJson.decodeFromString<DocsMark>(it.payload)
-            },
-            tags = rows.filter { it.kind == "tags" }.map {
-                docsJson.decodeFromString<DocsTag>(it.payload)
-            }.filterNot(DocsTag::deleted).sortedBy(DocsTag::name),
         )
     }.distinctUntilChanged().flowOn(Dispatchers.IO).catch {
         _storageError.value = "无法读取文档本地数据库"
-        emit(DocsPageProgress(emptyMap(), emptyMap(), emptyList()))
+        emit(DocsPageProgress(emptyMap()))
     }
 
     fun pending(userId: String) = dao.observePendingCount(DEFAULT_EXAM_DOCS_BASE_URL, userId)
@@ -118,20 +112,6 @@ internal class DocsProgressRepository(
         return DocsSavedAnswer(state, draft, timestamp)
     }
 
-    fun saveMark(page: DocsPageKey, mark: DocsMark, syncable: Boolean) {
-        val timestamp = nextTimestamp(mark.timestamp)
-        val updated = mark.copy(updatedAt = instant(timestamp))
-        val queue = page.canSync && syncable
-        writeLocally(page, queue) {
-            val record = DocsRecord(
-                page.site, page.account, "marks", mark.id, mark.documentPath,
-                timestamp, docsJson.encodeToString(updated),
-            )
-            dao.putRecord(record)
-            if (queue) enqueue(record)
-        }
-    }
-
     /** The account's existing rows win, including resets and cleared notes. */
     suspend fun importGuest(userId: String): Int {
         val site = DEFAULT_EXAM_DOCS_BASE_URL
@@ -154,11 +134,6 @@ internal class DocsProgressRepository(
                         "attempts" -> {
                             val attempt = docsJson.decodeFromString<DocsAttempt>(row.payload)
                             if (attempt.questionRevision == "unversioned") continue
-                            true
-                        }
-                        "marks" -> {
-                            val mark = docsJson.decodeFromString<DocsMark>(row.payload)
-                            if (mark.questionId.startsWith("local:") || (!mark.favorite && mark.note.isBlank())) continue
                             true
                         }
                         else -> continue

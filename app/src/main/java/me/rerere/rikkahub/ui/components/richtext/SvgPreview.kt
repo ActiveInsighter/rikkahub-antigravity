@@ -18,6 +18,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -25,6 +27,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import coil3.annotation.ExperimentalCoilApi
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
@@ -35,6 +38,16 @@ import com.jvziyaoyao.scale.zoomable.pager.rememberZoomablePagerState
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.rikkahub.R
+
+@Composable
+internal fun SvgArtwork(model: Any, description: String?, modifier: Modifier = Modifier) {
+    AsyncImage(
+        model = rememberSvgRequest(model, vector = false),
+        contentDescription = description,
+        contentScale = ContentScale.Fit,
+        modifier = modifier,
+    )
+}
 
 @Composable
 internal fun SvgPreview(
@@ -73,6 +86,7 @@ internal fun SvgPreviewDialog(
     model: Any,
     onDismiss: () -> Unit,
     description: String? = null,
+    framed: Boolean = true,
 ) {
     val pagerState = rememberZoomablePagerState { 1 }
     val painter = rememberAsyncImagePainter(rememberSvgRequest(model, vector = true))
@@ -80,9 +94,9 @@ internal fun SvgPreviewDialog(
     Dialog(onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             modifier = Modifier.fillMaxSize().padding(16.dp),
-            shape = MaterialTheme.shapes.extraLarge,
-            color = Color.White,
-            contentColor = Color(0xFF303134),
+            shape = if (framed) MaterialTheme.shapes.extraLarge else RectangleShape,
+            color = if (framed) Color.White else Color.Transparent,
+            contentColor = if (framed) Color(0xFF303134) else Color.White,
         ) {
             Box(contentAlignment = Alignment.Center) {
                 ImagePager(
@@ -92,17 +106,22 @@ internal fun SvgPreviewDialog(
                     pagerState = pagerState,
                     imageLoader = { Pair(painter, painter.intrinsicSize) },
                 )
-                if (state is AsyncImagePainter.State.Error) {
+                if (framed && state is AsyncImagePainter.State.Error) {
                     Text(stringResource(R.string.svg_preview_error))
                 }
                 IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopEnd)) {
-                    Icon(HugeIcons.Cancel01, contentDescription = stringResource(R.string.update_card_close))
+                    Icon(
+                        HugeIcons.Cancel01,
+                        contentDescription = stringResource(R.string.update_card_close),
+                        tint = if (framed) Color(0xFF303134) else Color.White,
+                    )
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalCoilApi::class)
 @Composable
 private fun rememberSvgRequest(model: Any, vector: Boolean): ImageRequest {
     val context = LocalContext.current
@@ -110,7 +129,7 @@ private fun rememberSvgRequest(model: Any, vector: Boolean): ImageRequest {
         ImageRequest.Builder(context)
             .data(model)
             .decoderFactory { result, options, _ ->
-                SvgDecoder(result.source, options, renderToBitmap = !vector, scaleToDensity = false)
+                SvgDecoder(result.source, options, parser = compatibleSvgParser, renderToBitmap = !vector)
             }
             .build()
     }
