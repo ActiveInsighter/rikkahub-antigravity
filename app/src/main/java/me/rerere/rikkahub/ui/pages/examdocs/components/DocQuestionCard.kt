@@ -45,6 +45,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -261,6 +262,10 @@ internal fun DocQuestionCard(
     val identity = reading?.identities?.get(block)
     val stored = identity?.let { reading?.snapshot?.answers?.get(it.answerId) }
     var optimistic by remember(id, reading?.page) { mutableStateOf<DocsSavedAnswer?>(null) }
+    LaunchedEffect(stored) {
+        val pending = optimistic
+        if (stored != null && pending != null && stored.timestamp >= pending.timestamp) optimistic = null
+    }
     val saved = optimistic?.takeIf { stored == null || it.timestamp > stored.timestamp } ?: stored
     val answer = saved?.state ?: DocsAnswerState()
     val selection = answer.selected

@@ -132,6 +132,49 @@ internal class DocsProgressRepository(
         }
     }
 
+    /** The account's existing rows win, including resets and cleared notes. */
+    suspend fun importGuest(userId: String): Int {
+        val site = DEFAULT_EXAM_DOCS_BASE_URL
+        require(accounts.state.value.user?.id == userId)
+        check(sync(userId) && accounts.state.value.let { it.user?.id == userId && !it.needsLogin }) {
+            "请先联网完成账号同步，再导入访客记录"
+        }
+        val count = writes.withLock {
+            database.withTransaction {
+                var copied = 0
+                for (row in dao.records(site, DOCS_GUEST)) {
+                    if (dao.record(site, userId, row.kind, row.recordId) != null) continue
+                    val upload = when (row.kind) {
+                        "answers" -> {
+                            val answer = docsJson.decodeFromString<DocsAnswer>(row.payload)
+                            if (!answer.key.hasRevision) continue
+                            answer.state.submitted || answer.state.attempt > 0 &&
+                                answer.state.selected.isEmpty() && answer.state.values.all(String::isBlank)
+                        }
+                        "attempts" -> {
+                            val attempt = docsJson.decodeFromString<DocsAttempt>(row.payload)
+                            if (attempt.questionRevision == "unversioned") continue
+                            true
+                        }
+                        "marks" -> {
+                            val mark = docsJson.decodeFromString<DocsMark>(row.payload)
+                            if (mark.questionId.startsWith("local:") || (!mark.favorite && mark.note.isBlank())) continue
+                            true
+                        }
+                        else -> continue
+                    }
+                    val copy = row.copy(account = userId)
+                    dao.putRecord(copy)
+                    if (upload) enqueue(copy)
+                    copied++
+                }
+                copied
+            }
+        }
+        if (count > 0) requestSync(userId, force = true)
+        return count
+    }
+
     private suspend fun enqueue(record: DocsRecord) {
         dao.enqueue(DocsPendingRecord(record.site, record.account, record.kind, record.recordId, record.timestamp, record.payload))
     }

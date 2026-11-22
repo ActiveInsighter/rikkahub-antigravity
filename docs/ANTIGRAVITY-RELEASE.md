@@ -2,15 +2,15 @@
 
 ### 本次更新
 
-- 修复 Gemini 聊天无法发送图片库和历史消息中的图片。
-- 修复 Gemini 流式回复只显示半截的问题。
-- 聊天存盘移到后台，关闭思考时减少 Gemini 返回的思考摘要。
+- 文档设置新增 Exam Docs 邮箱验证码登录，可同步网页与手机上的答题、收藏、笔记和标签。
+- 文档按站点与账号保存本地数据，目录和已读正文支持离线打开。提交和重做在网络恢复后继续同步，Study Docs 暂时仅使用本机记录。
+- 更新题卡布局、作答反馈和无边框代码块。
 
 ### Updates
 
-- Fix sending library and history images in Gemini chat.
-- Recover Gemini replies after interrupted streams.
-- Save chat progress in the background and omit Gemini thought summaries when thinking is off.
+- Sign in to Exam Docs with an email code to sync answers, favourites, notes and tags with the web app.
+- Read cached documents offline and sync committed Exam Docs changes when the connection returns. Study Docs uses its own local storage.
+- Refine question cards and render document code blocks without a frame.
 
 - Android 8.0 及以上；普通手机优先下载 **arm64-v8a-debug.apk**，不确定架构时下载 **universal-debug.apk**。
 - 独立包名 `me.rerere.rikkahub.debug`，可与官方正式版并存；**Build 6 起**显式使用固定签名，并核对 APK 证书。Build 3/4 的临时签名不同，升级前请导出数据，再卸载旧修改版、安装新版并导入；从 Build 6 升级后续构建可直接覆盖。

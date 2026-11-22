@@ -72,6 +72,9 @@ internal interface DocsDao {
     @Query("SELECT * FROM DocsRecord WHERE site = :site AND account = :account AND kind = :kind AND recordId = :id")
     suspend fun record(site: String, account: String, kind: String, id: String): DocsRecord?
 
+    @Query("SELECT * FROM DocsRecord WHERE site = :site AND account = :account")
+    suspend fun records(site: String, account: String): List<DocsRecord>
+
     @Query("""
         SELECT * FROM DocsRecord WHERE site = :site AND account = :account
         AND ((path = :path AND kind IN ('answers', 'marks')) OR kind = 'tags')

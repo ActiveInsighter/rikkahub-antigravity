@@ -66,11 +66,13 @@ fun ExamDocsAccountPage() {
     var code by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var notice by remember { mutableStateOf<String?>(null) }
 
     fun perform(action: suspend () -> Unit) {
         if (busy) return
         busy = true
         error = null
+        notice = null
         scope.launch {
             try {
                 action()
@@ -78,6 +80,8 @@ fun ExamDocsAccountPage() {
                 throw cancelled
             } catch (failure: DocsCloudError) {
                 error = failure.message
+            } catch (failure: IllegalStateException) {
+                error = failure.message ?: "操作未完成"
             } catch (_: Exception) {
                 error = "操作未完成，请检查网络或设备存储后重试"
             } finally {
@@ -129,6 +133,16 @@ fun ExamDocsAccountPage() {
                         onClick = if (syncing == user.id) null else { { repository.requestSync(user.id, force = true) } },
                         leadingContent = { CardGroupIcon(HugeIcons.Refresh03) },
                         headlineContent = { Text("立即同步") },
+                    )
+                    if (!account.needsLogin) item(
+                        onClick = if (busy || syncing == user.id) null else { {
+                            perform {
+                                val count = repository.importGuest(user.id)
+                                notice = if (count > 0) "已导入 $count 条本机记录" else "没有新的访客记录需要导入"
+                            }
+                        } },
+                        headlineContent = { Text("导入未登录时的记录") },
+                        supportingContent = { Text("只补充此账号尚未保存的记录") },
                     )
                     item(
                         onClick = if (busy) null else { {
@@ -202,6 +216,9 @@ fun ExamDocsAccountPage() {
                 }
             }
 
+            notice?.let { message ->
+                item { Text(message, style = MaterialTheme.typography.bodyMedium) }
+            }
             val message = error ?: storageError
             if (message != null) item {
                 Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)

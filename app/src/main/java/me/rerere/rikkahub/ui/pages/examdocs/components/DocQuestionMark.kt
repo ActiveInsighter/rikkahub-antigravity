@@ -1,5 +1,7 @@
 package me.rerere.rikkahub.ui.pages.examdocs.components
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -29,8 +31,6 @@ import me.rerere.rikkahub.data.examdocs.DocsMark
 import me.rerere.rikkahub.data.examdocs.DocsPageKey
 import me.rerere.rikkahub.data.examdocs.DocsQuestionKey
 import me.rerere.rikkahub.ui.pages.examdocs.DocsReadingProgress
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 
 @Composable
 internal fun DocQuestionMark(reading: DocsReadingProgress, page: DocsPageKey, question: DocsQuestionKey) {
@@ -72,7 +72,7 @@ internal fun DocQuestionMark(reading: DocsReadingProgress, page: DocsPageKey, qu
                     }
                     OutlinedTextField(
                         value = note,
-                        onValueChange = { note = it.take(4000) },
+                        onValueChange = { note = it.replace("\u0000", "").take(4000) },
                         label = { Text("笔记") },
                         minLines = 2,
                         maxLines = 5,
