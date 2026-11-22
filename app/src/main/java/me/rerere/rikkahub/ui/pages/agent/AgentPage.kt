@@ -1675,7 +1675,7 @@ private fun AgentSubModelPickerDialog(
                     text = if (isCodex) {
                         "将在服务器上通过 Codex App Server 执行；可选择预设或输入自定义模型 ID。"
                     } else {
-                        "将随任务派发到后端 Antigravity Agent；可选择预设或输入自定义模型 ID。"
+                        "自定义模型的可用性取决于服务器的 Google 项目权限和配额。"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

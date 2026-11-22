@@ -26,8 +26,6 @@ val DEFAULT_AGENT_MODELS: List<String> = listOf(
 
 val DEFAULT_ANTIGRAVITY_SUB_MODELS: List<String> = listOf(
     "gemini-4-hydrogen",
-    "gemini-4-carbon",
-    "gemini-4-argon",
 )
 
 val DEFAULT_CODEX_SUB_MODELS: List<String> = listOf(
