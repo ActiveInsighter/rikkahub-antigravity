@@ -76,7 +76,7 @@ internal fun parseDecisionResultMarkdown(text: String): ParsedDecisionResult? {
 }
 
 @Composable
-fun DecisionResultCard(
+internal fun DecisionResultCard(
     parsed: ParsedDecisionResult,
     modifier: Modifier = Modifier,
 ) {

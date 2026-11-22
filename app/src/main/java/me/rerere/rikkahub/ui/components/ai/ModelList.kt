@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.ai
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -363,7 +364,7 @@ fun ModelListSheet(
             ModelList(
                 currentModel = state.modelId,
                 providers = state.filteredProviders,
-                modelType = state.type,
+                modelTypes = state.types,
                 onSelect = {
                     onSelect(it)
                     dismiss()
@@ -380,7 +381,7 @@ fun ModelListSheet(
 private fun ColumnScope.ModelList(
     currentModel: Uuid? = null,
     providers: List<ProviderSetting>,
-    modelType: ModelType,
+    modelTypes: Set<ModelType>,
     onSelect: (Model) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -394,7 +395,7 @@ private fun ColumnScope.ModelList(
     var draggingFavoriteOrder by remember { mutableStateOf<List<Uuid>?>(null) }
     val favoriteModels = (draggingFavoriteOrder ?: settings.value.favoriteModels).mapNotNull { modelId ->
         val model = settings.value.providers.findModelById(modelId) ?: return@mapNotNull null
-        if (model.type != modelType) return@mapNotNull null
+        if (model.type !in modelTypes) return@mapNotNull null
         val provider = model.findProvider(providers = settings.value.providers, checkOverwrite = false) ?: return@mapNotNull null
         model to provider
     }
@@ -415,9 +416,9 @@ private fun ColumnScope.ModelList(
             .joinToString(",")
     }
 
-    val typeFilteredModelsByProvider = remember(providers, modelType) {
+    val typeFilteredModelsByProvider = remember(providers, modelTypes) {
         providers.associate { provider ->
-            provider.id to provider.models.fastFilter { it.type == modelType }
+            provider.id to provider.models.fastFilter { it.type in modelTypes }
         }
     }
 
@@ -481,7 +482,7 @@ private fun ColumnScope.ModelList(
         initialFirstVisibleItemIndex = selectedModelPosition
     )
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        // 列表里只显示当前类型的收藏，下标和完整的收藏列表对不上，按 key 找到对应的模型再移动
+        // 列表只显示符合类型筛选的收藏，按 key 在完整的收藏列表中找到对应的模型再移动
         val ids = (draggingFavoriteOrder ?: settings.value.favoriteModels).toMutableList()
         val fromPos = ids.indexOfFirst { "favorite:$it" == from.key }
         val toPos = ids.indexOfFirst { "favorite:$it" == to.key }
@@ -863,20 +864,21 @@ private fun ModelItem(
     }
 }
 
+@StringRes
+internal fun ModelType.labelRes(): Int = when (this) {
+    ModelType.CHAT -> R.string.setting_provider_page_chat_model
+    ModelType.EMBEDDING -> R.string.setting_provider_page_embedding_model
+    ModelType.IMAGE -> R.string.setting_provider_page_image_model
+    ModelType.AGENT -> R.string.setting_provider_page_agent_model
+    ModelType.DECISION -> R.string.setting_provider_page_decision_model
+}
+
 @Composable
 fun ModelTypeTag(model: Model) {
     Tag(
         type = TagType.INFO
     ) {
-        Text(
-            text = stringResource(
-                when (model.type) {
-                    ModelType.CHAT -> R.string.setting_provider_page_chat_model
-                    ModelType.EMBEDDING -> R.string.setting_provider_page_embedding_model
-                    ModelType.IMAGE -> R.string.setting_provider_page_image_model
-                }
-            )
-        )
+        Text(text = stringResource(model.type.labelRes()))
     }
 }
 

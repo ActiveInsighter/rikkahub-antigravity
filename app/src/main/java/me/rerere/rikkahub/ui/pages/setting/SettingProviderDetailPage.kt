@@ -119,6 +119,7 @@ import me.rerere.rikkahub.ui.components.ai.ModelModalityTag
 import me.rerere.rikkahub.ui.components.ai.ModelSelector
 import me.rerere.rikkahub.ui.components.ai.ModelTypeTag
 import me.rerere.rikkahub.ui.components.ai.ProviderQuotaText
+import me.rerere.rikkahub.ui.components.ai.labelRes
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.CardGroup
@@ -1126,13 +1127,7 @@ private fun ModelTypeSelector(
         onSelect = onTypeSelected,
     ) { type, selected ->
         ConnectedChoiceLabel(
-            text = stringResource(
-                when (type) {
-                    ModelType.CHAT -> R.string.setting_provider_page_chat_model
-                    ModelType.EMBEDDING -> R.string.setting_provider_page_embedding_model
-                    ModelType.IMAGE -> R.string.setting_provider_page_image_model
-                }
-            ),
+            text = stringResource(type.labelRes()),
             selected = selected,
         )
     }
