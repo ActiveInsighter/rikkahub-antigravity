@@ -22,16 +22,20 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.examdocs.prepareExamDocsDocument
 import me.rerere.rikkahub.ui.components.richtext.SvgPreview
 import me.rerere.rikkahub.ui.context.LocalSettings
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,7 +49,7 @@ class ExamDocsReaderTest {
     fun answersAndOpensSolutionContainingStepsCalloutAndWideMath() {
         render(
             """
-            :::question {id="sample" type="single" number="1"}
+            :::question {id="sample" type="single" number="1" points="2" tags="来源:模拟试卷"}
             求分段函数 ${'$'} f(x)${'$'} 的原函数。
 
             :::option {label="A" correct="true"}
@@ -71,6 +75,10 @@ class ExamDocsReaderTest {
             | --- | --- |
             | 连续 | 可积 |
 
+            ~~~kotlin
+            val answer = 1
+            ~~~
+
             :::
             :::
             :::
@@ -78,13 +86,20 @@ class ExamDocsReaderTest {
             """.trimIndent(),
             modifier = Modifier.height(IntrinsicSize.Min),
         )
+        val kind = compose.onNodeWithText("单选题").fetchSemanticsNode().boundsInRoot
+        val source = compose.onNodeWithText("模拟试卷").fetchSemanticsNode().boundsInRoot
+        assertTrue("Question metadata should share one line", source.top < kind.bottom && source.bottom > kind.top)
         compose.onNodeWithText("A").performClick()
         compose.onNodeWithText("回答正确").assertIsDisplayed()
-        compose.onNodeWithText("查看解答").performClick()
+        val retry = compose.onNodeWithText("重做").fetchSemanticsNode().boundsInRoot
+        val solution = compose.onNodeWithText("查看解答")
+        assertTrue("Retry should sit to the left of the solution link", retry.right <= solution.fetchSemanticsNode().boundsInRoot.left)
+        solution.performClick()
         compose.onNodeWithText("本题解析").assertIsDisplayed()
         compose.onNodeWithText("检查连续性").assertIsDisplayed()
         compose.onNodeWithText("对照参考条件").assertIsDisplayed()
         compose.onNodeWithText("可积").assertExists()
+        compose.onNodeWithText("kotlin").assertExists()
     }
 
     @Test
@@ -128,6 +143,25 @@ class ExamDocsReaderTest {
         submit.performClick()
         compose.onNodeWithContentDescription("选错").assertIsDisplayed()
         compose.onNodeWithText("回答错误").assertIsDisplayed()
+    }
+
+    @Test
+    fun submitsAndResetsRoundedBlankField() {
+        render(
+            """
+            :::question {id="blank" type="blank" blanks="[{\"answer\":\"2\"}]"}
+            填写 1 + 1 的结果。
+            :::
+            """.trimIndent(),
+        )
+        val submit = compose.onNodeWithText("提交答案")
+        submit.assertIsNotEnabled()
+        compose.onNode(hasSetTextAction()).performTextInput("2")
+        submit.assertIsEnabled().performClick()
+        compose.onNodeWithText("与参考答案一致").assertIsDisplayed()
+        compose.onNodeWithText("回答正确").assertIsDisplayed()
+        compose.onNodeWithText("重做").performClick()
+        submit.assertIsNotEnabled()
     }
 
     @Test
@@ -177,7 +211,7 @@ class ExamDocsReaderTest {
         val registry = ExamDocsComponentRegistry()
         compose.setContent {
             MaterialExpressiveTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
-                CompositionLocalProvider(LocalSettings provides Settings.dummy()) {
+                CompositionLocalProvider(LocalSettings provides Settings.dummy(), LocalDarkMode provides dark) {
                     val renderer = rememberExamDocsRenderer(document, rememberLazyListState(), {}, { it })
                     SharedTransitionLayout(Modifier.fillMaxSize().padding(12.dp)) {
                         Column(modifier) {

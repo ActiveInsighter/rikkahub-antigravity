@@ -27,7 +27,6 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,7 +85,6 @@ import kotlin.time.Clock
 
 private const val COLLAPSE_LINES = 10
 
-internal val LocalCodeBlockEmbedded = compositionLocalOf { false }
 internal val CodeBlockShape = RoundedCornerShape(14.dp)
 
 @Composable
@@ -103,9 +101,9 @@ fun HighlightCodeBlock(
     modifier: Modifier = Modifier,
     completeCodeBlock: Boolean = true,
     svgPreviewByDefault: Boolean = false,
+    showContainer: Boolean = true,
 ) {
     val darkMode = LocalDarkMode.current
-    val embedded = LocalCodeBlockEmbedded.current
     val colorPalette = if (darkMode) AtomOneDarkPalette else AtomOneLightPalette
     val scrollState = rememberScrollState()
     val clipboardManager = LocalClipboard.current
@@ -144,21 +142,13 @@ fun HighlightCodeBlock(
         }
     }
 
-    val containerColor = codeBlockBackground()
-
-    Column(
-        modifier = if (embedded) {
-            modifier
-        } else {
-            modifier
-                .clip(CodeBlockShape)
-                .background(containerColor)
-        },
-    ) {
+    val codePadding = if (showContainer) 14.dp else 8.dp
+    val container = if (showContainer) Modifier.clip(CodeBlockShape).background(codeBlockBackground()) else Modifier
+    Column(modifier = modifier.then(container)) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = if (embedded) 6.dp else 9.dp)
+                .padding(horizontal = codePadding, vertical = if (showContainer) 9.dp else 6.dp)
         ) {
             HighlightCodeActions(
                 language = language,
@@ -185,9 +175,9 @@ fun HighlightCodeBlock(
         }
         Column(
             modifier = Modifier.padding(
-                start = 14.dp,
-                end = 14.dp,
-                top = if (embedded) 4.dp else 12.dp,
+                start = codePadding,
+                end = codePadding,
+                top = if (showContainer) 12.dp else 4.dp,
                 bottom = 12.dp,
             )
         ) {

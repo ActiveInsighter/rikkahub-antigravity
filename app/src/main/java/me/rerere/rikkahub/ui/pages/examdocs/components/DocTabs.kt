@@ -33,7 +33,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -43,6 +42,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
@@ -53,9 +54,6 @@ import me.rerere.bettertext.markdown.MarkdownBlock
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
-import me.rerere.rikkahub.ui.components.richtext.CodeBlockShape
-import me.rerere.rikkahub.ui.components.richtext.LocalCodeBlockEmbedded
-import me.rerere.rikkahub.ui.components.richtext.codeBlockBackground
 import kotlin.math.roundToInt
 
 private data class TabMeasurement(
@@ -81,24 +79,14 @@ internal fun DocTabs(
     var selectedIndex by rememberSaveable(tabs.size, block.type) { mutableIntStateOf(0) }
     val safeIndex = selectedIndex.coerceIn(0, tabs.lastIndex)
 
-    val hasAnySingleCodeBlock = remember(tabs) {
-        tabs.all { it.isSingleCodeBlock() }
-    }
-    val useCodeSurface = isCodeTabs || hasAnySingleCodeBlock
-
-    val shape = if (useCodeSurface) CodeBlockShape else RoundedCornerShape(16.dp)
-    val surfaceColor = if (useCodeSurface) {
-        codeBlockBackground()
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerLow
-    }
+    val useCodeLayout = isCodeTabs || remember(tabs) { tabs.all { it.isSingleCodeBlock() } }
     val borderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
 
     val density = LocalDensity.current
     val scrollState = rememberScrollState()
     val measurements = remember(tabs.size) { mutableStateMapOf<Int, TabMeasurement>() }
     val activeMeasurement = measurements[safeIndex]
-    val indicatorInsetPx = with(density) { (if (useCodeSurface) 8.dp else 0.dp).toPx() }
+    val indicatorInsetPx = with(density) { (if (useCodeLayout) 8.dp else 0.dp).toPx() }
 
     val targetOffsetDp = with(density) {
         ((activeMeasurement?.leftPx ?: 0f) + indicatorInsetPx).coerceAtLeast(0f).toDp()
@@ -126,9 +114,9 @@ internal fun DocTabs(
     }
 
     Surface(
-        shape = shape,
-        color = surfaceColor,
-        border = if (useCodeSurface) null else BorderStroke(1.dp, borderColor),
+        shape = if (useCodeLayout) RectangleShape else RoundedCornerShape(16.dp),
+        color = if (useCodeLayout) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow,
+        border = if (useCodeLayout) null else BorderStroke(1.dp, borderColor),
         modifier = modifier
             .fillMaxWidth()
             .animateContentSize(
@@ -140,10 +128,10 @@ internal fun DocTabs(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(scrollState)
-                    .padding(horizontal = if (useCodeSurface) 8.dp else 14.dp),
+                    .padding(horizontal = if (useCodeLayout) 8.dp else 14.dp),
             ) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(if (useCodeSurface) 0.dp else 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (useCodeLayout) 0.dp else 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (isCodeTabs) {
@@ -180,8 +168,8 @@ internal fun DocTabs(
                                     indication = null,
                                 ) { selectedIndex = index }
                                 .padding(
-                                    horizontal = if (useCodeSurface) 10.dp else 2.dp,
-                                    vertical = if (useCodeSurface) 9.dp else 10.dp,
+                                    horizontal = if (useCodeLayout) 10.dp else 2.dp,
+                                    vertical = if (useCodeLayout) 9.dp else 10.dp,
                                 ),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -210,7 +198,7 @@ internal fun DocTabs(
                 }
             }
 
-            if (!useCodeSurface) {
+            if (!useCodeLayout) {
                 Box(Modifier.fillMaxWidth().height(0.8.dp).background(borderColor))
             }
 
@@ -225,22 +213,12 @@ internal fun DocTabs(
                 label = "DocTabsPanel",
             ) { index ->
                 val tab = tabs[index]
-                val singleCodeBlock = tab.isSingleCodeBlock()
-                if (useCodeSurface && singleCodeBlock) {
-                    CompositionLocalProvider(LocalCodeBlockEmbedded provides true) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            renderChildren(tab.blocks)
-                        }
-                    }
-                } else {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        renderChildren(tab.blocks)
-                    }
+                val padding = if (useCodeLayout && tab.isSingleCodeBlock()) 0.dp else 14.dp
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(padding),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    renderChildren(tab.blocks)
                 }
             }
         }

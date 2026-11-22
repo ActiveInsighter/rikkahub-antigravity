@@ -182,6 +182,7 @@ internal fun rememberRichMarkdownRenderer(
     inlineMath: ((String) -> BetterInline)? = null,
     imageContent: (@Composable (MarkdownInline.Image, String?, String) -> Unit)? = null,
     svgPreviewByDefault: Boolean = false,
+    showCodeBlockContainer: Boolean = true,
 ): RichMarkdownRenderer {
     val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
     val enableQuoteHighlight = LocalSettings.current.displaySetting.enableQuoteHighlight
@@ -203,7 +204,7 @@ internal fun rememberRichMarkdownRenderer(
 
     val currentOnClickCitation by rememberUpdatedState(onClickCitation)
     val currentImageUrlResolver by rememberUpdatedState(imageUrlResolver)
-    val components = remember(enableLatexRendering, displayMath, inlineMath, imageContent, svgPreviewByDefault) {
+    val components = remember(enableLatexRendering, displayMath, inlineMath, imageContent, svgPreviewByDefault, showCodeBlockContainer) {
         MarkdownComponents(
             codeBlock = { block ->
                 HighlightCodeBlock(
@@ -212,6 +213,7 @@ internal fun rememberRichMarkdownRenderer(
                     modifier = Modifier.fillMaxWidth(),
                     completeCodeBlock = block.closed,
                     svgPreviewByDefault = svgPreviewByDefault,
+                    showContainer = showCodeBlockContainer,
                 )
             },
             image = { image, link ->

@@ -7,11 +7,13 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -27,7 +30,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -40,6 +42,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
@@ -51,13 +54,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -77,6 +87,7 @@ import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Tick02
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 import me.rerere.rikkahub.ui.components.ui.cardGroupItemShape
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
 
 private enum class QuestionKind(val label: String, val icon: ImageVector) {
     Single("单选题", HugeIcons.CheckmarkCircle02),
@@ -95,6 +106,7 @@ private enum class SelfGradeOption(val letter: String, val label: String, val re
 private enum class GradeResult(val icon: ImageVector) {
     Correct(HugeIcons.CheckmarkCircle02),
     Partial(HugeIcons.Alert02),
+    Missed(HugeIcons.Alert02),
     Incorrect(HugeIcons.Alert01),
     Recorded(HugeIcons.Tick01),
 }
@@ -321,32 +333,29 @@ internal fun DocQuestionCard(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     blanks.forEachIndexed { index, value ->
                         val match = blankMatches.getOrNull(index)
-                        TextField(
+                        QuestionAnswerField(
                             value = value,
                             onValueChange = { updated -> blanks = ArrayList(blanks).apply { set(index, updated) } },
-                            label = { Text(if (blankCount > 1) "第 ${index + 1} 空" else "填写答案") },
+                            label = if (blankCount > 1) "第 ${index + 1} 空" else "填写答案",
+                            icon = HugeIcons.Edit01,
                             readOnly = submitted,
-                            supportingText = when (match) {
-                                true -> { { Text("与参考答案一致") } }
-                                false -> { { Text("请核对参考答案，等价写法可能需要自行判断") } }
+                            feedback = when (match) {
+                                true -> "与参考答案一致"
+                                false -> "请核对参考答案，等价写法可能需要自行判断"
                                 null -> null
                             },
-                            singleLine = true,
-                            shape = MaterialTheme.shapes.medium,
-                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
             }
 
             if (kind == QuestionKind.Essay) {
-                TextField(
+                QuestionAnswerField(
                     value = draft,
                     onValueChange = { draft = it },
-                    label = { Text("作答草稿（可选）") },
-                    minLines = 2,
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.fillMaxWidth(),
+                    label = "作答草稿（可选）",
+                    icon = HugeIcons.QuillWrite01,
+                    singleLine = false,
                 )
                 if (pickedGrade == null) {
                     SelfGradeChoices(selfGradeLetter) {
@@ -372,7 +381,10 @@ internal fun DocQuestionCard(
                     QuestionResultPanel(
                         result = visibleResult,
                         supportingText = referenceAnswer?.takeIf {
-                            visibleResult.grade == GradeResult.Partial || visibleResult.grade == GradeResult.Incorrect
+                            when (visibleResult.grade) {
+                                GradeResult.Partial, GradeResult.Missed, GradeResult.Incorrect -> true
+                                else -> false
+                            }
                         }?.let { "参考答案  $it" },
                     )
                 }
@@ -381,8 +393,7 @@ internal fun DocQuestionCard(
             if (hasActions) {
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.End),
                     itemVerticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (!submitted && (multiple || blankCount > 0)) {
@@ -397,20 +408,6 @@ internal fun DocQuestionCard(
                             Text("提交答案")
                         }
                     }
-                    if (solution != null) {
-                        FilledTonalButton(
-                            onClick = {
-                                focusManager.clearFocus()
-                                showSolution = true
-                            },
-                            shapes = ButtonDefaults.shapes(),
-                            contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
-                        ) {
-                            Icon(HugeIcons.Book02, null, Modifier.size(ButtonDefaults.IconSize))
-                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                            Text("查看解答")
-                        }
-                    }
                     if (result != null) {
                         TextButton(
                             onClick = {
@@ -420,10 +417,25 @@ internal fun DocQuestionCard(
                                 selfGradeLetter = null
                             },
                             shapes = ButtonDefaults.shapes(),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
                         ) {
-                            Icon(HugeIcons.Refresh03, null, Modifier.size(ButtonDefaults.IconSize))
-                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                            Icon(HugeIcons.Refresh03, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(5.dp))
                             Text(if (kind == QuestionKind.Essay) "重新自评" else "重做")
+                        }
+                    }
+                    if (solution != null) {
+                        TextButton(
+                            onClick = {
+                                focusManager.clearFocus()
+                                showSolution = true
+                            },
+                            shapes = ButtonDefaults.shapes(),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                        ) {
+                            Icon(HugeIcons.Book02, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text("查看解答", textDecoration = TextDecoration.Underline)
                         }
                     }
                 }
@@ -482,44 +494,83 @@ internal fun DocQuestionCard(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun QuestionHeader(number: String?, kind: QuestionKind, points: String?, sourceName: String?) {
     val scheme = MaterialTheme.colorScheme
     Row(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Surface(
-            shape = MaterialTheme.shapes.medium,
+            shape = MaterialTheme.shapes.small,
             color = scheme.secondaryContainer,
             contentColor = scheme.onSecondaryContainer,
-            modifier = Modifier.size(40.dp),
+            modifier = Modifier.size(28.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(kind.icon, contentDescription = null, modifier = Modifier.size(20.dp))
+                Icon(kind.icon, contentDescription = null, modifier = Modifier.size(16.dp))
             }
         }
-        Column {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                itemVerticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (number != null) Text(number, style = MaterialTheme.typography.titleSmallEmphasized)
-                Text(kind.label, style = MaterialTheme.typography.titleSmallEmphasized)
-                if (points != null) {
-                    Text(
-                        text = "$points 分",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = scheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (sourceName != null) {
-                Text(sourceName, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-            }
+        if (number != null) {
+            Text(number, style = MaterialTheme.typography.titleSmallEmphasized, maxLines = 1)
+        }
+        Text(kind.label, style = MaterialTheme.typography.labelLargeEmphasized, maxLines = 1)
+        if (points != null) {
+            Text(
+                text = "$points 分",
+                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
+        if (sourceName != null) {
+            Text(
+                text = sourceName,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariant,
+                textAlign = TextAlign.End,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
+}
+
+@Composable
+private fun QuestionAnswerField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    icon: ImageVector,
+    singleLine: Boolean = true,
+    readOnly: Boolean = false,
+    feedback: String? = null,
+) {
+    val scheme = MaterialTheme.colorScheme
+    TextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(label) },
+        leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
+        readOnly = readOnly,
+        singleLine = singleLine,
+        minLines = if (singleLine) 1 else 3,
+        maxLines = if (singleLine) 1 else 6,
+        supportingText = feedback?.let { { Text(it) } },
+        shape = MaterialTheme.shapes.large,
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = if (readOnly) scheme.surfaceContainerHigh else scheme.secondaryContainer,
+            unfocusedContainerColor = scheme.surfaceContainerHigh,
+            focusedTextColor = if (readOnly) scheme.onSurface else scheme.onSecondaryContainer,
+            focusedLabelColor = if (readOnly) scheme.onSurfaceVariant else scheme.onSecondaryContainer,
+            focusedLeadingIconColor = if (readOnly) scheme.onSurfaceVariant else scheme.onSecondaryContainer,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+        ),
+    )
 }
 
 private fun resolveOptionFeedback(
@@ -550,10 +601,11 @@ private fun QuestionChoice(
     val scheme = MaterialTheme.colorScheme
     val motion = MaterialTheme.motionScheme
     val (container, content) = when (feedback) {
-        ChoiceFeedback.Correct, ChoiceFeedback.Answer, ChoiceFeedback.Missed ->
+        ChoiceFeedback.Correct, ChoiceFeedback.Answer ->
             scheme.primaryContainer to scheme.onPrimaryContainer
+        ChoiceFeedback.Missed -> missedAnswerColors()
         ChoiceFeedback.Selected -> scheme.secondaryContainer to scheme.onSecondaryContainer
-        ChoiceFeedback.Incorrect -> scheme.surfaceContainerHighest to scheme.onSurface
+        ChoiceFeedback.Incorrect -> incorrectAnswerColors()
         ChoiceFeedback.Idle -> scheme.surfaceContainerHigh to scheme.onSurface
     }
     val containerColor by animateColorAsState(container, motion.fastEffectsSpec(), label = "option container")
@@ -575,7 +627,22 @@ private fun QuestionChoice(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (option.text == null) {
-                Text(option.label, style = MaterialTheme.typography.labelLargeEmphasized)
+                Box(
+                    modifier = Modifier
+                        .widthIn(min = 29.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(content.copy(alpha = 0.08f))
+                        .padding(horizontal = 5.dp, vertical = 3.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = option.label,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontFamily = FontFamily.Serif,
+                        fontStyle = FontStyle.Italic,
+                        maxLines = 1,
+                    )
+                }
             }
             Column(Modifier.weight(1f)) {
                 if (option.text != null) {
@@ -632,7 +699,7 @@ private fun gradeAnswer(
     return when {
         correct.isEmpty() -> QuestionResult(GradeResult.Recorded, "已记录作答")
         selection.toSet() == correct -> QuestionResult(GradeResult.Correct, "回答正确")
-        selection.all { it in correct } -> QuestionResult(GradeResult.Partial, "部分正确，有漏选")
+        selection.all { it in correct } -> QuestionResult(GradeResult.Missed, "部分正确，有漏选")
         else -> QuestionResult(GradeResult.Incorrect, "回答错误")
     }
 }
@@ -643,7 +710,9 @@ private fun QuestionResultPanel(result: QuestionResult, supportingText: String?)
     val (container, content) = when (result.grade) {
         GradeResult.Correct -> scheme.primaryContainer to scheme.onPrimaryContainer
         GradeResult.Partial -> scheme.secondaryContainer to scheme.onSecondaryContainer
-        GradeResult.Incorrect, GradeResult.Recorded -> scheme.surfaceContainerHighest to scheme.onSurface
+        GradeResult.Missed -> missedAnswerColors()
+        GradeResult.Incorrect -> incorrectAnswerColors()
+        GradeResult.Recorded -> scheme.surfaceContainerHighest to scheme.onSurface
     }
     Surface(
         modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
@@ -665,6 +734,19 @@ private fun QuestionResultPanel(result: QuestionResult, supportingText: String?)
             }
         }
     }
+}
+
+@Composable
+private fun incorrectAnswerColors(): Pair<Color, Color> {
+    val scheme = MaterialTheme.colorScheme
+    return lerp(scheme.errorContainer, scheme.surfaceContainerHigh, 0.35f) to scheme.onErrorContainer
+}
+
+@Composable
+private fun missedAnswerColors(): Pair<Color, Color> = if (LocalDarkMode.current) {
+    Color(0xFF3D321B) to Color(0xFFF4DB9C)
+} else {
+    Color(0xFFFFF0C5) to Color(0xFF604700)
 }
 
 @OptIn(ExperimentalLayoutApi::class)

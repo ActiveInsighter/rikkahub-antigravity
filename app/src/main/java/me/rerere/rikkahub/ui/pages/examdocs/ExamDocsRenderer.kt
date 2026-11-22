@@ -150,6 +150,7 @@ internal fun rememberExamDocsRenderer(
         inlineMath = inlineMath,
         imageContent = imageContent,
         svgPreviewByDefault = true,
+        showCodeBlockContainer = false,
     )
 }
 
