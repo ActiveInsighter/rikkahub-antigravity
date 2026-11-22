@@ -248,7 +248,7 @@ fun ExamDocsPage(
                                     ),
                                     TopBarMenuItem(
                                         "答题统计",
-                                        me.rerere.hugeicons.stroke.ChartColumn,
+                                        HugeIcons.ChartColumn,
                                         { navController.navigate(Screen.ExamDocsStats) },
                                         state.sitesReady,
                                     ),

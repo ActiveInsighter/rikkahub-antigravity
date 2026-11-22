@@ -236,8 +236,8 @@ private fun prefetchBlockImages(
             item.children.forEach { prefetchBlockImages(it, imageUrlResolver, seen, onEnqueue) }
         }
         is MarkdownBlock.Table -> {
-            block.headers.forEach { cell -> prefetchInlineImages(cell, imageUrlResolver, seen, onEnqueue) }
-            block.rows.forEach { row -> row.forEach { cell -> prefetchInlineImages(cell, imageUrlResolver, seen, onEnqueue) } }
+            block.header.forEach { cell -> prefetchInlineImages(cell.content, imageUrlResolver, seen, onEnqueue) }
+            block.rows.forEach { row -> row.forEach { cell -> prefetchInlineImages(cell.content, imageUrlResolver, seen, onEnqueue) } }
         }
         else -> Unit
     }
