@@ -1276,8 +1276,8 @@ class PocketBaseAgentCloudClient(
             }
             val isAntigravityModel = isAntigravityAgentModel(selectedModel)
             val isCodexModel = isCodexAgentModel(selectedModel)
-            val effectiveAgentModel = agentModelOverride?.trim()?.takeIf { it.isNotBlank() }
-                ?: config.agentModel.trim().takeIf { it.isNotBlank() }
+            val effectiveAgentModel = (agentModelOverride ?: config.agentModel.takeIf { isAntigravityModel })
+                ?.trim()?.takeIf { it.isNotBlank() }
             val selectedThinkingLevel = thinkingLevelOverride ?: config.thinkingLevel
             val selectedSystemPrompt = systemPromptOverride ?: config.systemPrompt
             val cleanImages = images.map { it.trim() }.filter { it.isNotBlank() }.distinct()

@@ -147,4 +147,3 @@ class AgentCloudClientPayloadTest {
         assertNull(payload["agentModel"])
     }
 }
-

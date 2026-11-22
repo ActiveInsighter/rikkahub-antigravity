@@ -819,11 +819,17 @@ class AgentVM(
         val modelName = selectedModelEntity.value?.modelId?.ifBlank { null }
             ?: selectedAgentModelName.value.ifBlank { "Antigravity" }
         val agentModel = when {
-            isCodexAgentModel(modelName) -> settingsStore.current.codexSubModel.trim().takeIf { it.isNotBlank() }
-            isAntigravityAgentModel(modelName) -> settingsStore.current.antigravitySubModel.trim().takeIf { it.isNotBlank() }
+            isCodexAgentModel(modelName) -> settingsStore.current.codexSubModel.trim()
+            isAntigravityAgentModel(modelName) -> settingsStore.current.antigravitySubModel.trim()
             else -> null
         }
-        val thinkingLevel = if (modelName.isManagedAgentModel()) "" else _agentAssistant.value.reasoningLevel.toGeminiThinkingLevel()
+        val reasoningLevel = _agentAssistant.value.reasoningLevel
+        val thinkingLevel = when {
+            isCodexAgentModel(modelName) && reasoningLevel in listOf(ReasoningLevel.XHIGH, ReasoningLevel.MAX) -> "xhigh"
+            isCodexAgentModel(modelName) && reasoningLevel == ReasoningLevel.OFF -> "off"
+            modelName.isManagedAgentModel() -> ""
+            else -> reasoningLevel.toGeminiThinkingLevel()
+        }
         val systemPrompt = _agentAssistant.value.systemPrompt.takeIf { it.isNotBlank() }
         val assistantMsgId = Uuid.random()
         val nodeId = targetNodeId ?: Uuid.random()

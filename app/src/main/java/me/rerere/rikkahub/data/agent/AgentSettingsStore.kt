@@ -25,19 +25,17 @@ val DEFAULT_AGENT_MODELS: List<String> = listOf(
 )
 
 val DEFAULT_ANTIGRAVITY_SUB_MODELS: List<String> = listOf(
-    "",
     "gemini-4-hydrogen",
     "gemini-4-carbon",
-    "antigravity-preview-09-2026",
+    "gemini-4-argon",
 )
 
 val DEFAULT_CODEX_SUB_MODELS: List<String> = listOf(
-    "",
-    "gpt-5.4",
-    "gpt-5.3-codex",
-    "gpt-5.2-codex",
-    "gpt-5.1-codex-max",
-    "o3",
+    "gpt-6.1-terra",
+    "gpt-6.1-sol",
+    "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
 )
 
 @Serializable

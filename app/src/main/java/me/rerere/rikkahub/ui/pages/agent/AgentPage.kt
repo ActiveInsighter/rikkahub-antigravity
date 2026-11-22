@@ -1656,7 +1656,7 @@ private fun AgentSubModelPickerDialog(
     var draftModel by remember(currentSubModel, isCodex) { mutableStateOf(currentSubModel) }
     val title = if (isCodex) "选择 Codex 底层模型" else "选择 Antigravity 底层模型"
     val placeholderText = if (isCodex) {
-        "留空则使用服务端默认（例如 gpt-5.3-codex）"
+        "留空则使用服务端默认"
     } else {
         "留空则使用服务端默认（例如 gemini-4-hydrogen）"
     }
@@ -1723,5 +1723,3 @@ private fun AgentSubModelPickerDialog(
         },
     )
 }
-
-
