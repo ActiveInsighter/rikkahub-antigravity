@@ -658,19 +658,21 @@ private fun ModelSettingsForm(
                             }
                         )
 
-                        ModelModalitySelector(
-                            model = model,
-                            inputModalities = model.inputModalities,
-                            onUpdateInputModalities = {
-                                onModelChange(model.copy(inputModalities = it))
-                            },
-                            outputModalities = model.outputModalities,
-                            onUpdateOutputModalities = {
-                                onModelChange(model.copy(outputModalities = it))
-                            }
-                        )
+                        if (model.type == ModelType.CHAT ||
+                            model.type == ModelType.AGENT ||
+                            model.type == ModelType.DECISION
+                        ) {
+                            ModelModalitySelector(
+                                inputModalities = model.inputModalities,
+                                onUpdateInputModalities = {
+                                    onModelChange(model.copy(inputModalities = it))
+                                },
+                                outputModalities = model.outputModalities,
+                                onUpdateOutputModalities = {
+                                    onModelChange(model.copy(outputModalities = it))
+                                }
+                            )
 
-                        if (model.type == ModelType.CHAT) {
                             ModalAbilitySelector(
                                 abilities = model.abilities,
                                 onUpdateAbilities = {
@@ -812,7 +814,12 @@ private fun AddModelButton(
 
         Button(
             onClick = {
-                dialogState.open(Model())
+                val type = when (parentProvider.id) {
+                    CODEX_PROVIDER_ID, ANTIGRAVITY_PROVIDER_ID -> ModelType.AGENT
+                    DECISION_PROVIDER_ID -> ModelType.DECISION
+                    else -> ModelType.CHAT
+                }
+                dialogState.open(Model(type = type))
             }
         ) {
             Row(
@@ -1135,58 +1142,55 @@ private fun ModelTypeSelector(
 
 @Composable
 private fun ModelModalitySelector(
-    model: Model,
     inputModalities: List<Modality>,
     onUpdateInputModalities: (List<Modality>) -> Unit,
     outputModalities: List<Modality>,
     onUpdateOutputModalities: (List<Modality>) -> Unit
 ) {
-    if (model.type == ModelType.CHAT) {
-        Text(
-            stringResource(R.string.setting_provider_page_input_modality),
-            style = MaterialTheme.typography.titleSmall
+    Text(
+        stringResource(R.string.setting_provider_page_input_modality),
+        style = MaterialTheme.typography.titleSmall
+    )
+    ConnectedMultiChoiceButtons(
+        options = Modality.entries,
+        selected = inputModalities,
+        onToggle = { modality, checked ->
+            onUpdateInputModalities(if (checked) inputModalities + modality else inputModalities - modality)
+        },
+    ) { modality, selected ->
+        ConnectedChoiceLabel(
+            text = stringResource(
+                when (modality) {
+                    Modality.TEXT -> R.string.setting_provider_page_text
+                    Modality.IMAGE -> R.string.setting_provider_page_image
+                }
+            ),
+            selected = selected,
+            icon = HugeIcons.Tick01,
         )
-        ConnectedMultiChoiceButtons(
-            options = Modality.entries,
-            selected = inputModalities,
-            onToggle = { modality, checked ->
-                onUpdateInputModalities(if (checked) inputModalities + modality else inputModalities - modality)
-            },
-        ) { modality, selected ->
-            ConnectedChoiceLabel(
-                text = stringResource(
-                    when (modality) {
-                        Modality.TEXT -> R.string.setting_provider_page_text
-                        Modality.IMAGE -> R.string.setting_provider_page_image
-                    }
-                ),
-                selected = selected,
-                icon = HugeIcons.Tick01,
-            )
-        }
+    }
 
-        Text(
-            stringResource(R.string.setting_provider_page_output_modality),
-            style = MaterialTheme.typography.titleSmall
+    Text(
+        stringResource(R.string.setting_provider_page_output_modality),
+        style = MaterialTheme.typography.titleSmall
+    )
+    ConnectedMultiChoiceButtons(
+        options = Modality.entries,
+        selected = outputModalities,
+        onToggle = { modality, checked ->
+            onUpdateOutputModalities(if (checked) outputModalities + modality else outputModalities - modality)
+        },
+    ) { modality, selected ->
+        ConnectedChoiceLabel(
+            text = stringResource(
+                when (modality) {
+                    Modality.TEXT -> R.string.setting_provider_page_text
+                    Modality.IMAGE -> R.string.setting_provider_page_image
+                }
+            ),
+            selected = selected,
+            icon = HugeIcons.Tick01,
         )
-        ConnectedMultiChoiceButtons(
-            options = Modality.entries,
-            selected = outputModalities,
-            onToggle = { modality, checked ->
-                onUpdateOutputModalities(if (checked) outputModalities + modality else outputModalities - modality)
-            },
-        ) { modality, selected ->
-            ConnectedChoiceLabel(
-                text = stringResource(
-                    when (modality) {
-                        Modality.TEXT -> R.string.setting_provider_page_text
-                        Modality.IMAGE -> R.string.setting_provider_page_image
-                    }
-                ),
-                selected = selected,
-                icon = HugeIcons.Tick01,
-            )
-        }
     }
 }
 
