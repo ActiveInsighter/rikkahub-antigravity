@@ -146,4 +146,58 @@ class ServerToolFormatterTest {
         val textOut = formatted.outputSections.filterIsInstance<ToolDetailSection.Text>().single()
         assertTrue(textOut.text.contains("Kotlin Coroutines Guide"))
     }
+
+    @Test
+    fun `exposes stepDurationText without exit code and defaults command output to bash`() {
+        val tool = UIMessagePart.ServerTool(
+            toolCallId = "cmd-1",
+            toolName = "commandExecution",
+            input = buildJsonObject { put("command", "ls -la") },
+            output = buildJsonObject {
+                put("exitCode", 0)
+                put("durationMs", 1250)
+                put("aggregatedOutput", "total 12\ndrwxr-xr-x 2 root root 40")
+            },
+            status = ServerToolStatus.COMPLETED,
+        )
+
+        val formatted = formatServerTool(tool)
+        assertEquals("1.3 s", formatted.stepDurationText)
+        assertEquals("退出码 0 · 1250 ms", formatted.statusText)
+        val outCode = formatted.outputSections.filterIsInstance<ToolDetailSection.Code>().single()
+        assertEquals("bash", outCode.language)
+    }
+
+    @Test
+    fun `applies decision classification to bash read of typescript file`() {
+        val classification = me.rerere.rikkahub.data.agent.AgentStepClassification(
+            operation = me.rerere.rikkahub.data.agent.AgentStepOperation.FILE_READ,
+            source = me.rerere.rikkahub.data.agent.AgentToolSource.SHELL,
+            label = "读取 index.ts",
+            targetPath = "src/index.ts",
+            inputLanguage = "bash",
+            outputLanguage = "typescript",
+            renderMode = me.rerere.rikkahub.data.agent.AgentStepRenderMode.CODE,
+        )
+        val tool = UIMessagePart.ServerTool(
+            toolCallId = "cmd-read-ts",
+            toolName = "commandExecution",
+            input = buildJsonObject { put("command", "sed -n '1,20p' src/index.ts") },
+            output = buildJsonObject {
+                put("exitCode", 0)
+                put("aggregatedOutput", "export const hello = 'world';")
+            },
+            status = ServerToolStatus.COMPLETED,
+            metadata = buildJsonObject {
+                put(me.rerere.rikkahub.data.agent.METADATA_STEP_CLASSIFICATION, classification.toJsonObject())
+            },
+        )
+
+        val formatted = formatServerTool(tool)
+        assertEquals(ServerToolCategory.FILE_READ, formatted.category)
+        assertEquals("读取 index.ts", formatted.title)
+        assertEquals(null, formatted.stepDurationText)
+        val outCode = formatted.outputSections.filterIsInstance<ToolDetailSection.Code>().single()
+        assertEquals("typescript", outCode.language)
+    }
 }

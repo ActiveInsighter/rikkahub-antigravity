@@ -215,6 +215,21 @@ fun SettingPreferencesUIPage(vm: SettingVM = koinViewModel()) {
                         supportingContent = { Text(stringResource(R.string.setting_display_page_auto_collapse_thinking_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_display_page_auto_collapse_thinking_title)) },
                     )
+                    formItem(
+                        headlineContent = { Text("步骤块折叠保留步数") },
+                        supportingContent = { Text("步骤块收起时默认保留显示的尾部步骤数量") },
+                        trailingContent = { CardGroupValue("${displaySetting.collapsedVisibleSteps} 步") },
+                    ) {
+                        Slider(
+                            value = displaySetting.collapsedVisibleSteps.toFloat(),
+                            onValueChange = { value ->
+                                updateDisplaySetting(displaySetting.copy(collapsedVisibleSteps = value.roundToInt().coerceIn(1, 10)))
+                            },
+                            valueRange = 1f..10f,
+                            steps = 8,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                     switchItem(
                         checked = displaySetting.enableLatexRendering,
                         onCheckedChange = { updateDisplaySetting(displaySetting.copy(enableLatexRendering = it)) },

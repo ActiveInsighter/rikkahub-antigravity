@@ -203,9 +203,12 @@ private fun serverToolCategoryIcon(category: ServerToolCategory): ImageVector = 
     ServerToolCategory.FILE_READ -> HugeIcons.FileView
     ServerToolCategory.FILE_WRITE -> HugeIcons.FileAdd
     ServerToolCategory.FILE_EDIT -> HugeIcons.FileEdit
+    ServerToolCategory.FILE_DELETE -> HugeIcons.Delete01
     ServerToolCategory.SEARCH_FILES -> HugeIcons.Search01
     ServerToolCategory.WEB_SEARCH,
     ServerToolCategory.URL_FETCH -> HugeIcons.GlobalSearch
+    ServerToolCategory.MCP_CALL -> HugeIcons.Codesandbox
+    ServerToolCategory.BUILTIN_TOOL -> HugeIcons.Code
     ServerToolCategory.GENERIC -> HugeIcons.Tools
 }
 

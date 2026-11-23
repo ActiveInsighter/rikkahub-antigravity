@@ -5,6 +5,7 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -21,9 +22,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.ui.ModelSnapshot
+import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.AppScope
@@ -453,8 +456,9 @@ class AgentRepository(
         PocketBaseAgentCloudClient.parseIsoMillis(value).takeIf { it > 0 } ?: fallback
 
     private suspend fun saveNodesForConversation(convId: String, nodes: List<MessageNode>) {
+        val enrichedNodes = attachCachedStepClassifications(nodes)
         val existing = messageNodeDao.getByConversationId(convId).associateByTo(HashMap()) { it.id }
-        val changed = nodes.mapIndexedNotNull { index, node ->
+        val changed = enrichedNodes.mapIndexedNotNull { index, node ->
             val entity = AgentMessageNodeEntity(
                 id = node.id.toString(),
                 conversationId = convId,
@@ -466,6 +470,125 @@ class AgentRepository(
         }
         if (existing.isNotEmpty()) messageNodeDao.deleteNodes(existing.values.toList())
         if (changed.isNotEmpty()) messageNodeDao.upsertAll(changed)
+        scheduleStepClassifications(convId, enrichedNodes)
+    }
+
+    private fun attachCachedStepClassifications(nodes: List<MessageNode>): List<MessageNode> =
+        nodes.map { node ->
+            var nodeChanged = false
+            val updatedMessages = node.messages.map { msg ->
+                var msgChanged = false
+                val updatedParts = msg.parts.map { part ->
+                    if (part is UIMessagePart.ServerTool) {
+                        val key = stepClassificationCacheKey(part)
+                        val existingMeta = part.metadata?.get(METADATA_STEP_CLASSIFICATION)
+                        if (existingMeta != null) {
+                            parseAgentStepClassification(existingMeta)?.let {
+                                stepClassificationCache.putIfAbsent(key, it)
+                            }
+                            part
+                        } else {
+                            val cached = stepClassificationCache[key]
+                            if (cached != null) {
+                                msgChanged = true
+                                part.copy(
+                                    metadata = buildJsonObject {
+                                        part.metadata?.forEach { (k, v) -> put(k, v) }
+                                        put(METADATA_STEP_CLASSIFICATION, cached.toJsonObject())
+                                    }
+                                )
+                            } else {
+                                part
+                            }
+                        }
+                    } else {
+                        part
+                    }
+                }
+                if (msgChanged) {
+                    nodeChanged = true
+                    msg.copy(parts = updatedParts)
+                } else {
+                    msg
+                }
+            }
+            if (nodeChanged) node.copy(messages = updatedMessages) else node
+        }
+
+    private fun scheduleStepClassifications(convId: String, nodes: List<MessageNode>) {
+        val candidates = nodes.flatMap { it.messages }
+            .flatMap { it.parts }
+            .filterIsInstance<UIMessagePart.ServerTool>()
+            .filter { tool ->
+                tool.status != ServerToolStatus.IN_PROGRESS &&
+                    tool.metadata?.get(METADATA_STEP_CLASSIFICATION) == null &&
+                    !stepClassificationCache.containsKey(stepClassificationCacheKey(tool))
+            }
+        if (candidates.isEmpty()) return
+
+        for (tool in candidates) {
+            val key = stepClassificationCacheKey(tool)
+            if (!pendingStepClassifications.add(key)) continue
+            appScope.launch(Dispatchers.IO) {
+                try {
+                    val classification = runCatching { stepClassifier.classify(tool) }.getOrNull()
+                    if (classification != null) {
+                        stepClassificationCache[key] = classification
+                        persistStepClassifications(convId)
+                    }
+                } finally {
+                    pendingStepClassifications.remove(key)
+                }
+            }
+        }
+    }
+
+    private suspend fun persistStepClassifications(convId: String) {
+        val convUuid = runCatching { Uuid.parse(convId) }.getOrNull() ?: return
+        conversationLock(convUuid).withLock {
+            database.withTransaction {
+                val entities = messageNodeDao.getByConversationId(convId)
+                if (entities.isEmpty()) return@withTransaction
+                val updatedEntities = entities.mapNotNull { entity ->
+                    val decoded = runCatching {
+                        JsonInstant.decodeFromString<List<UIMessage>>(entity.messages)
+                    }.getOrNull() ?: return@mapNotNull null
+                    var changed = false
+                    val newMessages = decoded.map { msg ->
+                        var msgChanged = false
+                        val newParts = msg.parts.map { part ->
+                            if (part is UIMessagePart.ServerTool && part.metadata?.get(METADATA_STEP_CLASSIFICATION) == null) {
+                                val cached = stepClassificationCache[stepClassificationCacheKey(part)]
+                                if (cached != null) {
+                                    msgChanged = true
+                                    part.copy(
+                                        metadata = buildJsonObject {
+                                            part.metadata?.forEach { (k, v) -> put(k, v) }
+                                            put(METADATA_STEP_CLASSIFICATION, cached.toJsonObject())
+                                        }
+                                    )
+                                } else {
+                                    part
+                                }
+                            } else {
+                                part
+                            }
+                        }
+                        if (msgChanged) {
+                            changed = true
+                            msg.copy(parts = newParts)
+                        } else {
+                            msg
+                        }
+                    }
+                    if (!changed) return@mapNotNull null
+                    entity.copy(messages = JsonInstant.encodeToString(newMessages))
+                }
+                if (updatedEntities.isNotEmpty()) {
+                    messageNodeDao.upsertAll(updatedEntities)
+                }
+            }
+        }
     }
 
     suspend fun renameConversation(id: Uuid, title: String) {

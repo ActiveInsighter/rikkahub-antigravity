@@ -11,6 +11,12 @@ import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.common.http.jsonArrayOrNull
 import me.rerere.common.http.jsonObjectOrNull
+import me.rerere.rikkahub.data.agent.AgentStepClassification
+import me.rerere.rikkahub.data.agent.AgentStepOperation
+import me.rerere.rikkahub.data.agent.AgentStepRenderMode
+import me.rerere.rikkahub.data.agent.AgentToolSource
+import me.rerere.rikkahub.data.agent.METADATA_STEP_CLASSIFICATION
+import me.rerere.rikkahub.data.agent.parseAgentStepClassification
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.generateUnifiedDiff
@@ -22,9 +28,12 @@ enum class ServerToolCategory {
     FILE_READ,
     FILE_WRITE,
     FILE_EDIT,
+    FILE_DELETE,
     SEARCH_FILES,
     WEB_SEARCH,
     URL_FETCH,
+    MCP_CALL,
+    BUILTIN_TOOL,
     GENERIC,
 }
 
@@ -47,6 +56,8 @@ data class FormattedServerTool(
     val subtitle: String? = null,
     val summaryCode: CodeSnippet? = null,
     val statusText: String? = null,
+    val stepDurationText: String? = null,
+    val source: AgentToolSource = AgentToolSource.UNKNOWN,
     val isError: Boolean = false,
     val inputSections: List<ToolDetailSection> = emptyList(),
     val outputSections: List<ToolDetailSection> = emptyList(),
@@ -59,6 +70,7 @@ data class FormattedServerTool(
 fun formatServerTool(tool: UIMessagePart.ServerTool): FormattedServerTool {
     val providerType = tool.metadata?.get("providerType")?.jsonPrimitiveOrNull?.contentOrNull
     val normalizedTool = normalizeToolKey(providerType?.takeIf { it.isNotBlank() } ?: tool.toolName)
+    val classification = parseAgentStepClassification(tool.metadata?.get(METADATA_STEP_CLASSIFICATION))
     val input = unwrapJsonElement(tool.input)
     val output = unwrapJsonElement(tool.output)
     val isFailed = tool.status == ServerToolStatus.FAILED
@@ -71,6 +83,7 @@ fun formatServerTool(tool: UIMessagePart.ServerTool): FormattedServerTool {
         output = output,
         isFailed = isFailed,
         isLoading = isLoading,
+        classification = classification,
     )
 }
 
@@ -80,6 +93,7 @@ fun formatServerTool(tool: UIMessagePart.ServerTool): FormattedServerTool {
 fun formatToolUIContext(context: ToolUIContext): FormattedServerTool {
     val providerType = context.tool.metadata?.get("providerType")?.jsonPrimitiveOrNull?.contentOrNull
     val normalizedKey = normalizeToolKey(providerType?.takeIf { it.isNotBlank() } ?: context.tool.toolName)
+    val classification = parseAgentStepClassification(context.tool.metadata?.get(METADATA_STEP_CLASSIFICATION))
     val input = unwrapJsonElement(context.arguments)
     val rawOutputText = context.tool.output
         .filterIsInstance<UIMessagePart.Text>()
@@ -99,6 +113,7 @@ fun formatToolUIContext(context: ToolUIContext): FormattedServerTool {
         output = output,
         isFailed = isFailed,
         isLoading = context.loading,
+        classification = classification,
     )
 }
 
@@ -109,11 +124,14 @@ private fun formatToolPayload(
     output: JsonElement?,
     isFailed: Boolean,
     isLoading: Boolean,
+    classification: AgentStepClassification? = null,
 ): FormattedServerTool {
     val inputObj = input as? JsonObject
     val outputObj = output as? JsonObject
+    val durationMs = outputObj?.firstString("durationMs", "duration_ms", "elapsed_ms")
+    val stepDurationText = formatDurationText(durationMs)
 
-    return when {
+    val base = when {
         normalizedKey in COMMAND_TOOLS ||
             (inputObj?.firstString("command", "cmd") != null && inputObj.firstString("code") == null) ->
             formatCommandTool(rawToolName, inputObj, input, outputObj, output, isFailed, isLoading)
@@ -146,6 +164,13 @@ private fun formatToolPayload(
 
         else ->
             formatGenericTool(rawToolName, input, output, isFailed, isLoading)
+    }
+
+    val withDuration = base.copy(stepDurationText = stepDurationText)
+    return if (classification != null) {
+        applyStepClassification(withDuration, classification)
+    } else {
+        withDuration
     }
 }
 
@@ -191,7 +216,7 @@ private fun formatCommandTool(
         if (!command.isNullOrBlank()) {
             add(ToolDetailSection.Code(label = "命令", code = command, language = "bash"))
         } else if (rawInput != null) {
-            addAll(extractGenericSections(rawInput))
+            addAll(extractGenericSections(rawInput, defaultLanguage = "bash"))
         }
         if (inputObj != null) {
             val extra = extractRemainingObject(
@@ -210,7 +235,8 @@ private fun formatCommandTool(
         }
         if (meta.isNotEmpty()) add(ToolDetailSection.Metadata(meta))
         if (!stdout.isNullOrBlank()) {
-            add(ToolDetailSection.Code(label = "输出", code = stdout, language = "plaintext"))
+            val outLang = inferCodeLanguage(explicitLang = null, path = null, code = stdout, defaultLanguage = "bash")
+            add(ToolDetailSection.Code(label = "输出", code = stdout, language = outLang))
         }
         if (!stderr.isNullOrBlank()) {
             add(ToolDetailSection.Text(label = "错误输出", text = stderr, isError = true))
@@ -228,7 +254,7 @@ private fun formatCommandTool(
                 )
             )
         } else if (rawOutput != null && stdout == null) {
-            addAll(extractGenericSections(rawOutput))
+            addAll(extractGenericSections(rawOutput, defaultLanguage = "bash"))
         }
     }
 
@@ -316,7 +342,7 @@ private fun formatCodeExecutionTool(
         }
         if (meta.isNotEmpty()) add(ToolDetailSection.Metadata(meta))
         if (!stdout.isNullOrBlank()) {
-            val outLang = inferCodeLanguage(explicitLang = null, path = null, code = stdout, defaultLanguage = "plaintext")
+            val outLang = inferCodeLanguage(explicitLang = null, path = null, code = stdout, defaultLanguage = "bash")
             add(ToolDetailSection.Code(label = "输出", code = stdout, language = outLang))
         }
         if (!stderr.isNullOrBlank()) {
@@ -758,6 +784,7 @@ private fun extractGenericSections(element: JsonElement): List<ToolDetailSection
 private fun extractRemainingObject(
     obj: JsonObject,
     excludedKeys: Set<String>,
+    defaultLanguage: String = "bash",
 ): List<ToolDetailSection> {
     val remaining = obj.filterKeys { it !in excludedKeys }
     if (remaining.isEmpty()) return emptyList()
@@ -778,7 +805,7 @@ private fun extractRemainingObject(
                         key.lowercase() in setOf("diff", "patch") -> "diff"
                         key.lowercase() in setOf("command", "cmd", "script") -> "bash"
                         key.lowercase() == "sql" -> "sql"
-                        else -> inferCodeLanguage(null, pathHint, content, "plaintext")
+                        else -> inferCodeLanguage(null, pathHint, content, defaultLanguage)
                     }
                     sections += ToolDetailSection.Code(label = key, code = content, language = lang)
                 } else {
