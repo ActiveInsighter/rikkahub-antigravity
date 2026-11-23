@@ -315,7 +315,7 @@ fun ChatMessage(
 }
 
 // 思考链折叠时默认保留的尾部步骤数
-private const val COLLAPSED_VISIBLE_STEPS = 2
+private const val COLLAPSED_VISIBLE_STEPS = 4
 
 @OptIn(FlowPreview::class)
 @Composable

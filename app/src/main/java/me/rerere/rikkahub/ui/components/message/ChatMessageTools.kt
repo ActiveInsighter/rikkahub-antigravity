@@ -37,10 +37,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -51,18 +54,34 @@ import me.rerere.ai.ui.UIMessagePart
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.BubbleChatQuestion
 import me.rerere.hugeicons.stroke.Cancel01
+import me.rerere.hugeicons.stroke.ComputerTerminal01
+import me.rerere.hugeicons.stroke.FileAdd
+import me.rerere.hugeicons.stroke.FileEdit
+import me.rerere.hugeicons.stroke.FileView
+import me.rerere.hugeicons.stroke.GlobalSearch
 import me.rerere.hugeicons.stroke.Notification01
+import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.Tools
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.tools.local.ASK_USER_TOOL_NAME
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.components.message.tools.DefaultToolPreview
+import me.rerere.rikkahub.ui.components.message.tools.ServerToolCategory
+import me.rerere.rikkahub.ui.components.message.tools.ServerToolPreview
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIContext
 import me.rerere.rikkahub.ui.components.message.tools.ToolUIRegistry
+import me.rerere.rikkahub.ui.components.message.tools.formatServerTool
+import me.rerere.rikkahub.ui.components.richtext.CodeBlockShape
+import me.rerere.rikkahub.ui.components.richtext.CodeHighlightText
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
+import me.rerere.rikkahub.ui.components.richtext.codeBlockBackground
+import me.rerere.rikkahub.ui.components.richtext.codeBlockTextStyle
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.modifier.shimmer
+import me.rerere.rikkahub.ui.theme.AtomOneDarkPalette
+import me.rerere.rikkahub.ui.theme.AtomOneLightPalette
+import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.utils.JsonInstant
 import me.rerere.ui.components.DotLoading
 import kotlin.time.Clock
@@ -73,9 +92,13 @@ import kotlin.time.DurationUnit
 @Composable
 fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool) {
     val loading = !tool.isFinished
-    val failed = tool.status == me.rerere.ai.ui.ServerToolStatus.FAILED
-    val hasDetails = tool.input != null || tool.output != null
+    val formatted = remember(tool) { formatServerTool(tool) }
+    val failed = tool.status == me.rerere.ai.ui.ServerToolStatus.FAILED || formatted.isError
+    val hasDetails = tool.input != null || tool.output != null ||
+        formatted.inputSections.isNotEmpty() || formatted.outputSections.isNotEmpty()
     var showResult by remember { mutableStateOf(false) }
+
+    val hasSummary = formatted.summaryCode != null || !formatted.subtitle.isNullOrBlank()
 
     ChainOfThoughtStep(
         icon = {
@@ -88,7 +111,7 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
                     tint = MaterialTheme.colorScheme.error,
                 )
                 else -> Icon(
-                    imageVector = HugeIcons.Tools,
+                    imageVector = serverToolCategoryIcon(formatted.category),
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
                     tint = LocalContentColor.current.copy(alpha = 0.7f),
@@ -97,7 +120,7 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
         },
         label = {
             Text(
-                text = stringResource(R.string.chat_message_tool_call_generic, tool.toolName),
+                text = formatted.title,
                 style = MaterialTheme.typography.titleSmall,
                 color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.shimmer(isLoading = loading),
@@ -105,35 +128,60 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
                 overflow = TextOverflow.Ellipsis,
             )
         },
+        extra = formatted.statusText?.let { status ->
+            {
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.shimmer(isLoading = loading),
+                )
+            }
+        },
         onClick = if (hasDetails) {
             { showResult = true }
         } else {
             null
         },
-        content = null,
+        content = if (hasSummary) {
+            {
+                val summaryCode = formatted.summaryCode
+                if (summaryCode != null) {
+                    val palette = if (LocalDarkMode.current) AtomOneDarkPalette else AtomOneLightPalette
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(CodeBlockShape)
+                            .background(codeBlockBackground())
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    ) {
+                        CodeHighlightText(
+                            code = summaryCode.code,
+                            language = summaryCode.language,
+                            colors = palette,
+                            style = codeBlockTextStyle(ratio = 0.8f),
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                } else {
+                    formatted.subtitle?.let { subtitle ->
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        } else {
+            null
+        },
     )
 
     if (showResult) {
-        val context = remember(tool, loading) {
-            val inputText = tool.input?.let { formatServerToolJson(it) } ?: "{}"
-            val outputParts = tool.output?.let { outputEl ->
-                val formatted = formatServerToolJson(outputEl)
-                if (formatted.isNotBlank()) listOf(UIMessagePart.Text(formatted)) else emptyList()
-            } ?: emptyList()
-            ToolUIContext(
-                tool = UIMessagePart.Tool(
-                    toolCallId = tool.toolCallId,
-                    toolName = tool.toolName,
-                    input = inputText,
-                    output = outputParts,
-                    metadata = tool.metadata,
-                ),
-                arguments = tool.input ?: JsonObject(emptyMap()),
-                content = tool.output,
-                loading = loading,
-                assistant = null,
-            )
-        }
         ModalBottomSheet(
             sheetState = rememberBottomSheetState(
                 initialValue = SheetValue.Hidden,
@@ -141,17 +189,25 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
             ),
             onDismissRequest = { showResult = false },
             content = {
-                DefaultToolPreview(context = context)
+                ServerToolPreview(
+                    tool = tool,
+                    formatted = formatted,
+                )
             },
         )
     }
 }
 
-private fun formatServerToolJson(element: kotlinx.serialization.json.JsonElement): String {
-    return when (element) {
-        is JsonPrimitive -> element.contentOrNull ?: element.toString()
-        else -> element.toString()
-    }
+private fun serverToolCategoryIcon(category: ServerToolCategory): ImageVector = when (category) {
+    ServerToolCategory.COMMAND_EXECUTION,
+    ServerToolCategory.CODE_EXECUTION -> HugeIcons.ComputerTerminal01
+    ServerToolCategory.FILE_READ -> HugeIcons.FileView
+    ServerToolCategory.FILE_WRITE -> HugeIcons.FileAdd
+    ServerToolCategory.FILE_EDIT -> HugeIcons.FileEdit
+    ServerToolCategory.SEARCH_FILES -> HugeIcons.Search01
+    ServerToolCategory.WEB_SEARCH,
+    ServerToolCategory.URL_FETCH -> HugeIcons.GlobalSearch
+    ServerToolCategory.GENERIC -> HugeIcons.Tools
 }
 
 /** 发给模型的运行时通知，例如后台命令结束；展开后显示发给模型的原文 */

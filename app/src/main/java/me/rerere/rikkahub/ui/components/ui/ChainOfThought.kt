@@ -68,7 +68,7 @@ fun <T> ChainOfThought(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     ),
     steps: List<T>,
-    collapsedVisibleCount: Int = 2,
+    collapsedVisibleCount: Int = 4,
     collapsedAdaptiveWidth: Boolean = false,
     content: @Composable ChainOfThoughtScope.(T) -> Unit
 ) {
