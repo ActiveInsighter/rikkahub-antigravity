@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -76,7 +77,6 @@ import me.rerere.rikkahub.ui.components.richtext.CodeBlockShape
 import me.rerere.rikkahub.ui.components.richtext.CodeHighlightText
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.richtext.codeBlockBackground
-import me.rerere.rikkahub.ui.components.richtext.codeBlockTextStyle
 import me.rerere.rikkahub.ui.components.ui.ChainOfThoughtScope
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.ui.theme.AtomOneDarkPalette
@@ -159,7 +159,6 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
                             code = summaryCode.code,
                             language = summaryCode.language,
                             colors = palette,
-                            style = codeBlockTextStyle(ratio = 0.8f),
                             maxLines = 3,
                             overflow = TextOverflow.Ellipsis,
                         )
