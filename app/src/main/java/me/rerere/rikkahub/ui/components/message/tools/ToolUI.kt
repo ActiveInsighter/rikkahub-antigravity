@@ -2,25 +2,29 @@ package me.rerere.rikkahub.ui.components.message.tools
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEach
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -32,8 +36,6 @@ import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
-import me.rerere.rikkahub.utils.JsonInstant
-import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
 import me.rerere.ui.components.FormItem
 
@@ -56,7 +58,7 @@ data class ToolUIContext(
  * 单个工具的 UI 渲染器
  *
  * 在 [ToolUIRegistry] 注册后, 聊天消息中对应的工具调用将使用该渲染器展示;
- * 未注册的工具 fallback 到接口的默认实现 (通用标题/图标 + JSON 详情)
+ * 未注册的工具 fallback 到接口的默认实现 (通用标题/图标 + 结构化详情)
  */
 interface ToolUIRenderer {
     /** 渲染器对应的工具名 */
@@ -122,7 +124,8 @@ internal fun JsonElement?.getStringContent(key: String): String? =
     this?.jsonObjectOrNull?.get(key)?.jsonPrimitiveOrNull?.contentOrNull
 
 /**
- * 默认工具详情: 入参与输出的 JSON 高亮展示
+ * 默认工具详情: 通过格式转换层将 Antigravity / Codex / 通用工具的 JSON 入参与出参
+ * 渲染为代码块、Diff、元信息与执行状态，而非直接展示原始 JSON。
  *
  * @param headerActions 标题栏右侧的附加操作区
  */
@@ -131,68 +134,106 @@ fun DefaultToolPreview(
     context: ToolUIContext,
     headerActions: (@Composable () -> Unit)? = null,
 ) {
+    val formatted = remember(context) { formatToolUIContext(context) }
+    val images = remember(context.tool.output) {
+        context.tool.output.filterIsInstance<UIMessagePart.Image>()
+    }
+    FormattedToolPreview(
+        toolName = context.tool.toolName,
+        formatted = formatted,
+        truncated = (context.tool.metadata?.get("truncated") as? JsonPrimitive)?.booleanOrNull == true,
+        images = images,
+        headerActions = headerActions,
+    )
+}
+
+@Composable
+fun ServerToolPreview(
+    tool: UIMessagePart.ServerTool,
+    formatted: FormattedServerTool = remember(tool) { formatServerTool(tool) },
+    headerActions: (@Composable () -> Unit)? = null,
+) {
+    FormattedToolPreview(
+        toolName = tool.toolName,
+        formatted = formatted,
+        truncated = (tool.metadata?.get("truncated") as? JsonPrimitive)?.booleanOrNull == true,
+        images = emptyList(),
+        headerActions = headerActions,
+    )
+}
+
+@Composable
+private fun FormattedToolPreview(
+    toolName: String,
+    formatted: FormattedServerTool,
+    truncated: Boolean,
+    images: List<UIMessagePart.Image>,
+    headerActions: (@Composable () -> Unit)? = null,
+) {
     Column(
         modifier = Modifier
             .fillMaxHeight(0.8f)
             .padding(16.dp)
             .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = stringResource(R.string.chat_message_tool_call_title),
-                style = MaterialTheme.typography.headlineSmall,
-                textAlign = TextAlign.Center
-            )
-            if ((context.tool.metadata?.get("truncated") as? JsonPrimitive)?.booleanOrNull == true) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = formatted.title.ifBlank { stringResource(R.string.chat_message_tool_call_title) },
+                    style = MaterialTheme.typography.headlineSmall,
+                    textAlign = TextAlign.Start,
+                )
+                val metaParts = listOfNotNull(
+                    toolName.takeIf { it.isNotBlank() },
+                    formatted.statusText,
+                )
+                if (metaParts.isNotEmpty()) {
+                    Text(
+                        text = metaParts.joinToString(" · "),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (formatted.isError) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
+            if (truncated) {
                 Text("部分内容已截断", style = MaterialTheme.typography.labelMedium)
             }
             headerActions?.invoke()
         }
-        FormItem(
-            label = {
-                Text(stringResource(R.string.chat_message_tool_call_label, context.tool.toolName))
-            }
-        ) {
-            val command = (context.arguments as? JsonObject)?.get("command")?.jsonPrimitiveOrNull?.contentOrNull
-            val cwd = (context.arguments as? JsonObject)?.get("cwd")?.jsonPrimitiveOrNull?.contentOrNull
-            if (context.tool.metadata?.get("providerType")?.jsonPrimitiveOrNull?.contentOrNull == "commandExecution" && command != null) {
-                cwd?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
-                HighlightCodeBlock(code = command, language = "bash")
-            } else {
-                HighlightCodeBlock(code = JsonInstantPretty.encodeToString(context.arguments), language = "json")
+
+        if (formatted.inputSections.isNotEmpty()) {
+            FormItem(
+                label = {
+                    Text(stringResource(R.string.chat_message_tool_call_label, toolName))
+                }
+            ) {
+                ToolDetailSections(formatted.inputSections)
             }
         }
-        if (context.tool.output.isNotEmpty()) {
+
+        if (formatted.outputSections.isNotEmpty() || images.isNotEmpty()) {
             FormItem(
                 label = {
                     Text(stringResource(R.string.chat_message_tool_call_result))
                 }
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AgentToolResult(context) {
-                        context.tool.output.fastForEach { part ->
-                            when (part) {
-                                is UIMessagePart.Text -> HighlightCodeBlock(
-                                    code = runCatching {
-                                        JsonInstantPretty.encodeToString(JsonInstant.parseToJsonElement(part.text))
-                                    }.getOrDefault(part.text),
-                                    language = "json",
-                                )
-
-                                is UIMessagePart.Image -> ZoomableAsyncImage(
-                                    model = part.url,
-                                    contentDescription = null,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-
-                                else -> {}
-                            }
-                        }
+                    ToolDetailSections(formatted.outputSections)
+                    images.fastForEach { part ->
+                        ZoomableAsyncImage(
+                            model = part.url,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
                 }
             }
@@ -200,43 +241,134 @@ fun DefaultToolPreview(
     }
 }
 
-
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun AgentToolResult(context: ToolUIContext, fallback: @Composable () -> Unit) {
-    val type = context.tool.metadata?.get("providerType")?.jsonPrimitiveOrNull?.contentOrNull
-    val output = context.content as? JsonObject
-    if (output == null) {
-        fallback()
-        return
-    }
-    when (type) {
-        "commandExecution" -> {
-            val exitCode = output["exitCode"]?.jsonPrimitiveOrNull?.contentOrNull
-            val duration = output["durationMs"]?.jsonPrimitiveOrNull?.contentOrNull
-            val log = output["aggregatedOutput"]?.jsonPrimitiveOrNull?.contentOrNull
-            if (exitCode == null && duration == null && log == null) {
-                fallback()
-                return
-            }
-            val details = listOfNotNull(exitCode?.let { "退出码 $it" }, duration?.let { "${it} ms" })
-            if (details.isNotEmpty()) Text(details.joinToString(" · "), style = MaterialTheme.typography.labelMedium)
-            if (!log.isNullOrBlank()) HighlightCodeBlock(code = log, language = "text")
-        }
+private fun ToolDetailSections(sections: List<ToolDetailSection>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        sections.forEach { section ->
+            when (section) {
+                is ToolDetailSection.Metadata -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        section.items.forEach { (key, value) ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                Text(
+                                    text = key,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    text = value,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                }
 
-        "fileChange" -> {
-            val files = (output["changes"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
-            if (files.isEmpty()) {
-                fallback()
-                return
-            }
-            files.forEach { file ->
-                val path = file["path"]?.jsonPrimitiveOrNull?.contentOrNull
-                val diff = file["diff"]?.jsonPrimitiveOrNull?.contentOrNull
-                if (!path.isNullOrBlank()) Text(path, style = MaterialTheme.typography.labelMedium)
-                if (!diff.isNullOrBlank()) HighlightCodeBlock(code = diff, language = "diff")
+                is ToolDetailSection.Code -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        section.label?.takeIf { it.isNotBlank() }?.let { label ->
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        HighlightCodeBlock(
+                            code = section.code,
+                            language = section.language,
+                        )
+                    }
+                }
+
+                is ToolDetailSection.Diff -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        section.path?.takeIf { it.isNotBlank() }?.let { path ->
+                            Text(
+                                text = path,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        HighlightCodeBlock(
+                            code = section.diff,
+                            language = "diff",
+                        )
+                    }
+                }
+
+                is ToolDetailSection.Text -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        section.label?.takeIf { it.isNotBlank() }?.let { label ->
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (section.isError) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (section.isError) {
+                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = section.text,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (section.isError) {
+                                    MaterialTheme.colorScheme.onErrorContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                modifier = Modifier.padding(10.dp),
+                            )
+                        }
+                    }
+                }
+
+                is ToolDetailSection.Chips -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        section.label?.takeIf { it.isNotBlank() }?.let { label ->
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            section.items.forEach { item ->
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                ) {
+                                    Text(
+                                        text = item,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
-
-        else -> fallback()
     }
 }
