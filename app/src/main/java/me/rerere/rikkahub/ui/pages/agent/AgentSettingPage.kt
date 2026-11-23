@@ -311,6 +311,23 @@ fun AgentSettingPage() {
                         onCheckedChange = { checked -> update { it.copy(autoCloseThinking = checked) } },
                         headlineContent = { Text("生成结束后自动折叠思考") },
                     )
+                    formItem(
+                        headlineContent = { Text("步骤块默认显示条数") },
+                        supportingContent = { Text("折叠时默认保留在底部的思考与工具步骤数量") },
+                        trailingContent = {
+                            CardGroupValue("${uiSettings.collapsedVisibleSteps} 步")
+                        },
+                    ) {
+                        Slider(
+                            value = uiSettings.collapsedVisibleSteps.toFloat(),
+                            onValueChange = { value ->
+                                update { it.copy(collapsedVisibleSteps = value.roundToInt().coerceIn(1, 8)) }
+                            },
+                            valueRange = 1f..8f,
+                            steps = 6,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                     switchItem(
                         checked = uiSettings.enableLatexRendering,
                         onCheckedChange = { checked -> update { it.copy(enableLatexRendering = checked) } },

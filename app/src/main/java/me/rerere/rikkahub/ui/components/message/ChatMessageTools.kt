@@ -128,12 +128,12 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
                 overflow = TextOverflow.Ellipsis,
             )
         },
-        extra = formatted.statusText?.let { status ->
+        extra = formatted.stepDurationText?.let { duration ->
             {
                 Text(
-                    text = status,
+                    text = duration,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
+                    color = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.shimmer(isLoading = loading),
                 )
             }
@@ -198,14 +198,17 @@ fun ChainOfThoughtScope.ChatMessageServerToolStep(tool: UIMessagePart.ServerTool
 }
 
 private fun serverToolCategoryIcon(category: ServerToolCategory): ImageVector = when (category) {
-    ServerToolCategory.COMMAND_EXECUTION,
-    ServerToolCategory.CODE_EXECUTION -> HugeIcons.ComputerTerminal01
+    ServerToolCategory.COMMAND_EXECUTION -> HugeIcons.ComputerTerminal01
+    ServerToolCategory.CODE_EXECUTION -> HugeIcons.Code
     ServerToolCategory.FILE_READ -> HugeIcons.FileView
-    ServerToolCategory.FILE_WRITE -> HugeIcons.FileAdd
+    ServerToolCategory.FILE_ADD -> HugeIcons.FileAdd
     ServerToolCategory.FILE_EDIT -> HugeIcons.FileEdit
+    ServerToolCategory.FILE_DELETE -> HugeIcons.Delete01
     ServerToolCategory.SEARCH_FILES -> HugeIcons.Search01
     ServerToolCategory.WEB_SEARCH,
     ServerToolCategory.URL_FETCH -> HugeIcons.GlobalSearch
+    ServerToolCategory.MCP_CALL -> HugeIcons.McpServer
+    ServerToolCategory.BUILTIN_TOOL -> HugeIcons.Package
     ServerToolCategory.GENERIC -> HugeIcons.Tools
 }
 

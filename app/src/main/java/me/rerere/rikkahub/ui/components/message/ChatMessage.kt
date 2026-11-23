@@ -314,9 +314,6 @@ fun ChatMessage(
     }
 }
 
-// 思考链折叠时默认保留的尾部步骤数
-private const val COLLAPSED_VISIBLE_STEPS = 4
-
 @OptIn(FlowPreview::class)
 @Composable
 private fun MessagePartsBlock(
@@ -375,10 +372,11 @@ private fun MessagePartsBlock(
                     val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
                     // 等待审批的工具不能折叠起来，否则用户看不到审批按钮，这一轮会一直卡在等待审批
                     val firstPendingIndex = block.steps.indexOfFirst { it is ThinkingStep.ToolStep && it.tool.isPending }
+                    val defaultVisibleSteps = settings.displaySetting.collapsedVisibleSteps.coerceAtLeast(1)
                     val collapsedVisibleCount = if (firstPendingIndex == -1) {
-                        COLLAPSED_VISIBLE_STEPS
+                        defaultVisibleSteps
                     } else {
-                        maxOf(COLLAPSED_VISIBLE_STEPS, block.steps.size - firstPendingIndex)
+                        maxOf(defaultVisibleSteps, block.steps.size - firstPendingIndex)
                     }
                     ChainOfThought(
                         modifier = Modifier.animateContentSize(),
