@@ -161,4 +161,20 @@ class AgentCloudClientPayloadTest {
         assertEquals("xhigh", payload["thinkingLevel"]?.jsonPrimitive?.content)
         assertNull(payload["agentModel"])
     }
+
+    @Test
+    fun `continues Command Code using the native queue model`() {
+        val payload = PocketBaseAgentCloudClient.buildSubmitJobPayload(
+            jobId = "abcdefghijklmno",
+            prompt = "Continue",
+            sources = emptyList(),
+            config = RemoteAgentConfig(model = COMMAND_CODE_MODEL, agentModel = "gemini-4-hydrogen"),
+            parentMessageId = "zyxwvutsrqponml",
+        )
+
+        assertEquals(COMMAND_CODE_MODEL, payload["model"]?.jsonPrimitive?.content)
+        assertEquals("zyxwvutsrqponml", payload["parentMessage"]?.jsonPrimitive?.content)
+        assertNull(payload["agentModel"])
+    }
+
 }

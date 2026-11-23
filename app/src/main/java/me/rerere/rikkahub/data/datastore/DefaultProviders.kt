@@ -16,6 +16,7 @@ import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.QuotaQuery
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.ANTIGRAVITY_CLI_MODEL
+import me.rerere.rikkahub.data.agent.COMMAND_CODE_MODEL
 import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import kotlin.uuid.Uuid
@@ -28,11 +29,14 @@ val ANTIGRAVITY_PROVIDER_ID = Uuid.parse("a1000003-0000-4000-8000-000000000003")
 val DECISION_PROVIDER_ID = Uuid.parse("a1000004-0000-4000-8000-000000000004")
 val ANTIGRAVITY_CLI_PROVIDER_ID = Uuid.parse("a1000005-0000-4000-8000-000000000005")
 
+val COMMAND_CODE_PROVIDER_ID = Uuid.parse("a1000006-0000-4000-8000-000000000006")
+
 val TOP_AGENT_PROVIDER_IDS = listOf(
     CHAT_GATEWAY_PROVIDER_ID,
     CODEX_PROVIDER_ID,
     ANTIGRAVITY_PROVIDER_ID,
     ANTIGRAVITY_CLI_PROVIDER_ID,
+    COMMAND_CODE_PROVIDER_ID,
     DECISION_PROVIDER_ID,
 )
 
@@ -204,6 +208,27 @@ val DEFAULT_PROVIDERS = listOf(
         ),
         shortDescription = {
             Text("本机 Antigravity CLI (any1.tech)")
+        },
+    ),
+    ProviderSetting.Google(
+        id = COMMAND_CODE_PROVIDER_ID,
+        name = "Command Code",
+        baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
+        apiKey = "",
+        enabled = true,
+        builtIn = true,
+        models = listOf(
+            Model(
+                id = Uuid.parse("b1000006-0000-4000-8000-000000000001"),
+                modelId = COMMAND_CODE_MODEL,
+                displayName = "Command Code",
+                type = ModelType.AGENT,
+                inputModalities = listOf(Modality.TEXT),
+                outputModalities = listOf(Modality.TEXT),
+            ),
+        ),
+        shortDescription = {
+            Text("Command Code CLI (any1.tech)")
         },
     ),
     ProviderSetting.Google(

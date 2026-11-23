@@ -191,6 +191,7 @@ enum class AgentModelCategory(val label: String) {
             return when {
                 isAntigravityAgentModel(clean) ||
                     isCodexAgentModel(clean) ||
+                    isCommandCodeModel(clean) ||
                     clean.startsWith("deep-research", ignoreCase = true) ||
                     clean.startsWith("agent-", ignoreCase = true) -> AGENT
                 clean.contains("decision", ignoreCase = true) -> DECISION
@@ -204,6 +205,11 @@ const val ANTIGRAVITY_CLI_MODEL = "antigravity-cli"
 
 fun isAntigravityCliModel(modelId: String): Boolean =
     modelId.trim().removePrefix("models/").equals(ANTIGRAVITY_CLI_MODEL, ignoreCase = true)
+
+const val COMMAND_CODE_MODEL = "command-code"
+
+fun isCommandCodeModel(modelId: String): Boolean =
+    modelId.trim().removePrefix("models/").equals(COMMAND_CODE_MODEL, ignoreCase = true)
 
 fun isAntigravityAgentModel(modelId: String): Boolean {
     val clean = modelId.trim().removePrefix("models/")
