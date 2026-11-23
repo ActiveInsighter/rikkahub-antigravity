@@ -8,6 +8,7 @@ import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.UIMessagePart
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -37,8 +38,150 @@ class ServerToolFormatterTest {
         assertEquals(ServerToolCategory.COMMAND_EXECUTION, formatted.category)
         assertFalse(formatted.isError)
         assertEquals("退出码 0 · 1250 ms", formatted.statusText)
+        assertEquals("1.3s", formatted.stepDurationText)
         assertTrue(formatted.inputSections.any { it is ToolDetailSection.Code && it.language == "bash" && it.code == "./gradlew test" })
-        assertTrue(formatted.outputSections.any { it is ToolDetailSection.Code && it.code == "BUILD SUCCESSFUL" })
+        assertTrue(formatted.outputSections.any { it is ToolDetailSection.Code && it.language == "bash" && it.code == "BUILD SUCCESSFUL" })
+    }
+
+    @Test
+    fun `detects codex commandActions read and claude bash cat ts file as typescript`() {
+        val codexRead = UIMessagePart.ServerTool(
+            toolCallId = "call-codex-read",
+            toolName = "commandExecution",
+            input = buildJsonObject {
+                put("command", "nl -ba src/index.ts")
+                put("commandActions", buildJsonArray {
+                    add(buildJsonObject {
+                        put("type", "read")
+                        put("path", "src/index.ts")
+                    })
+                })
+            },
+            output = buildJsonObject {
+                put("exitCode", 0)
+                put("aggregatedOutput", "1\tconst x: number = 1;")
+            },
+            status = ServerToolStatus.COMPLETED,
+        )
+
+        val formattedCodex = formatServerTool(codexRead)
+        assertEquals(ServerToolCategory.FILE_READ, formattedCodex.category)
+        assertEquals("读取 index.ts", formattedCodex.title)
+        assertNull(formattedCodex.stepDurationText)
+        val codexOut = formattedCodex.outputSections.filterIsInstance<ToolDetailSection.Code>().single()
+        assertEquals("typescript", codexOut.language)
+
+        val claudeBashRead = UIMessagePart.ServerTool(
+            toolCallId = "call-claude-read",
+            toolName = "Bash",
+            input = buildJsonObject {
+                put("command", "cat -n src/app.ts | head -n 20")
+            },
+            output = buildJsonObject {
+                put("exitCode", 0)
+                put("duration_ms", 420)
+                put("stdout", "     1\texport function hello(): string { return 'hi'; }")
+            },
+            status = ServerToolStatus.COMPLETED,
+        )
+
+        val formattedClaude = formatServerTool(claudeBashRead)
+        assertEquals(ServerToolCategory.FILE_READ, formattedClaude.category)
+        assertEquals("读取 app.ts", formattedClaude.title)
+        assertEquals("420ms", formattedClaude.stepDurationText)
+        val claudeOut = formattedClaude.outputSections.filterIsInstance<ToolDetailSection.Code>().single()
+        assertEquals("typescript", claudeOut.language)
+    }
+
+    @Test
+    fun `formats mcp calls, file add, file delete, antigravity replace, and builtin tools`() {
+        val claudeMcp = UIMessagePart.ServerTool(
+            toolCallId = "mcp-1",
+            toolName = "mcp__github__get_issue",
+            input = buildJsonObject {
+                put("owner", "ActiveInsighter")
+                put("repo", "rikkahub-antigravity")
+                put("issue_number", 15)
+            },
+            output = buildJsonObject {
+                put("content", buildJsonArray {
+                    add(buildJsonObject {
+                        put("type", "text")
+                        put("text", "{\"title\":\"Bug report\"}")
+                    })
+                })
+            },
+            status = ServerToolStatus.COMPLETED,
+        )
+        val formattedMcp = formatServerTool(claudeMcp)
+        assertEquals(ServerToolCategory.MCP_CALL, formattedMcp.category)
+        assertEquals("MCP: github / get_issue", formattedMcp.title)
+        val mcpOut = formattedMcp.outputSections.filterIsInstance<ToolDetailSection.Code>().single()
+        assertEquals("json", mcpOut.language)
+
+        val codexDelete = UIMessagePart.ServerTool(
+            toolCallId = "del-1",
+            toolName = "fileChange",
+            input = buildJsonObject {
+                put("changes", buildJsonArray {
+                    add(buildJsonObject {
+                        put("path", "src/old.ts")
+                        put("kind", "delete")
+                    })
+                })
+            },
+            output = buildJsonObject {
+                put("status", "completed")
+            },
+            status = ServerToolStatus.COMPLETED,
+        )
+        val formattedDelete = formatServerTool(codexDelete)
+        assertEquals(ServerToolCategory.FILE_DELETE, formattedDelete.category)
+        assertEquals("删除 old.ts", formattedDelete.title)
+
+        val codexAdd = UIMessagePart.ServerTool(
+            toolCallId = "add-1",
+            toolName = "fileChange",
+            input = buildJsonObject {
+                put("changes", buildJsonArray {
+                    add(buildJsonObject {
+                        put("path", "src/new.ts")
+                        put("kind", "add")
+                    })
+                })
+            },
+            status = ServerToolStatus.COMPLETED,
+        )
+        val formattedAdd = formatServerTool(codexAdd)
+        assertEquals(ServerToolCategory.FILE_ADD, formattedAdd.category)
+        assertEquals("新建 new.ts", formattedAdd.title)
+
+        val antigravityReplace = UIMessagePart.ServerTool(
+            toolCallId = "ag-edit-1",
+            toolName = "replace_file_content",
+            input = buildJsonObject {
+                put("TargetFile", "src/Main.kt")
+                put("TargetContent", "val a = 1")
+                put("ReplacementContent", "val a = 2")
+            },
+            status = ServerToolStatus.COMPLETED,
+        )
+        val formattedReplace = formatServerTool(antigravityReplace)
+        assertEquals(ServerToolCategory.FILE_EDIT, formattedReplace.category)
+        assertEquals("编辑 Main.kt", formattedReplace.title)
+        assertTrue(formattedReplace.inputSections.any { it is ToolDetailSection.Diff && it.diff.contains("+val a = 2") })
+
+        val todoTool = UIMessagePart.ServerTool(
+            toolCallId = "todo-1",
+            toolName = "TodoWrite",
+            input = buildJsonObject {
+                put("todos", buildJsonArray { add(JsonPrimitive("step 1")) })
+            },
+            status = ServerToolStatus.COMPLETED,
+        )
+        val formattedTodo = formatServerTool(todoTool)
+        assertEquals(ServerToolCategory.BUILTIN_TOOL, formattedTodo.category)
+        assertEquals("更新任务计划", formattedTodo.title)
     }
 
     @Test
