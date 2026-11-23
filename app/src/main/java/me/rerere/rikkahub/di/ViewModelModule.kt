@@ -150,4 +150,15 @@ val viewModelModule = module {
             repository = get(),
         )
     }
+    viewModel {
+        me.rerere.rikkahub.ui.pages.beszel.BeszelVM(
+            repository = get(),
+        )
+    }
+    viewModel { params ->
+        me.rerere.rikkahub.ui.pages.beszel.BeszelDetailVM(
+            systemId = params.get(),
+            repository = get(),
+        )
+    }
 }

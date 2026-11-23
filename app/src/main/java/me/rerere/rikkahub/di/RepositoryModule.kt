@@ -149,4 +149,7 @@ val repositoryModule = module {
     single { me.rerere.rikkahub.data.examdocs.DocsCloudClient(get()) }
     single { me.rerere.rikkahub.data.examdocs.DocsAccountRepository(get(), get()) }
     single { me.rerere.rikkahub.data.examdocs.DocsProgressRepository(get(), get(), get(), get()) }
+
+    single { me.rerere.rikkahub.data.beszel.BeszelApiClient(get(), get()) }
+    single { me.rerere.rikkahub.data.beszel.BeszelRepository(get(), get(), get()) }
 }

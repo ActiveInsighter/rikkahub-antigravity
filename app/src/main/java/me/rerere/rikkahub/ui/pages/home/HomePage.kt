@@ -50,6 +50,7 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.Clock01
+import me.rerere.hugeicons.stroke.DashboardSpeed02
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.GitFork
 import me.rerere.hugeicons.stroke.MessageAdd01
@@ -128,6 +129,10 @@ fun HomePage() {
 
     fun openExamDocs() {
         navController.navigate(Screen.ExamDocs())
+    }
+
+    fun openBeszel() {
+        navController.navigate(Screen.Beszel)
     }
 
     Scaffold(
@@ -219,6 +224,30 @@ fun HomePage() {
                     CardGroup(
                         title = { Text("探索与工具") },
                     ) {
+                        item(
+                            onClick = ::openBeszel,
+                            leadingContent = {
+                                CardGroupIcon(
+                                    icon = HugeIcons.DashboardSpeed02,
+                                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                )
+                            },
+                            supportingContent = {
+                                Text("Beszel · 实时监控服务器资源与容器")
+                            },
+                            trailingContent = {
+                                Icon(
+                                    imageVector = HugeIcons.ArrowRight01,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            },
+                        ) {
+                            Text("服务器状况")
+                        }
+
                         item(
                             onClick = ::openExamDocs,
                             leadingContent = {
