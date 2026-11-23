@@ -73,6 +73,7 @@ class AgentRepository(
     private val appScope: AppScope,
     private val appEventBus: AppEventBus,
     private val gatewayClient: AgentGatewayClient,
+    private val settingsStore: AgentSettingsStore? = null,
 ) {
     private val conversationDao = database.conversationDao()
     private val messageNodeDao = database.messageNodeDao()
@@ -99,6 +100,9 @@ class AgentRepository(
     private val localGenerationJobs = ConcurrentHashMap<Uuid, Job>()
     private val _localGenerations = MutableStateFlow<Map<Uuid, LocalGenerationState>>(emptyMap())
     val localGenerations = _localGenerations.asStateFlow()
+    private val stepClassifier by lazy { AgentStepClassifier(gatewayClient, modelDao, settingsStore) }
+    private val stepClassificationCache = ConcurrentHashMap<String, AgentStepClassification>()
+    private val pendingStepClassifications = ConcurrentHashMap.newKeySet<String>()
 
     fun observeConversations(sortOrder: ConversationSortOrder): Flow<List<Conversation>> {
         val source = when (sortOrder) {

@@ -754,22 +754,21 @@ private fun formatGenericTool(
     )
 }
 
-private fun extractGenericSections(element: JsonElement): List<ToolDetailSection> {
+private fun extractGenericSections(
+    element: JsonElement,
+    defaultLanguage: String = "bash",
+): List<ToolDetailSection> {
     return when (element) {
         is JsonNull -> emptyList()
         is JsonPrimitive -> {
             val text = element.contentOrNull.orEmpty()
             if (text.isBlank()) emptyList()
             else {
-                val lang = inferCodeLanguage(null, null, text, "plaintext")
-                if (lang != "plaintext" || text.contains('\n')) {
-                    listOf(ToolDetailSection.Code(code = text, language = lang))
-                } else {
-                    listOf(ToolDetailSection.Text(text = text))
-                }
+                val lang = inferCodeLanguage(null, null, text, defaultLanguage)
+                listOf(ToolDetailSection.Code(code = text, language = lang))
             }
         }
-        is JsonObject -> extractRemainingObject(element, excludedKeys = emptySet())
+        is JsonObject -> extractRemainingObject(element, excludedKeys = emptySet(), defaultLanguage = defaultLanguage)
         is JsonArray -> {
             if (element.isEmpty()) emptyList()
             else if (element.all { it is JsonPrimitive }) {
@@ -995,6 +994,81 @@ private fun buildStatusSummary(
         durationMs?.let { add("${it} ms") }
     }
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+}
+
+private fun formatDurationText(durationMs: String?): String? {
+    val ms = durationMs?.trim()?.toLongOrNull()?.takeIf { it > 0L } ?: return null
+    return if (ms < 1000L) "$ms ms" else String.format(java.util.Locale.US, "%.1f s", ms / 1000.0)
+}
+
+private fun applyStepClassification(
+    base: FormattedServerTool,
+    classification: AgentStepClassification,
+): FormattedServerTool {
+    val mappedCategory = when (classification.operation) {
+        AgentStepOperation.FILE_READ -> ServerToolCategory.FILE_READ
+        AgentStepOperation.FILE_CREATE -> ServerToolCategory.FILE_WRITE
+        AgentStepOperation.FILE_EDIT -> ServerToolCategory.FILE_EDIT
+        AgentStepOperation.FILE_DELETE -> ServerToolCategory.FILE_DELETE
+        AgentStepOperation.FILE_SEARCH -> ServerToolCategory.SEARCH_FILES
+        AgentStepOperation.SHELL_EXEC -> ServerToolCategory.COMMAND_EXECUTION
+        AgentStepOperation.CODE_EXEC -> ServerToolCategory.CODE_EXECUTION
+        AgentStepOperation.WEB_SEARCH -> ServerToolCategory.WEB_SEARCH
+        AgentStepOperation.WEB_FETCH -> ServerToolCategory.URL_FETCH
+        AgentStepOperation.MCP_CALL -> ServerToolCategory.MCP_CALL
+        AgentStepOperation.BUILTIN_TOOL -> ServerToolCategory.BUILTIN_TOOL
+        AgentStepOperation.OTHER -> ServerToolCategory.GENERIC
+    }
+
+    val targetPath = classification.targetPath.takeIf { it.isNotBlank() }
+    val resolvedInputLang = normalizeLanguageName(classification.inputLanguage) ?: "bash"
+    val resolvedOutputLang = inferCodeLanguage(
+        explicitLang = classification.outputLanguage.takeUnless {
+            it.equals("bash", ignoreCase = true) || it.equals("plaintext", ignoreCase = true)
+        },
+        path = targetPath,
+        code = null,
+        defaultLanguage = normalizeLanguageName(classification.outputLanguage) ?: "bash",
+    )
+
+    val updatedInputSections = base.inputSections.map { section ->
+        when {
+            section is ToolDetailSection.Code &&
+                (section.language == "plaintext" || (section.language == "json" && resolvedInputLang != "json")) ->
+                section.copy(language = resolvedInputLang)
+            section is ToolDetailSection.Text && !section.isError && classification.renderMode == AgentStepRenderMode.CODE ->
+                ToolDetailSection.Code(label = section.label, code = section.text, language = resolvedInputLang)
+            else -> section
+        }
+    }.let { sections ->
+        if (targetPath != null && sections.none { it is ToolDetailSection.Metadata && it.items.any { p -> p.second == targetPath } }) {
+            listOf(ToolDetailSection.Metadata(listOf("目标路径" to targetPath))) + sections
+        } else {
+            sections
+        }
+    }
+
+    val updatedOutputSections = base.outputSections.map { section ->
+        when {
+            classification.renderMode == AgentStepRenderMode.DIFF && section is ToolDetailSection.Code && section.language == "diff" ->
+                ToolDetailSection.Diff(path = targetPath, diff = section.code)
+            section is ToolDetailSection.Code &&
+                (section.language == "plaintext" || section.language == "bash") &&
+                resolvedOutputLang != section.language ->
+                section.copy(language = resolvedOutputLang)
+            section is ToolDetailSection.Text && !section.isError && classification.renderMode == AgentStepRenderMode.CODE ->
+                ToolDetailSection.Code(label = section.label, code = section.text, language = resolvedOutputLang)
+            else -> section
+        }
+    }
+
+    return base.copy(
+        category = mappedCategory,
+        title = classification.label.ifBlank { base.title },
+        source = classification.source,
+        inputSections = updatedInputSections,
+        outputSections = updatedOutputSections,
+    )
 }
 
 private fun formatOutcomeLabel(outcome: String): String = when (outcome.uppercase()) {

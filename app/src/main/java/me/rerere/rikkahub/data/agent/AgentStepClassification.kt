@@ -97,6 +97,7 @@ class AgentStepClassifier(
     suspend fun classify(tool: UIMessagePart.ServerTool): AgentStepClassification? {
         if (tool.status == ServerToolStatus.IN_PROGRESS) return null
 
+        val now = System.currentTimeMillis()
         val modelEntity = modelDao.getById("builtin-gemini-decision")
             ?: AgentModelEntity(
                 id = "builtin-gemini-decision",
@@ -105,6 +106,8 @@ class AgentStepClassifier(
                 category = AgentModelCategory.DECISION.name,
                 baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
                 isBuiltin = true,
+                createdAt = now,
+                updatedAt = now,
             )
 
         val providerType = tool.metadata?.get("providerType")?.jsonPrimitive?.contentOrNull.orEmpty()
