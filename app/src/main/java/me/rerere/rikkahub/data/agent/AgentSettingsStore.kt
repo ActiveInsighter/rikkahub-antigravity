@@ -17,6 +17,7 @@ import me.rerere.rikkahub.utils.JsonInstant
 val DEFAULT_AGENT_MODELS: List<String> = listOf(
     "Antigravity",
     "Codex",
+    COMMAND_CODE_MODEL,
     "gemini-3.5-flash-lite",
     "gemini-3-flash-preview",
     "gemini-3-pro-preview",

@@ -36,9 +36,11 @@ import me.rerere.rikkahub.data.agent.AgentGatewayClient
 import me.rerere.rikkahub.data.agent.AgentModelCategory
 import me.rerere.rikkahub.data.agent.AgentModelEntity
 import me.rerere.rikkahub.data.agent.ANTIGRAVITY_CLI_MODEL
+import me.rerere.rikkahub.data.agent.COMMAND_CODE_MODEL
 import me.rerere.rikkahub.data.agent.isAntigravityAgentModel
 import me.rerere.rikkahub.data.agent.isAntigravityCliModel
 import me.rerere.rikkahub.data.agent.isCodexAgentModel
+import me.rerere.rikkahub.data.agent.isCommandCodeModel
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
 import me.rerere.rikkahub.data.agent.AgentUiSettings
@@ -48,6 +50,7 @@ import me.rerere.rikkahub.data.agent.RemoteAgentSourceInput
 import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_CLI_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.CODEX_PROVIDER_ID
+import me.rerere.rikkahub.data.datastore.COMMAND_CODE_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.TOP_AGENT_PROVIDER_IDS
@@ -422,15 +425,19 @@ class AgentVM(
         )
     }
 
-    private fun validateAntigravityCliInput(parts: List<UIMessagePart>): Boolean {
-        val isCli = selectedModelProvider.value?.id == ANTIGRAVITY_CLI_PROVIDER_ID ||
-            resolvedChatModel.value?.modelId?.let(::isAntigravityCliModel) == true
-        if (!isCli) return true
+    private fun validateRemoteCliInput(parts: List<UIMessagePart>): Boolean {
+        val providerId = selectedModelProvider.value?.id
+        val modelId = resolvedChatModel.value?.modelId.orEmpty()
+        val name = when {
+            providerId == COMMAND_CODE_PROVIDER_ID || isCommandCodeModel(modelId) -> "Command Code"
+            providerId == ANTIGRAVITY_CLI_PROVIDER_ID || isAntigravityCliModel(modelId) -> "Antigravity CLI"
+            else -> return true
+        }
         _errorMessage.value = when {
-            session.value == null -> "请先连接 PocketBase 账号，再使用 Antigravity CLI。"
+            session.value == null -> "请先连接 PocketBase 账号，再使用 $name。"
             parts.any { it !is UIMessagePart.Text &&
                 !(it is UIMessagePart.Document && it.fileName.endsWith(".md", ignoreCase = true))
-            } -> "Antigravity CLI 支持文本和 Markdown 附件。"
+            } -> "$name 支持文本和 Markdown 附件。"
             else -> null
         }
         return _errorMessage.value == null
@@ -439,7 +446,7 @@ class AgentVM(
     fun sendMessage(parts: List<UIMessagePart>): Boolean {
         if (parts.isEmpty() || isBusy) return false
         _errorMessage.value = null
-        if (!validateAntigravityCliInput(parts)) return false
+        if (!validateRemoteCliInput(parts)) return false
 
         val modelEntity = currentOrFallbackModelEntity()
         val category = modelEntity.modelCategory
@@ -554,7 +561,7 @@ class AgentVM(
         val node = current.messageNodes[nodeIndex]
         val historyBefore = current.messageNodes.take(nodeIndex).map { it.currentMessage }
         val userMsg = historyBefore.lastOrNull { it.role == MessageRole.USER } ?: return
-        if (!validateAntigravityCliInput(userMsg.parts)) return
+        if (!validateRemoteCliInput(userMsg.parts)) return
 
         val modelEntity = currentOrFallbackModelEntity()
         val prompt = buildPromptFromParts(userMsg.parts)
@@ -736,6 +743,7 @@ class AgentVM(
         val rawModelId = selectedModel?.modelId?.ifBlank { null } ?: "Antigravity"
         val isAntigravityCli = rawProvider?.id == ANTIGRAVITY_CLI_PROVIDER_ID ||
             isAntigravityCliModel(rawModelId)
+        val isCommandCode = rawProvider?.id == COMMAND_CODE_PROVIDER_ID || isCommandCodeModel(rawModelId)
         val isCodex = rawProvider?.id == CODEX_PROVIDER_ID ||
             rawProvider?.name.equals("Codex", ignoreCase = true) ||
             isCodexAgentModel(rawModelId)
@@ -743,6 +751,7 @@ class AgentVM(
             rawProvider?.name.equals("Antigravity", ignoreCase = true) ||
             isAntigravityAgentModel(rawModelId)
         val modelName = when {
+            isCommandCode -> COMMAND_CODE_MODEL
             isAntigravityCli -> ANTIGRAVITY_CLI_MODEL
             isCodex -> "Codex"
             isAntigravity -> "Antigravity"
@@ -762,7 +771,7 @@ class AgentVM(
             isAntigravityCli -> reasoningLevel.toGeminiThinkingLevel()
             isCodex && reasoningLevel in listOf(ReasoningLevel.XHIGH, ReasoningLevel.MAX) -> "xhigh"
             isCodex && reasoningLevel == ReasoningLevel.OFF -> "off"
-            isAntigravity -> ""
+            isAntigravity || isCommandCode -> ""
             else -> reasoningLevel.toGeminiThinkingLevel()
         }
         val systemPrompt = _agentAssistant.value.systemPrompt.takeIf { it.isNotBlank() }

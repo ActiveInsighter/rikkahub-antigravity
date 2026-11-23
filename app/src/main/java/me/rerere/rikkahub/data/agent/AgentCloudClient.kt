@@ -1235,7 +1235,7 @@ class PocketBaseAgentCloudClient(
             systemPromptOverride: String? = null,
         ): JsonObject {
             val selectedModel = modelOverride?.trim()?.takeIf { it.isNotBlank() } ?: if (
-                isAntigravityAgentModel(config.model) || isCodexAgentModel(config.model)
+                isAntigravityAgentModel(config.model) || isCodexAgentModel(config.model) || isCommandCodeModel(config.model)
             ) {
                 config.model
             } else {
@@ -1341,5 +1341,6 @@ private fun JsonObject.str(key: String): String =
 private fun agentModelDisplayName(modelId: String): String = when {
     isAntigravityCliModel(modelId) -> "Antigravity CLI"
     isCodexAgentModel(modelId) -> "Codex Agent"
+    isCommandCodeModel(modelId) -> "Command Code"
     else -> "Antigravity Agent"
 }
