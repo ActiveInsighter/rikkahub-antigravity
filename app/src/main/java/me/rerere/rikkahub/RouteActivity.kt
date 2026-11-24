@@ -699,6 +699,16 @@ class RouteActivity : ComponentActivity() {
                                     systemId = key.systemId,
                                 )
                             }
+
+                            entry<Screen.PocketBase> {
+                                me.rerere.rikkahub.ui.pages.pocketbase.PocketBasePage()
+                            }
+
+                            entry<Screen.PocketBaseCollection> { key ->
+                                me.rerere.rikkahub.ui.pages.pocketbase.PocketBaseCollectionPage(
+                                    collectionName = key.collectionName,
+                                )
+                            }
                         }
                     )
                     if (BuildConfig.DEBUG) {
@@ -973,4 +983,10 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class BeszelDetail(val systemId: String) : Screen
+
+    @Serializable
+    data object PocketBase : Screen
+
+    @Serializable
+    data class PocketBaseCollection(val collectionName: String) : Screen
 }

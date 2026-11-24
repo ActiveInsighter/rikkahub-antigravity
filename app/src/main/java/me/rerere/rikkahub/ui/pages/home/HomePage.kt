@@ -51,6 +51,7 @@ import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.Clock01
 import me.rerere.hugeicons.stroke.CloudServer
+import me.rerere.hugeicons.stroke.Database02
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.GitFork
 import me.rerere.hugeicons.stroke.MessageAdd01
@@ -290,6 +291,30 @@ fun HomePage() {
                             },
                         ) {
                             Text("服务器状况")
+                        }
+
+                        item(
+                            onClick = { navController.navigate(Screen.PocketBase) },
+                            leadingContent = {
+                                CardGroupIcon(
+                                    icon = HugeIcons.Database02,
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            },
+                            supportingContent = {
+                                Text("PocketBase 控制台 · 表结构、记录、日志与 SQL")
+                            },
+                            trailingContent = {
+                                Icon(
+                                    imageVector = HugeIcons.ArrowRight01,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            },
+                        ) {
+                            Text("数据库")
                         }
                     }
                 }
