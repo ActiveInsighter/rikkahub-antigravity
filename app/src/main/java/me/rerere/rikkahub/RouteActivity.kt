@@ -680,6 +680,16 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.ExamDocsUISettings> {
                                 me.rerere.rikkahub.ui.pages.examdocs.ExamDocsUISettingsPage()
                             }
+
+                            entry<Screen.Beszel> {
+                                me.rerere.rikkahub.ui.pages.beszel.BeszelPage()
+                            }
+
+                            entry<Screen.BeszelDetail> { key ->
+                                me.rerere.rikkahub.ui.pages.beszel.BeszelDetailPage(
+                                    systemId = key.systemId,
+                                )
+                            }
                         }
                     )
                     if (BuildConfig.DEBUG) {
@@ -942,4 +952,10 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object ExamDocsUISettings : Screen
+
+    @Serializable
+    data object Beszel : Screen
+
+    @Serializable
+    data class BeszelDetail(val systemId: String) : Screen
 }
