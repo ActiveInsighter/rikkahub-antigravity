@@ -113,4 +113,69 @@ class AgentGatewayChatTest {
         assertEquals(1, modelRequests)
         assertEquals(imageUrl, (firstTurn.parts.last() as UIMessagePart.Image).url)
     }
+
+    @Test
+    fun `anthropic providers stream through v1 messages`() = runTest {
+        val answer = "modelflare reply"
+        val events = buildString {
+            append("event: message_start\n")
+            append("data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-sonnet-5-5\"}}\n\n")
+            append("event: content_block_start\n")
+            append("data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+            append("event: content_block_delta\n")
+            append("data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"$answer\"}}\n\n")
+            append("event: content_block_stop\n")
+            append("data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+            append("event: message_delta\n")
+            append("data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n")
+            append("event: message_stop\n")
+            append("data: {\"type\":\"message_stop\"}\n\n")
+        }
+
+        var requestPath: String? = null
+        var requestApiKey: String? = null
+        var requestBody: String? = null
+        val client = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val request = chain.request()
+                requestPath = request.url.encodedPath
+                requestApiKey = request.header("x-api-key")
+                requestBody = request.body?.let { Buffer().apply { it.writeTo(this) }.readUtf8() }
+                Response.Builder()
+                    .request(request)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(events.toResponseBody("text/event-stream".toMediaType()))
+                    .build()
+            }
+            .build()
+
+        val model = AgentModelEntity(
+            id = "test-anthropic",
+            modelId = "claude-sonnet-5-5",
+            displayName = "Claude Sonnet 5.5",
+            providerType = AGENT_PROVIDER_TYPE_ANTHROPIC,
+            baseUrl = "https://modelflare.example.test/v1",
+            createdAt = 0,
+            updatedAt = 0,
+        )
+        var reply = UIMessage.assistant("").copy(parts = emptyList())
+        AgentGatewayClient(client).streamChat(
+            modelEntity = model,
+            messages = listOf(UIMessage.user("hello")),
+            systemPrompt = "be brief",
+            reasoningLevel = ReasoningLevel.OFF,
+            temperature = null,
+            fallbackBaseUrl = "",
+            fallbackApiKey = "anthropic-test-key",
+            initialReply = reply,
+            onReply = { reply = it },
+        )
+
+        assertEquals("/v1/messages", requestPath)
+        assertEquals("anthropic-test-key", requestApiKey)
+        assertFalse(requestBody.orEmpty().contains("\"thinking\""))
+        assertEquals(answer, reply.toText())
+    }
 }

@@ -228,6 +228,12 @@ fun isCodexAgentModel(modelId: String): Boolean {
 
 const val DEFAULT_GEMINI_GATEWAY_URL = "https://gemini.any1.tech/v1beta"
 
+/** [AgentModelEntity.providerType] for the Gemini-native gateway. */
+const val AGENT_PROVIDER_TYPE_GEMINI = "GEMINI"
+
+/** [AgentModelEntity.providerType] for Anthropic-protocol gateways such as modelflare. */
+const val AGENT_PROVIDER_TYPE_ANTHROPIC = "ANTHROPIC"
+
 /**
  * Local-only Gemini model configuration for the Agent page.
  */

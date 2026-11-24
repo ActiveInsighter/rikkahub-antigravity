@@ -33,6 +33,8 @@ jobs:
     env:
       RIKKA_UPDATE_BASE_URL: ${{ vars.R2_UPDATE_PUBLIC_URL }}
       EXAM_DOCS_PUBLISHABLE_KEY: ${{ vars.EXAM_DOCS_PUBLISHABLE_KEY }}
+      MODELFLARE_CLAUDE_KEY: ${{ secrets.MODELFLARE_CLAUDE_KEY }}
+      MODELFLARE_GPT_KEY: ${{ secrets.MODELFLARE_GPT_KEY }}
     permissions:
       contents: write
     steps:

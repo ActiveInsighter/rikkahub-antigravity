@@ -29,4 +29,24 @@ class AgentModelRoutingTest {
             AgentGatewayClient.resolveGatewayRootUrl("https://gemini.any1.tech/v1beta/", DEFAULT_GEMINI_GATEWAY_URL),
         )
     }
+
+    @Test
+    fun `anthropic base url always resolves to a v1 root`() {
+        assertEquals(
+            "https://modelflare.dev/v1",
+            AgentGatewayClient.resolveAnthropicBaseUrl("https://modelflare.dev/v1", ""),
+        )
+        assertEquals(
+            "https://modelflare.dev/v1",
+            AgentGatewayClient.resolveAnthropicBaseUrl("https://modelflare.dev", ""),
+        )
+        assertEquals(
+            "https://modelflare.dev/v1",
+            AgentGatewayClient.resolveAnthropicBaseUrl("https://modelflare.dev/v1/", ""),
+        )
+        assertEquals(
+            "https://gateway.example.test/v1",
+            AgentGatewayClient.resolveAnthropicBaseUrl("https://gateway.example.test/v1beta", ""),
+        )
+    }
 }

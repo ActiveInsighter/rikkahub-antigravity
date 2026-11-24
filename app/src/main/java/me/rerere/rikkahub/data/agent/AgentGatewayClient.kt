@@ -23,6 +23,7 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.TextGenerationResult
+import me.rerere.ai.provider.providers.claude.ClaudeProvider
 import me.rerere.ai.provider.providers.google.GoogleProvider
 import me.rerere.ai.ui.StreamChunk
 import me.rerere.ai.ui.StreamChunkHandler
@@ -67,17 +68,17 @@ internal suspend fun collectAgentChatReply(
         onReply(reply)
     }
 
-    if (finishReason == "STOP" && reply.hasChatOutput()) return
-    check(finishReason == null || finishReason == "STOP" || finishReason == "MAX_TOKENS") {
-        "Gemini 未正常完成回复（$finishReason）"
+    if (finishReason.isCompleted() && reply.hasChatOutput()) return
+    check(finishReason == null || finishReason.isCompleted() || finishReason.isTruncated()) {
+        "网关未正常完成回复（$finishReason）"
     }
 
     val result = retry()
     check(result.message.hasChatOutput()) {
-        "Gemini 重试后仍未返回正文" + (result.finishReason?.let { "（$it）" } ?: "")
+        "网关重试后仍未返回正文" + (result.finishReason?.let { "（$it）" } ?: "")
     }
-    check(result.finishReason == null || result.finishReason == "STOP") {
-        "Gemini 重试后仍未完成回复（${result.finishReason}）"
+    check(result.finishReason == null || result.finishReason.isCompleted()) {
+        "网关重试后仍未完成回复（${result.finishReason}）"
     }
 
     // Replace the partial reply as a unit so its thought signatures match the answer on replay.
@@ -100,10 +101,17 @@ private fun UIMessage.hasChatOutput(): Boolean = parts.any { part ->
     }
 }
 
+/** Gemini reports `STOP`, Anthropic reports `end_turn` — both mean a finished answer. */
+private fun String?.isCompleted(): Boolean = this == "STOP" || this == "end_turn"
+
+/** Gemini reports `MAX_TOKENS`, Anthropic reports `max_tokens`. */
+private fun String?.isTruncated(): Boolean = this == "MAX_TOKENS" || this == "max_tokens"
+
 class AgentGatewayClient(
     private val okHttpClient: OkHttpClient,
 ) {
     private val googleProvider = GoogleProvider(okHttpClient)
+    private val claudeProvider = ClaudeProvider(okHttpClient)
 
     internal suspend fun streamChat(
         modelEntity: AgentModelEntity,
@@ -116,22 +124,16 @@ class AgentGatewayClient(
         initialReply: UIMessage,
         onReply: suspend (UIMessage) -> Unit,
     ) {
-        val baseUrl = resolveGeminiBaseUrl(modelEntity.baseUrl, fallbackBaseUrl)
         val apiKey = modelEntity.apiKey.ifBlank { fallbackApiKey }.trim()
         val cleanModelId = modelEntity.modelId.trim().removePrefix("models/")
+        val isAnthropic = modelEntity.providerType.equals(AGENT_PROVIDER_TYPE_ANTHROPIC, ignoreCase = true)
 
         val model = Model(
             modelId = cleanModelId,
             displayName = modelEntity.displayName.ifBlank { cleanModelId },
-            abilities = listOf(ModelAbility.REASONING),
-        )
-        val providerSetting = ProviderSetting.Google(
-            name = "Gemini Gateway",
-            apiKey = apiKey,
-            baseUrl = baseUrl,
-            models = listOf(model),
-            vertexAI = false,
-            useInteractionsApi = false,
+            // ClaudeProvider only emits a `thinking` block for models advertising REASONING, and some
+            // gateways (modelflare's opus-5-5) reject `thinking: disabled`, so leave the ability off.
+            abilities = if (isAnthropic) emptyList() else listOf(ModelAbility.REASONING),
         )
 
         val history = messages.filterNot { it.role == MessageRole.ASSISTANT && !it.hasChatOutput() }
@@ -152,6 +154,30 @@ class AgentGatewayClient(
             reasoningLevel = reasoningLevel,
         )
 
+        if (isAnthropic) {
+            val providerSetting = ProviderSetting.Claude(
+                name = "Anthropic Gateway",
+                apiKey = apiKey,
+                baseUrl = resolveAnthropicBaseUrl(modelEntity.baseUrl, fallbackBaseUrl),
+                models = listOf(model),
+            )
+            collectAgentChatReply(
+                initialReply = initialReply,
+                chunks = claudeProvider.streamText(providerSetting, effectiveMessages, params),
+                onReply = onReply,
+                retry = { claudeProvider.generateText(providerSetting, effectiveMessages, params) },
+            )
+            return
+        }
+
+        val providerSetting = ProviderSetting.Google(
+            name = "Gemini Gateway",
+            apiKey = apiKey,
+            baseUrl = resolveGeminiBaseUrl(modelEntity.baseUrl, fallbackBaseUrl),
+            models = listOf(model),
+            vertexAI = false,
+            useInteractionsApi = false,
+        )
         collectAgentChatReply(
             initialReply = initialReply,
             chunks = googleProvider.streamText(providerSetting, effectiveMessages, params),
@@ -313,6 +339,17 @@ class AgentGatewayClient(
             val raw = modelBaseUrl.ifBlank { fallbackBaseUrl }.ifBlank { DEFAULT_GEMINI_GATEWAY_URL }
             val trimmed = raw.trim().trimEnd('/')
             return if (trimmed.endsWith("/v1beta", ignoreCase = true)) trimmed else "$trimmed/v1beta"
+        }
+
+        /** ClaudeProvider appends `/messages`, so the base URL has to end with `/v1`. */
+        fun resolveAnthropicBaseUrl(modelBaseUrl: String, fallbackBaseUrl: String): String {
+            val raw = modelBaseUrl.ifBlank { fallbackBaseUrl }.ifBlank { DEFAULT_GEMINI_GATEWAY_URL }
+            val trimmed = raw.trim().trimEnd('/')
+            return when {
+                trimmed.endsWith("/v1beta", ignoreCase = true) -> trimmed.removeSuffix("/v1beta").trimEnd('/')
+                trimmed.endsWith("/v1", ignoreCase = true) -> trimmed
+                else -> "$trimmed/v1"
+            }
         }
 
         fun resolveGatewayRootUrl(modelBaseUrl: String, fallbackBaseUrl: String): String {

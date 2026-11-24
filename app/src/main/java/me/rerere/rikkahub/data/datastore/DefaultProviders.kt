@@ -14,6 +14,7 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.provider.QuotaQuery
+import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.ANTIGRAVITY_CLI_MODEL
 import me.rerere.rikkahub.data.agent.COMMAND_CODE_MODEL
@@ -30,6 +31,11 @@ val DECISION_PROVIDER_ID = Uuid.parse("a1000004-0000-4000-8000-000000000004")
 val ANTIGRAVITY_CLI_PROVIDER_ID = Uuid.parse("a1000005-0000-4000-8000-000000000005")
 
 val COMMAND_CODE_PROVIDER_ID = Uuid.parse("a1000006-0000-4000-8000-000000000006")
+val CLAUDE_CODE_PROVIDER_ID = Uuid.parse("a1000007-0000-4000-8000-000000000007")
+val CLAUDE_CODE_GPT_PROVIDER_ID = Uuid.parse("a1000008-0000-4000-8000-000000000008")
+
+/** modelflare gateway root; both Claude Code groups talk Anthropic protocol against it. */
+const val MODELFLARE_BASE_URL = "https://modelflare.dev/v1"
 
 val TOP_AGENT_PROVIDER_IDS = listOf(
     CHAT_GATEWAY_PROVIDER_ID,
@@ -37,6 +43,8 @@ val TOP_AGENT_PROVIDER_IDS = listOf(
     ANTIGRAVITY_PROVIDER_ID,
     ANTIGRAVITY_CLI_PROVIDER_ID,
     COMMAND_CODE_PROVIDER_ID,
+    CLAUDE_CODE_PROVIDER_ID,
+    CLAUDE_CODE_GPT_PROVIDER_ID,
     DECISION_PROVIDER_ID,
 )
 
@@ -232,6 +240,64 @@ val DEFAULT_PROVIDERS = listOf(
         ),
         shortDescription = {
             Text("Command Code CLI (any1.tech)")
+        },
+    ),
+    ProviderSetting.Claude(
+        id = CLAUDE_CODE_PROVIDER_ID,
+        name = "Claude Code",
+        baseUrl = MODELFLARE_BASE_URL,
+        apiKey = BuildConfig.MODELFLARE_CLAUDE_KEY,
+        enabled = true,
+        builtIn = true,
+        models = listOf(
+            Model(
+                id = Uuid.parse("b1000007-0000-4000-8000-000000000001"),
+                modelId = "claude-sonnet-5-5",
+                displayName = "Claude Sonnet 5.5",
+                type = ModelType.CHAT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+            ),
+            Model(
+                id = Uuid.parse("b1000007-0000-4000-8000-000000000002"),
+                modelId = "claude-opus-5-5",
+                displayName = "Claude Opus 5.5",
+                type = ModelType.CHAT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+            ),
+        ),
+        shortDescription = {
+            Text("modelflare 上的 Claude Sonnet/Opus 5.5")
+        },
+    ),
+    ProviderSetting.Claude(
+        id = CLAUDE_CODE_GPT_PROVIDER_ID,
+        name = "Claude Code GPT",
+        baseUrl = MODELFLARE_BASE_URL,
+        apiKey = BuildConfig.MODELFLARE_GPT_KEY,
+        enabled = true,
+        builtIn = true,
+        models = listOf(
+            Model(
+                id = Uuid.parse("b1000008-0000-4000-8000-000000000001"),
+                modelId = "gpt-6.2-sol",
+                displayName = "GPT-6.2 Sol",
+                type = ModelType.CHAT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+            ),
+            Model(
+                id = Uuid.parse("b1000008-0000-4000-8000-000000000002"),
+                modelId = "gpt-6.2-astra",
+                displayName = "GPT-6.2 Astra",
+                type = ModelType.CHAT,
+                inputModalities = listOf(Modality.TEXT, Modality.IMAGE),
+                outputModalities = listOf(Modality.TEXT),
+            ),
+        ),
+        shortDescription = {
+            Text("modelflare 上的 GPT-6.2 Sol/Astra")
         },
     ),
     ProviderSetting.Google(

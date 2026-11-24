@@ -33,6 +33,8 @@ import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.agent.AgentAssistantEntity
+import me.rerere.rikkahub.data.agent.AGENT_PROVIDER_TYPE_ANTHROPIC
+import me.rerere.rikkahub.data.agent.AGENT_PROVIDER_TYPE_GEMINI
 import me.rerere.rikkahub.data.agent.AgentConversationSnapshot
 import me.rerere.rikkahub.data.agent.AgentGatewayClient
 import me.rerere.rikkahub.data.agent.AgentModelCategory
@@ -423,11 +425,19 @@ class AgentVM(
             ModelType.CHAT -> AgentModelCategory.CHAT
             else -> AgentModelCategory.inferFromModelId(modelId)
         }
+        // Anthropic-protocol providers (e.g. modelflare) talk to the local gateway over /v1/messages;
+        // everything else keeps using the Gemini-native /v1beta gateway.
+        val providerType = if (apiKeyProvider is ProviderSetting.Claude) {
+            AGENT_PROVIDER_TYPE_ANTHROPIC
+        } else {
+            AGENT_PROVIDER_TYPE_GEMINI
+        }
         return AgentModelEntity(
             id = model?.id?.toString() ?: "fallback-$modelId",
             modelId = modelId,
             displayName = displayName,
             category = category.name,
+            providerType = providerType,
             baseUrl = baseUrl,
             apiKey = apiKey,
             createdAt = now,
