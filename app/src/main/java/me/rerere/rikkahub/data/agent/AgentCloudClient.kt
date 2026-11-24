@@ -6,6 +6,7 @@ import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -39,6 +40,13 @@ import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 private const val GEMINI_API = "/api/anyworkflow/gemini"
+internal const val MAX_AGENT_IMAGES = 6
+private val r2AgentImageUrl = Regex(
+    """https://file\.any1\.tech/api/library/image-sources/[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.(jpg|png|webp|gif)""",
+)
+
+internal fun String.isAgentImageUrl(): Boolean = r2AgentImageUrl.matches(this)
+
 internal const val JOBS_COLLECTION = "aw_gemini_jobs"
 internal const val MESSAGES_COLLECTION = "aw_gemini_messages"
 private const val RECORD_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -125,6 +133,7 @@ data class RemoteSourceRef(
 data class RemoteHistoryTurn(
     val role: String,
     val text: String,
+    val images: List<String> = emptyList(),
 )
 
 data class RemoteGeminiMessage(
@@ -799,7 +808,7 @@ class PocketBaseAgentCloudClient(
         job.history.take(firstLoadedTurn).forEachIndexed { index, turn ->
             val user = turn.role == "user"
             val id = "${job.id}-h-$index"
-            val (text, images) = extractImageUrlsAndStripMarker(turn.text)
+            val (text, images) = extractImageUrlsAndStripMarker(turn.text, turn.images)
             val message = UIMessage(
                 id = stableUuid(if (user) "aw-user:$id" else "aw-asst:$id"),
                 role = if (user) MessageRole.USER else MessageRole.ASSISTANT,
@@ -964,7 +973,7 @@ class PocketBaseAgentCloudClient(
                     baseUrl = session.baseUrl,
                     path = "/api/collections/$JOBS_COLLECTION/records/${message.job}",
                     method = "GET",
-                    query = mapOf("fields" to "id,parentMessage,prompt,model,status,error,created,updated,sources,images"),
+                    query = mapOf("fields" to "id,parentMessage,prompt,model,status,error,created,updated,sources,images,options"),
                     token = session.token,
                 ).jsonObject)
                 ancestors += parentJob to message
@@ -990,6 +999,11 @@ class PocketBaseAgentCloudClient(
         }
     }
 
+    private fun parseImageReferences(value: JsonElement?): List<String> =
+        (value as? JsonArray).orEmpty().mapNotNull { element ->
+            (element as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
+        }
+
     private fun parseJob(obj: JsonObject): RemoteGeminiJob {
         val sources = obj["sources"]?.jsonArray.orEmpty().mapNotNull { el ->
             val o = el as? JsonObject ?: return@mapNotNull null
@@ -997,11 +1011,14 @@ class PocketBaseAgentCloudClient(
         }
         val history = obj["history"]?.jsonArray.orEmpty().mapNotNull { el ->
             val o = el as? JsonObject ?: return@mapNotNull null
-            RemoteHistoryTurn(role = o.str("role"), text = o.str("text"))
+            RemoteHistoryTurn(
+                role = o.str("role"),
+                text = o.str("text"),
+                images = parseImageReferences(o["images"]),
+            )
         }
-        val images = obj["images"]?.jsonArray.orEmpty().mapNotNull { el ->
-            (el as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
-        }
+        val storedImages = (obj["options"] as? JsonObject)?.get("images")
+        val images = parseImageReferences(storedImages) + parseImageReferences(obj["images"])
         return RemoteGeminiJob(
             id = obj.str("id"),
             owner = obj.str("owner"),
@@ -1019,7 +1036,7 @@ class PocketBaseAgentCloudClient(
             updated = obj.str("updated"),
             sources = sources,
             history = history,
-            images = images,
+            images = images.distinct(),
         )
     }
 
@@ -1248,24 +1265,17 @@ class PocketBaseAgentCloudClient(
             val selectedThinkingLevel = thinkingLevelOverride ?: config.thinkingLevel
             val selectedSystemPrompt = systemPromptOverride ?: config.systemPrompt
             val cleanImages = images.map { it.trim() }.filter { it.isNotBlank() }.distinct()
-            val imagesJson = if (cleanImages.isNotEmpty()) {
-                buildJsonArray { cleanImages.forEach { add(JsonPrimitive(it)) } }
-            } else null
-            val finalPrompt = if (imagesJson != null) {
-                val base = prompt.trimEnd()
-                if (base.isEmpty()) "<!-- aw:images:$imagesJson -->" else "$base\n<!-- aw:images:$imagesJson -->"
-            } else {
-                prompt
-            }
+            require(cleanImages.size <= MAX_AGENT_IMAGES) { "每条消息最多添加 6 张图片" }
+            require(cleanImages.all { it.isAgentImageUrl() }) { "图片须先上传至图片资料库" }
             return buildJsonObject {
                 put("id", jobId)
                 put("responseVersion", 1)
                 put("title", title)
-                put("prompt", finalPrompt)
+                put("prompt", prompt)
                 put("systemPrompt", selectedSystemPrompt)
                 put("text", "")
-                if (imagesJson != null) {
-                    put("images", imagesJson)
+                if (cleanImages.isNotEmpty()) {
+                    put("images", JsonArray(cleanImages.map { JsonPrimitive(it) }))
                 }
                 put(
                     "sources",

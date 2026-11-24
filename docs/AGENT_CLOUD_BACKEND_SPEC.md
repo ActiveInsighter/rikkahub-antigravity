@@ -262,3 +262,19 @@ Content-Type: application/json
    - 下次进入侧边栏或刷新时，先推送本地 `PENDING` 记录，再拉取远端全量合并。
 2. **向后兼容**：
    - 在服务端尚未部署 `aw_agent_folders` 与 `aw_agent_usage_records` 集合前，客户端已做 `runCatching` 容错，不会影响本地文件夹分类、用量记录与 Agent 对话的正常使用。
+
+## Agent 图片附件
+
+Android 先通过 `PUT /api/library/images` 把图片上传到现有 R2 图片资料库，再将返回的 `sourceUrl` 放入 `POST /api/anyworkflow/gemini/jobs` 的 `images` 数组。每条消息最多六张，也可只发图片。PocketBase 把链接保存在现有 `options.images` 字段，并在领取任务时交给执行器。同步对话时读取同一字段，旧消息里的 `aw:images` 注释仍可解析。
+
+| 执行路径 | 图片输入 |
+| --- | --- |
+| Gemini GenerateContent | 支持外链的模型优先使用 `fileData.fileUri`。上游明确拒绝后，从 R2 获取图片并改用 `inlineData`。 |
+| 托管 Antigravity | 优先使用 Interactions 的 `image.uri`。上游拒绝链接后，从 R2 读取并改发 `image.data` 与 `mime_type`。 |
+| Codex app-server | 将 R2 图片转为 Base64 data URL，作为 `turn/start` 的独立 `image` 输入。 |
+| Antigravity CLI | 图片轮次通过 ACP 发送 `image` 内容块，后续轮次按已保存的 ACP 会话继续。 |
+| Command Code | 通过现有 ACP 会话发送 `image` 内容块。 |
+
+图片下载仅访问现有 R2 图片源地址，禁止跟随跳转。内联限制为单张 25 MiB、单次下载总量 48 MiB。旧网关的 GitHub Actions 派发和专用 Decision 文本接口会在客户端明确提示图片不可用。
+
+部署时先更新 Agent-gemeni 的执行器，再更新 AnyWorkflow-workers 的 PocketBase hooks，最后发 Android 更新。该次更新使用现有 R2 Worker 和 PocketBase 字段。

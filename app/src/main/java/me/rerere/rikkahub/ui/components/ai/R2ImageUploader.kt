@@ -1,9 +1,12 @@
 package me.rerere.rikkahub.ui.components.ai
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -27,33 +30,59 @@ internal fun launchR2ImageUpload(
     if (!url.startsWith("file://")) return
     val path = uri.path ?: return
     val file = File(path)
-    if (!file.exists()) return
-
-    val mimeType = when (file.extension.lowercase()) {
-        "jpg", "jpeg" -> "image/jpeg"
-        "webp" -> "image/webp"
-        "gif" -> "image/gif"
-        else -> "image/png"
+    if (!file.isFile) {
+        inputState.setImageUploadState(url, ImageUploadState.Failed("找不到本地图片"))
+        return
     }
-    val fileName = filesManager.getFileNameFromUri(uri)
-        ?.takeIf { it.isNotBlank() }
-        ?: file.name.ifBlank { "image.${file.extension.ifBlank { "png" }}" }
+    if (inputState.imageUploadStates[url] is ImageUploadState.Uploading) return
 
     inputState.setImageUploadState(url, ImageUploadState.Uploading(0f))
     scope.launch {
-        val result = libraryRepository.uploadLibraryImage(
-            file = file,
-            fileName = fileName,
-            mimeType = mimeType,
-            onProgress = { progress ->
-                scope.launch(Dispatchers.Main.immediate) {
-                    if (inputState.imageUploadStates[url] is ImageUploadState.Uploading) {
-                        inputState.setImageUploadState(url, ImageUploadState.Uploading(progress))
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(file.path, bounds)
+                val mimeType = bounds.outMimeType ?: error("无法读取图片格式")
+                val fileName = filesManager.getFileNameFromUri(uri)?.ifBlank { null } ?: file.name
+                var reportedPercent = 0
+                val onProgress: (Float) -> Unit = { progress ->
+                    val percent = (progress * 100).toInt()
+                    if (percent > reportedPercent) {
+                        reportedPercent = percent
+                        scope.launch(Dispatchers.Main.immediate) {
+                            if (inputState.imageUploadStates[url] is ImageUploadState.Uploading) {
+                                inputState.setImageUploadState(url, ImageUploadState.Uploading(progress))
+                            }
+                        }
                     }
                 }
-            },
-        )
+                if (mimeType in setOf("image/jpeg", "image/webp", "image/gif", "image/png")) {
+                    libraryRepository.uploadLibraryImage(file, fileName, mimeType, onProgress).getOrThrow()
+                } else {
+                    // Android can pick HEIF and other formats outside the R2 image library contract.
+                    val converted = File.createTempFile("agent-image-", ".png", file.parentFile)
+                    try {
+                        var sampleSize = 1
+                        while (maxOf(bounds.outWidth, bounds.outHeight) / sampleSize > 4096) sampleSize *= 2
+                        val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                        val bitmap = BitmapFactory.decodeFile(file.path, options) ?: error("无法解码图片")
+                        try {
+                            converted.outputStream().use { output ->
+                                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "无法转换图片格式" }
+                            }
+                        } finally {
+                            bitmap.recycle()
+                        }
+                        val convertedName = "${fileName.substringBeforeLast('.')}.png"
+                        libraryRepository.uploadLibraryImage(converted, convertedName, "image/png", onProgress).getOrThrow()
+                    } finally {
+                        converted.delete()
+                    }
+                }
+            }.onFailure { if (it is CancellationException) throw it }
+        }
         withContext(Dispatchers.Main.immediate) {
+            if (inputState.imageUploadStates[url] !is ImageUploadState.Uploading) return@withContext
             result.onSuccess { uploaded ->
                 inputState.replaceImageUrl(url, uploaded.sourceUrl)
             }.onFailure { err ->

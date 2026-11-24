@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.data.agent
 
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -177,4 +178,30 @@ class AgentCloudClientPayloadTest {
         assertNull(payload["agentModel"])
     }
 
+    @Test
+    fun `sends one R2 reference per image and supports an empty prompt`() {
+        val url = "https://file.any1.tech/api/library/image-sources/00000000-0000-4000-8000-000000000001.png"
+        val payload = PocketBaseAgentCloudClient.buildSubmitJobPayload(
+            jobId = "abcdefghijklmno",
+            config = RemoteAgentConfig(model = COMMAND_CODE_MODEL),
+            prompt = "",
+            sources = emptyList(),
+            images = listOf(url, url),
+        )
+        assertEquals("", payload["prompt"]?.jsonPrimitive?.content)
+        assertEquals(listOf(url), payload["images"]?.jsonArray?.map { it.jsonPrimitive.content })
+    }
+
+    @Test
+    fun `restores legacy and structured image attachments without duplicating them`() {
+        val first = "https://file.any1.tech/api/library/image-sources/00000000-0000-4000-8000-000000000001.png"
+        val second = "https://file.any1.tech/api/library/image-sources/00000000-0000-4000-8000-000000000002.jpg"
+        val result = PocketBaseAgentCloudClient.extractImageUrlsAndStripMarker(
+            """查看图片
+                |<!-- aw:images:["$first","$second"] -->
+            """.trimMargin(),
+            listOf(first),
+        )
+        assertEquals("查看图片" to listOf(first, second), result)
+    }
 }
