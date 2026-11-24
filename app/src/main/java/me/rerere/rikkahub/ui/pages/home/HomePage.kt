@@ -50,6 +50,7 @@ import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.Clock01
+import me.rerere.hugeicons.stroke.CloudServer
 import me.rerere.hugeicons.stroke.Download01
 import me.rerere.hugeicons.stroke.GitFork
 import me.rerere.hugeicons.stroke.MessageAdd01
