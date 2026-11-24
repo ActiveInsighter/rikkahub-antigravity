@@ -160,7 +160,7 @@ fun AgentPage(id: Uuid) {
     val decisionSchemaJson by vm.decisionSchemaJson.collectAsStateWithLifecycle()
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     val isSyncing by vm.isSyncing.collectAsStateWithLifecycle()
-    val activeStatusText by vm.activeStatusText.collectAsStateWithLifecycle()
+    val activeStatusTextState = vm.activeStatusText.collectAsStateWithLifecycle()
     val errorMessage by vm.errorMessage.collectAsStateWithLifecycle()
     val session by vm.session.collectAsStateWithLifecycle()
     val showConnectDialog by vm.showConnectDialog.collectAsStateWithLifecycle()
@@ -352,9 +352,10 @@ fun AgentPage(id: Uuid) {
                                         val providerName = selectedModelProvider?.name
                                         if (providerName != null) "${m.displayName} ($providerName)" else m.displayName
                                     } ?: "未选择模型"
+                                    val activeStatusText = activeStatusTextState.value
                                     val subtitleText = when {
                                         isGenerating && !activeStatusText.isNullOrBlank() -> "运行中 · $activeStatusText"
-                                        !activeStatusText.isNullOrBlank() -> activeStatusText!!
+                                        !activeStatusText.isNullOrBlank() -> activeStatusText
                                         isSyncing -> "正在同步…"
                                         selectedModelCategory == AgentModelCategory.CHAT -> "Chat · $modelLabel"
                                         selectedModelCategory == AgentModelCategory.DECISION -> "Decision · $modelLabel"
@@ -482,7 +483,7 @@ fun AgentPage(id: Uuid) {
                                 previewListState = previewListState,
                                 selectionState = selectionState,
                                 loading = isGenerating,
-                                processingStatus = activeStatusText,
+                                processingStatusState = activeStatusTextState,
                                 previewMode = previewMode,
                                 onPreviewModeChange = { previewMode = it },
                                 settings = composedSettings,
@@ -519,7 +520,7 @@ fun AgentPage(id: Uuid) {
         AgentInsightsSheet(
             message = targetMessage,
             isRunning = isGenerating && (showLiveInsights || targetMessage?.id == latestAssistant?.id),
-            liveElapsedText = activeStatusText,
+            liveElapsedText = activeStatusTextState.value,
             onDismiss = {
                 showLiveInsights = false
                 insightsMessageId = null
