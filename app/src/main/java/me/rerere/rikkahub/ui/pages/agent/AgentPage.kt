@@ -120,6 +120,7 @@ import me.rerere.rikkahub.data.agent.DEFAULT_CODEX_SUB_MODELS
 import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
 import me.rerere.rikkahub.data.agent.isAntigravityAgentModel
 import me.rerere.rikkahub.data.agent.isCodexAgentModel
+import me.rerere.rikkahub.data.datastore.CLAUDE_CODE_PROVIDER_ID
 import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
 import me.rerere.rikkahub.ui.components.ai.AgentFilesPicker
 import me.rerere.rikkahub.ui.components.ai.ChatInput
@@ -432,6 +433,7 @@ fun AgentPage(id: Uuid) {
                                 placeholderText = inputPlaceholder,
                                 alwaysShowReasoningButton = false,
                                 showReasoningButton = true,
+                                allowReasoningOff = selectedModelProvider?.id != CLAUDE_CODE_PROVIDER_ID,
                                 showAsrButton = false,
                                 modelTypes = setOf(ModelType.CHAT, ModelType.AGENT, ModelType.DECISION),
                                 onUpdateChatModel = vm::updateAgentModel,

@@ -152,6 +152,7 @@ fun ChatInput(
     placeholderText: String? = null,
     alwaysShowReasoningButton: Boolean = false,
     showReasoningButton: Boolean = true,
+    allowReasoningOff: Boolean = true,
     showAsrButton: Boolean = true,
     modelTypes: Set<ModelType> = setOf(ModelType.CHAT),
     overrideModelId: String? = null,
@@ -340,6 +341,7 @@ fun ChatInput(
                                 if (showReasoningButton && (alwaysShowReasoningButton || chatModel?.abilities?.contains(ModelAbility.REASONING) == true)) {
                                     ReasoningButton(
                                         reasoningLevel = assistant.reasoningLevel,
+                                        allowReasoningOff = allowReasoningOff,
                                         onUpdateReasoningLevel = {
                                             onUpdateAssistant(assistant.copy(reasoningLevel = it))
                                         },

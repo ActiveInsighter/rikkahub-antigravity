@@ -57,7 +57,7 @@ import me.rerere.rikkahub.data.agent.RemoteHistoryTurn
 import me.rerere.rikkahub.data.agent.isAgentImageUrl
 import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_CLI_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_PROVIDER_ID
-import me.rerere.rikkahub.data.datastore.isClaudeCodeProvider
+import me.rerere.rikkahub.data.datastore.CLAUDE_CODE_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.CODEX_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.COMMAND_CODE_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
@@ -65,6 +65,7 @@ import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.TOP_AGENT_PROVIDER_IDS
 import me.rerere.rikkahub.data.datastore.findModelById
 import me.rerere.rikkahub.data.datastore.findProvider
+import me.rerere.rikkahub.data.datastore.isClaudeCodeProvider
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.MessageNode
@@ -806,6 +807,7 @@ class AgentVM(
         val thinkingLevel = when {
             isClaudeCode -> when (reasoningLevel) {
                 ReasoningLevel.AUTO -> ""
+                ReasoningLevel.OFF -> if (rawProvider?.id == CLAUDE_CODE_PROVIDER_ID) "" else "off"
                 else -> reasoningLevel.name.lowercase()
             }
             isAntigravityCli && agentModel != null && reasoningLevel == ReasoningLevel.MAX -> "max"

@@ -1,4 +1,4 @@
-基于官方 RikkaHub **3.3.0** 的 Antigravity Interactions API Debug 版。
+基于官方 RikkaHub **3.3.1** 的 Antigravity Interactions API Debug 版。
 
 ### 本次更新
 
