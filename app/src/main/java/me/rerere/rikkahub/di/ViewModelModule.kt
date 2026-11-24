@@ -151,6 +151,13 @@ val viewModelModule = module {
         )
     }
     viewModel {
+        me.rerere.rikkahub.ui.pages.examdocs.ExamDocsStatsVM(
+            examDocsRepository = get(),
+            progressRepository = get(),
+            accountRepository = get(),
+        )
+    }
+    viewModel {
         me.rerere.rikkahub.ui.pages.beszel.BeszelVM(
             client = get(),
             settingsStore = get(),

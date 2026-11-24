@@ -32,6 +32,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.takeOrElse
 import androidx.core.net.toUri
+import coil3.imageLoader
+import coil3.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collectLatest
@@ -50,6 +52,7 @@ import me.rerere.rikkahub.ui.components.richtext.RichMarkdownRenderer
 import me.rerere.rikkahub.ui.components.richtext.SvgArtwork
 import me.rerere.rikkahub.ui.components.richtext.SvgPreviewDialog
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
+import me.rerere.rikkahub.ui.components.richtext.buildSvgImageRequest
 import me.rerere.rikkahub.ui.components.richtext.rememberRichMarkdownRenderer
 import me.rerere.rikkahub.ui.context.LocalSettings
 
@@ -82,20 +85,31 @@ internal fun rememberExamDocsRenderer(
         { formula -> LatexInline(cache.get(formula, display = false), painter) }
     }
 
-    if (LocalSettings.current.displaySetting.enableLatexRendering) {
-        LaunchedEffect(cache, listState) {
-            snapshotFlow { listState.firstVisibleItemIndex / PREFETCH_GROUP }.collectLatest { group ->
-                withContext(Dispatchers.Default) {
-                    val start = ((group - 1).coerceAtLeast(0) * PREFETCH_GROUP)
-                    val end = ((group + 3) * PREFETCH_GROUP).coerceAtMost(document.blocks.size)
-                    for (index in start until end) {
-                        ensureActive()
-                        val segment = document.blocks[index] as? ExamDocsSegment.Markdown ?: continue
+    val renderLatex = LocalSettings.current.displaySetting.enableLatexRendering
+    val prefetchedUrls = remember(document) { mutableSetOf<String>() }
+    LaunchedEffect(cache, listState, renderLatex, imageUrlResolver) {
+        val imageLoader = context.imageLoader
+        snapshotFlow { listState.firstVisibleItemIndex / PREFETCH_GROUP }.collectLatest { group ->
+            withContext(Dispatchers.Default) {
+                val start = ((group - 1).coerceAtLeast(0) * PREFETCH_GROUP)
+                val end = ((group + 3) * PREFETCH_GROUP).coerceAtMost(document.blocks.size)
+                for (index in start until end) {
+                    ensureActive()
+                    val segment = document.blocks[index]
+                    if (renderLatex && segment is ExamDocsSegment.Markdown) {
                         when (val block = segment.document.blocks.singleOrNull()) {
                             is MarkdownBlock.Paragraph -> cache.prefetch(block.content)
                             is MarkdownBlock.Heading -> cache.prefetch(block.content)
                             else -> Unit
                         }
+                    }
+                    prefetchImages(segment, imageUrlResolver, prefetchedUrls) { resolvedUrl ->
+                        val request = if (isSvgUrl(resolvedUrl)) {
+                            buildSvgImageRequest(context, resolvedUrl)
+                        } else {
+                            ImageRequest.Builder(context).data(resolvedUrl).build()
+                        }
+                        imageLoader.enqueue(request)
                     }
                 }
             }
@@ -103,9 +117,7 @@ internal fun rememberExamDocsRenderer(
     }
     val imageContent: @Composable (MarkdownInline.Image, String?, String) -> Unit = remember(onLinkClick) {
         { image, link, url ->
-            if (url.startsWith("data:image/svg+xml", ignoreCase = true) ||
-                url.toUri().path?.endsWith(".svg", ignoreCase = true) == true
-            ) {
+            if (isSvgUrl(url)) {
                 var expanded by remember(url) { mutableStateOf(false) }
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     SvgArtwork(
@@ -186,6 +198,68 @@ private class DocMathLayouts(private val context: Context) {
                 is MarkdownInline.Link -> prefetch(part.children)
                 else -> Unit
             }
+        }
+    }
+}
+
+private fun isSvgUrl(url: String): Boolean =
+    url.startsWith("data:image/svg+xml", ignoreCase = true) ||
+        url.toUri().path?.endsWith(".svg", ignoreCase = true) == true
+
+private fun prefetchImages(
+    segment: ExamDocsSegment,
+    imageUrlResolver: (String) -> String,
+    seen: MutableSet<String>,
+    onEnqueue: (String) -> Unit,
+) {
+    when (segment) {
+        is ExamDocsSegment.Markdown -> segment.document.blocks.forEach { block ->
+            prefetchBlockImages(block, imageUrlResolver, seen, onEnqueue)
+        }
+        is ExamDocsSegment.CustomBlock -> segment.blocks.forEach { child ->
+            prefetchImages(child, imageUrlResolver, seen, onEnqueue)
+        }
+    }
+}
+
+private fun prefetchBlockImages(
+    block: MarkdownBlock,
+    imageUrlResolver: (String) -> String,
+    seen: MutableSet<String>,
+    onEnqueue: (String) -> Unit,
+) {
+    when (block) {
+        is MarkdownBlock.Paragraph -> prefetchInlineImages(block.content, imageUrlResolver, seen, onEnqueue)
+        is MarkdownBlock.Heading -> prefetchInlineImages(block.content, imageUrlResolver, seen, onEnqueue)
+        is MarkdownBlock.Quote -> block.children.forEach { prefetchBlockImages(it, imageUrlResolver, seen, onEnqueue) }
+        is MarkdownBlock.ListBlock -> block.items.forEach { item ->
+            item.children.forEach { prefetchBlockImages(it, imageUrlResolver, seen, onEnqueue) }
+        }
+        is MarkdownBlock.Table -> {
+            block.header.forEach { cell -> prefetchInlineImages(cell.content, imageUrlResolver, seen, onEnqueue) }
+            block.rows.forEach { row -> row.forEach { cell -> prefetchInlineImages(cell.content, imageUrlResolver, seen, onEnqueue) } }
+        }
+        else -> Unit
+    }
+}
+
+private fun prefetchInlineImages(
+    inlines: List<MarkdownInline>,
+    imageUrlResolver: (String) -> String,
+    seen: MutableSet<String>,
+    onEnqueue: (String) -> Unit,
+) {
+    for (inline in inlines) {
+        when (inline) {
+            is MarkdownInline.Image -> {
+                val resolved = imageUrlResolver(inline.url)
+                if (resolved.isNotBlank() && seen.add(resolved)) {
+                    onEnqueue(resolved)
+                }
+            }
+            is MarkdownInline.Styled -> prefetchInlineImages(inline.children, imageUrlResolver, seen, onEnqueue)
+            is MarkdownInline.Link -> prefetchInlineImages(inline.children, imageUrlResolver, seen, onEnqueue)
+            else -> Unit
         }
     }
 }

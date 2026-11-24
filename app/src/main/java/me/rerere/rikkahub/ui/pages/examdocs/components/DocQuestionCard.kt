@@ -1,12 +1,17 @@
 package me.rerere.rikkahub.ui.pages.examdocs.components
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +22,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -55,6 +61,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
@@ -92,7 +99,6 @@ import me.rerere.rikkahub.data.examdocs.DocsWrite
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 import me.rerere.rikkahub.ui.components.ui.cardGroupItemShape
 import me.rerere.rikkahub.ui.pages.examdocs.LocalDocsReadingProgress
-import me.rerere.rikkahub.ui.theme.LocalDarkMode
 
 private enum class QuestionKind(val label: String, val icon: ImageVector) {
     Single("单选题", HugeIcons.CheckmarkCircle02),
@@ -450,8 +456,10 @@ internal fun DocQuestionCard(
                             },
                             enabled = canSubmit,
                             shapes = ButtonDefaults.shapes(),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                            modifier = Modifier.height(36.dp),
                         ) {
-                            Text("提交答案")
+                            Text("提交答案", style = MaterialTheme.typography.labelLarge)
                         }
                     }
                     if (result != null) {
@@ -545,16 +553,12 @@ private fun QuestionHeader(number: String?, kind: QuestionKind, points: String?,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(
-            shape = MaterialTheme.shapes.small,
-            color = scheme.secondaryContainer,
-            contentColor = scheme.onSecondaryContainer,
-            modifier = Modifier.size(28.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(kind.icon, contentDescription = null, modifier = Modifier.size(16.dp))
-            }
-        }
+        Icon(
+            imageVector = kind.icon,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = scheme.onSurfaceVariant,
+        )
         if (number != null) {
             Text(number, style = MaterialTheme.typography.titleSmallEmphasized, maxLines = 1)
         }
@@ -652,6 +656,18 @@ private fun QuestionChoice(
         ChoiceFeedback.Idle -> scheme.surfaceContainerHigh to scheme.onSurface
     }
     val containerColor by animateColorAsState(container, motion.fastEffectsSpec(), label = "option container")
+    val contentColor by animateColorAsState(content, motion.fastEffectsSpec(), label = "option content")
+    var previousFeedback by remember { mutableStateOf(feedback) }
+    val rowScale = remember { Animatable(1f) }
+    LaunchedEffect(feedback) {
+        val prev = previousFeedback
+        previousFeedback = feedback
+        if (prev != feedback && feedback != ChoiceFeedback.Idle && feedback != ChoiceFeedback.Selected) {
+            val peak = if (feedback == ChoiceFeedback.Incorrect) 0.985f else 1.016f
+            rowScale.animateTo(peak, motion.fastSpatialSpec())
+            rowScale.animateTo(1f, motion.defaultSpatialSpec())
+        }
+    }
     val interaction = if (multiple) {
         Modifier.toggleable(value = selected, enabled = enabled, role = Role.Checkbox) { onSelect() }
     } else {
@@ -659,25 +675,40 @@ private fun QuestionChoice(
     }
 
     Surface(
-        modifier = Modifier.fillMaxWidth().clip(shape).then(interaction),
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = rowScale.value
+                scaleY = rowScale.value
+            }
+            .clip(shape)
+            .then(interaction),
         shape = shape,
         color = containerColor,
-        contentColor = content,
+        contentColor = contentColor,
     ) {
         Row(
             modifier = Modifier.heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            QuestionChoiceMarker(option.label, selected, feedback, containerColor, content)
+            QuestionChoiceMarker(option.label, selected, feedback, containerColor, contentColor)
             Column(Modifier.weight(1f)) {
                 if (option.text != null) {
                     Text(option.text, style = MaterialTheme.typography.bodyLarge)
                 } else {
                     renderChildren(option.blocks)
                 }
-                if (feedback == ChoiceFeedback.Missed || feedback == ChoiceFeedback.Answer) {
-                    Text(checkNotNull(feedback.label), style = MaterialTheme.typography.labelMedium)
+                AnimatedVisibility(
+                    visible = feedback == ChoiceFeedback.Missed || feedback == ChoiceFeedback.Answer,
+                    enter = expandVertically(motion.fastSpatialSpec()) + fadeIn(motion.fastEffectsSpec()),
+                    exit = shrinkVertically(motion.fastSpatialSpec()) + fadeOut(motion.fastEffectsSpec()),
+                ) {
+                    Text(
+                        text = feedback.label.orEmpty(),
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
                 }
             }
         }
@@ -692,15 +723,30 @@ private fun QuestionChoiceMarker(
     rowColor: Color,
     ink: Color,
 ) {
-    val effects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    val motion = MaterialTheme.motionScheme
     val circleSize = maxOf(30.dp, with(LocalDensity.current) { 20.sp.toDp() } + 8.dp)
+    val circleFill by animateColorAsState(
+        targetValue = if (selected) ink else Color.Transparent,
+        animationSpec = motion.fastEffectsSpec(),
+        label = "marker fill",
+    )
+    val circleInk by animateColorAsState(
+        targetValue = if (selected) rowColor else ink,
+        animationSpec = motion.fastEffectsSpec(),
+        label = "marker ink",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = ink.copy(alpha = if (feedback == ChoiceFeedback.Idle) 0.45f else 0.8f),
+        animationSpec = motion.fastEffectsSpec(),
+        label = "marker border",
+    )
     Box(Modifier.size(circleSize + 4.dp)) {
         Surface(
             modifier = Modifier.align(Alignment.TopStart).size(circleSize),
             shape = CircleShape,
-            color = if (selected) ink else Color.Transparent,
-            contentColor = if (selected) rowColor else ink,
-            border = BorderStroke(1.dp, ink.copy(alpha = if (feedback == ChoiceFeedback.Idle) 0.45f else 0.8f)),
+            color = circleFill,
+            contentColor = circleInk,
+            border = BorderStroke(1.dp, borderColor),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Text(
@@ -712,10 +758,16 @@ private fun QuestionChoiceMarker(
                 )
             }
         }
-        Crossfade(
+        AnimatedContent(
             targetState = feedback.takeIf { it.icon != null },
             modifier = Modifier.align(Alignment.BottomEnd).size(15.dp),
-            animationSpec = effects,
+            transitionSpec = {
+                (scaleIn(initialScale = 0.45f, animationSpec = motion.fastSpatialSpec()) +
+                    fadeIn(motion.fastEffectsSpec())) togetherWith
+                    (scaleOut(targetScale = 0.45f, animationSpec = motion.fastEffectsSpec()) +
+                        fadeOut(motion.fastEffectsSpec())) using
+                    SizeTransform(clip = false)
+            },
             label = "option verdict",
         ) { verdict ->
             if (verdict?.icon != null) {
@@ -806,10 +858,9 @@ private fun incorrectAnswerColors(): Pair<Color, Color> {
 }
 
 @Composable
-private fun missedAnswerColors(): Pair<Color, Color> = if (LocalDarkMode.current) {
-    Color(0xFF3D321B) to Color(0xFFF4DB9C)
-} else {
-    Color(0xFFFFF0C5) to Color(0xFF604700)
+private fun missedAnswerColors(): Pair<Color, Color> {
+    val scheme = MaterialTheme.colorScheme
+    return lerp(scheme.tertiaryContainer, scheme.surfaceContainerHigh, 0.25f) to scheme.onTertiaryContainer
 }
 
 @OptIn(ExperimentalLayoutApi::class)
