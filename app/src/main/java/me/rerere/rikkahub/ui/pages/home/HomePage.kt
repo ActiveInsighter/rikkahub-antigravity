@@ -266,6 +266,30 @@ fun HomePage() {
                         ) {
                             Text("对话历史")
                         }
+
+                        item(
+                            onClick = { navController.navigate(Screen.Beszel) },
+                            leadingContent = {
+                                CardGroupIcon(
+                                    icon = me.rerere.hugeicons.stroke.ServerStack01,
+                                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                                )
+                            },
+                            supportingContent = {
+                                Text("Beszel 监控 · 实时指标、容器与告警")
+                            },
+                            trailingContent = {
+                                Icon(
+                                    imageVector = HugeIcons.ArrowRight01,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            },
+                        ) {
+                            Text("服务器状况")
+                        }
                     }
                 }
             }
