@@ -35,6 +35,7 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -118,7 +119,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val setting by vm.settings.collectAsStateWithLifecycle()
     val conversation by vm.conversation.collectAsStateWithLifecycle()
     val loadingJob by vm.conversationJob.collectAsStateWithLifecycle()
-    val processingStatus by vm.processingStatus.collectAsStateWithLifecycle()
+    val processingStatusState = vm.processingStatus.collectAsStateWithLifecycle()
     val currentChatModel by vm.currentChatModel.collectAsStateWithLifecycle()
     val assistant by vm.assistant.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
@@ -224,7 +225,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     onStartVoiceMode = startVoiceMode,
                     inputState = inputState,
                     loadingJob = loadingJob,
-                    processingStatus = processingStatus,
+                    processingStatusState = processingStatusState,
                     setting = setting,
                     conversation = conversation,
                     drawerState = drawerState,
@@ -257,7 +258,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
                     onStartVoiceMode = startVoiceMode,
                     inputState = inputState,
                     loadingJob = loadingJob,
-                    processingStatus = processingStatus,
+                    processingStatusState = processingStatusState,
                     setting = setting,
                     conversation = conversation,
                     drawerState = drawerState,
@@ -284,7 +285,7 @@ private fun ChatPageContent(
     onStartVoiceMode: () -> Unit,
     inputState: ChatInputState,
     loadingJob: Job?,
-    processingStatus: String? = null,
+    processingStatusState: State<String?>,
     setting: Settings,
     bigScreen: Boolean,
     conversation: Conversation,
@@ -462,7 +463,7 @@ private fun ChatPageContent(
                 selectionState = selectionState,
                 loading = loadingJob != null,
                 compressing = sessionActivity == SessionActivity.Compressing,
-                processingStatus = processingStatus,
+                processingStatusState = processingStatusState,
                 previewMode = previewMode,
                 onPreviewModeChange = { previewMode = it },
                 settings = setting,

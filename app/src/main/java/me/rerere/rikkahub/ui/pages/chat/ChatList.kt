@@ -3,6 +3,7 @@ package me.rerere.rikkahub.ui.pages.chat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,7 +17,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +59,7 @@ import dev.chrisbanes.haze.hazeSource
 import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import me.rerere.ai.ui.UIMessage
 import me.rerere.hugeicons.HugeIcons
@@ -91,6 +93,7 @@ fun ChatList(
     loading: Boolean,
     compressing: Boolean = false,
     processingStatus: String? = null,
+    processingStatusState: State<String?>? = null,
     previewMode: Boolean,
     onPreviewModeChange: (Boolean) -> Unit,
     settings: Settings,
@@ -155,6 +158,7 @@ fun ChatList(
                 loading = loading,
                 compressing = compressing,
                 processingStatus = processingStatus,
+                processingStatusState = processingStatusState,
                 settings = settings,
                 hazeState = hazeState,
                 errors = errors,
@@ -229,6 +233,7 @@ private fun ChatListNormal(
     loading: Boolean,
     compressing: Boolean,
     processingStatus: String? = null,
+    processingStatusState: State<String?>? = null,
     settings: Settings,
     hazeState: HazeState,
     errors: List<ChatError>,
@@ -276,15 +281,6 @@ private fun ChatListNormal(
         }
     }
 
-    fun List<LazyListItemInfo>.isAtBottom(): Boolean {
-        val lastItem = lastOrNull() ?: return false
-        val inputBarHeight = with(density) { innerPadding.calculateBottomPadding().toPx() }
-        val lastPos = lastItem.offset + lastItem.size
-        val inputPos = (state.layoutInfo.viewportEndOffset - inputBarHeight.roundToInt())
-        // println("lastPos = $lastPos, inputPos = $inputPos  | ${lastPos <= inputPos - 8}")
-        return lastPos <= inputPos - 8
-    }
-
     // 聊天选择
     val selectedItems = selectionState.selectedItems
     var showExportSheet by remember { mutableStateOf(false) }
@@ -317,18 +313,63 @@ private fun ChatListNormal(
         modifier = Modifier
             .fillMaxSize(),
     ) {
-        // 自动滚动到底部
-        if (settings.displaySetting.enableAutoScroll) {
-            LaunchedEffect(state) {
-                snapshotFlow { state.layoutInfo.visibleItemsInfo }.collect { visibleItemsInfo ->
-                    // println("is bottom = ${visibleItemsInfo.isAtBottom()}, scroll = ${state.isScrollInProgress}, can_scroll = ${state.canScrollForward}, loading = $loading")
-                    if (!state.isScrollInProgress && loadingState) {
-                        if (visibleItemsInfo.isAtBottom()) {
-                            state.requestScrollToItem(conversationUpdated.messageNodes.lastIndex + 10)
-                            // Log.i(TAG, "ChatList: scroll to ${conversationUpdated.messageNodes.lastIndex}")
+        // 自动滚动到底部：用用户意图闩锁（followBottom）避免与上滑手势抢控制权及自激重测
+        var followBottom by remember(state) { mutableStateOf(true) }
+        var isUserDragging by remember(state) { mutableStateOf(false) }
+        var isAutoScrolling by remember(state) { mutableStateOf(false) }
+
+        LaunchedEffect(state) {
+            state.interactionSource.interactions.collect { interaction ->
+                when (interaction) {
+                    is DragInteraction.Start -> {
+                        isUserDragging = true
+                        followBottom = false
+                    }
+                    is DragInteraction.Stop, is DragInteraction.Cancel -> {
+                        isUserDragging = false
+                        if (!state.isScrollInProgress && !state.canScrollForward) {
+                            followBottom = true
                         }
                     }
                 }
+            }
+        }
+
+        LaunchedEffect(state) {
+            snapshotFlow { state.isScrollInProgress to state.canScrollForward }
+                .distinctUntilChanged()
+                .collect { (scrolling, canScrollForward) ->
+                    if (!scrolling && !isUserDragging && !canScrollForward) {
+                        followBottom = true
+                    } else if (scrolling && !isAutoScrolling && canScrollForward) {
+                        followBottom = false
+                    }
+                }
+        }
+
+        if (settings.displaySetting.enableAutoScroll) {
+            LaunchedEffect(state) {
+                snapshotFlow {
+                    if (!loadingState) {
+                        null
+                    } else {
+                        val nodes = conversationUpdated.messageNodes
+                        val lastMsg = nodes.lastOrNull()?.currentMessage
+                        Triple(nodes.size, lastMsg?.id, lastMsg?.parts)
+                    }
+                }
+                    .distinctUntilChanged()
+                    .collect { contentKey ->
+                        if (contentKey != null && followBottom && !isUserDragging && !state.isScrollInProgress && state.canScrollForward) {
+                            val targetIndex = (state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                            isAutoScrolling = true
+                            try {
+                                state.scrollToItem(targetIndex)
+                            } finally {
+                                isAutoScrolling = false
+                            }
+                        }
+                    }
             }
         }
 
@@ -362,6 +403,7 @@ private fun ChatListNormal(
             itemsIndexed(
                 items = conversation.messageNodes,
                 key = { index, item -> item.id },
+                contentType = { _, _ -> "message" },
             ) { index, node ->
                 Column {
                     ListSelectableItem(
@@ -430,17 +472,20 @@ private fun ChatListNormal(
 
             // 压缩时也用这一行，processingStatus 显示的是压缩中
             if (loading) {
-                item(LoadingIndicatorKey) {
+                item(key = LoadingIndicatorKey, contentType = "loading") {
+                    val currentProcessingStatus = processingStatusState?.value ?: processingStatus
                     Row(
                         modifier = Modifier.padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        ContainedLoadingIndicator(
-                            modifier = Modifier.size(28.dp)
-                        )
+                        Box(modifier = Modifier.graphicsLayer()) {
+                            ContainedLoadingIndicator(
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
                         AnimatedVisibility(
-                            visible = processingStatus != null || onProcessingStatusClick != null,
+                            visible = currentProcessingStatus != null || onProcessingStatusClick != null,
                         ) {
                             val timeModifier = if (onProcessingStatusClick != null) {
                                 Modifier
@@ -451,8 +496,10 @@ private fun ChatListNormal(
                                 Modifier
                             }
                             Text(
-                                text = processingStatus ?: "0秒",
-                                style = MaterialTheme.typography.labelMedium,
+                                text = currentProcessingStatus ?: "0秒",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontFeatureSettings = "tnum",
+                                ),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = timeModifier,
                             )
@@ -463,13 +510,13 @@ private fun ChatListNormal(
 
             // 没有可用模型就发不了消息，放在消息后面，空会话时在顶部、有消息时贴着输入框
             if (needsSetup) {
-                item(key = "QuickStartCard") {
+                item(key = "QuickStartCard", contentType = "quickstart") {
                     QuickStartCard(modifier = Modifier.animateItem())
                 }
             }
 
             // 为了能正确滚动到这
-            item(ScrollBottomKey) {
+            item(key = ScrollBottomKey, contentType = "spacer") {
                 Spacer(
                     Modifier
                         .fillMaxWidth()
