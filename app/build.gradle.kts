@@ -162,6 +162,11 @@ android {
         compose = true
         buildConfig = true
     }
+    testOptions {
+        // Providers call android.util.Log from their streaming callbacks, which would otherwise throw
+        // "not mocked" in JVM tests that exercise real request/response paths.
+        unitTests.isReturnDefaultValues = true
+    }
     sourceSets {
         getByName("androidTest").assets.srcDirs("$projectDir/schemas")
     }

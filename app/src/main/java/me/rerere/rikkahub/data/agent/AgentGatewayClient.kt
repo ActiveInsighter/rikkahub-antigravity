@@ -70,15 +70,15 @@ internal suspend fun collectAgentChatReply(
 
     if (finishReason.isCompleted() && reply.hasChatOutput()) return
     check(finishReason == null || finishReason.isCompleted() || finishReason.isTruncated()) {
-        "网关未正常完成回复（$finishReason）"
+        "Gemini 未正常完成回复（$finishReason）"
     }
 
     val result = retry()
     check(result.message.hasChatOutput()) {
-        "网关重试后仍未返回正文" + (result.finishReason?.let { "（$it）" } ?: "")
+        "Gemini 重试后仍未返回正文" + (result.finishReason?.let { "（$it）" } ?: "")
     }
     check(result.finishReason == null || result.finishReason.isCompleted()) {
-        "网关重试后仍未完成回复（${result.finishReason}）"
+        "Gemini 重试后仍未完成回复（${result.finishReason}）"
     }
 
     // Replace the partial reply as a unit so its thought signatures match the answer on replay.
@@ -345,11 +345,12 @@ class AgentGatewayClient(
         fun resolveAnthropicBaseUrl(modelBaseUrl: String, fallbackBaseUrl: String): String {
             val raw = modelBaseUrl.ifBlank { fallbackBaseUrl }.ifBlank { DEFAULT_GEMINI_GATEWAY_URL }
             val trimmed = raw.trim().trimEnd('/')
-            return when {
-                trimmed.endsWith("/v1beta", ignoreCase = true) -> trimmed.removeSuffix("/v1beta").trimEnd('/')
-                trimmed.endsWith("/v1", ignoreCase = true) -> trimmed
-                else -> "$trimmed/v1"
-            }
+            val root = (if (trimmed.endsWith("/v1beta", ignoreCase = true)) {
+                trimmed.dropLast("/v1beta".length)
+            } else {
+                trimmed
+            }).trimEnd('/')
+            return if (root.endsWith("/v1", ignoreCase = true)) root else "$root/v1"
         }
 
         fun resolveGatewayRootUrl(modelBaseUrl: String, fallbackBaseUrl: String): String {
