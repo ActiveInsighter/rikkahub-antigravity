@@ -971,8 +971,8 @@ private fun InspectorBottomSheet(
                 if (!sheet.isLoading && sheet.content.isNotBlank()) {
                     IconButton(
                         onClick = {
-                            context.copyText(sheet.content)
-                            toaster.show("已复制到剪贴板", ToastType.SUCCESS)
+                            context.writeClipboardText(sheet.content)
+                            toaster.show("已复制到剪贴板", type = ToastType.Success)
                         },
                     ) {
                         Icon(

@@ -271,7 +271,7 @@ fun HomePage() {
                             onClick = { navController.navigate(Screen.Beszel) },
                             leadingContent = {
                                 CardGroupIcon(
-                                    icon = me.rerere.hugeicons.stroke.ServerStack01,
+                                    icon = me.rerere.hugeicons.stroke.CloudServer,
                                     containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                                     contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
                                 )

@@ -360,7 +360,7 @@ private fun BeszelLoginScreen(
                     formItem(
                         leadingContent = { CardGroupIcon(HugeIcons.Key01) },
                         headlineContent = { Text("输入邮箱验证码") },
-                        supportingContent = { Text("已向 ${mfa.email} 发送一次性验证码") },
+                        supportingContent = { Text("已向 ${mfa.identity} 发送一次性验证码") },
                     ) {
                         OutlinedTextField(
                             value = otpCode,
