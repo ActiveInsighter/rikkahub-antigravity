@@ -48,7 +48,9 @@ import me.rerere.rikkahub.data.agent.AgentSettingsStore
 import me.rerere.rikkahub.data.agent.AgentUiSettings
 import me.rerere.rikkahub.data.agent.DEFAULT_AGENT_MODELS
 import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
+import me.rerere.rikkahub.data.agent.MAX_AGENT_IMAGES
 import me.rerere.rikkahub.data.agent.RemoteAgentSourceInput
+import me.rerere.rikkahub.data.agent.isAgentImageUrl
 import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_CLI_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.CODEX_PROVIDER_ID
@@ -433,7 +435,20 @@ class AgentVM(
         )
     }
 
-    private fun validateRemoteCliInput(parts: List<UIMessagePart>): Boolean {
+    private fun validateInput(parts: List<UIMessagePart>, category: AgentModelCategory): Boolean {
+        val images = extractImagesFromParts(parts)
+        if (images.isNotEmpty()) {
+            _errorMessage.value = when {
+                category == AgentModelCategory.DECISION -> "当前决策接口仅接收文本。请选择支持图片的聊天或 Agent 模型。"
+                category != AgentModelCategory.AGENT -> null
+                session.value == null -> "请先连接 PocketBase 账号，再发送 Agent 图片。"
+                images.size > MAX_AGENT_IMAGES -> "每条消息最多添加 6 张图片。"
+                images.any { !it.isAgentImageUrl() } -> "图片须先上传至资料库。可点击失败的附件重试，或重新添加图片。"
+                else -> null
+            }
+            if (_errorMessage.value != null) return false
+        }
+
         val providerId = selectedModelProvider.value?.id
         val modelId = resolvedChatModel.value?.modelId.orEmpty()
         val name = when {
@@ -443,9 +458,9 @@ class AgentVM(
         }
         _errorMessage.value = when {
             session.value == null -> "请先连接 PocketBase 账号，再使用 $name。"
-            parts.any { it !is UIMessagePart.Text &&
+            parts.any { it !is UIMessagePart.Text && it !is UIMessagePart.Image &&
                 !(it is UIMessagePart.Document && it.fileName.endsWith(".md", ignoreCase = true))
-            } -> "$name 支持文本和 Markdown 附件。"
+            } -> "$name 支持文本、图片和 Markdown 附件。"
             else -> null
         }
         return _errorMessage.value == null
@@ -454,10 +469,9 @@ class AgentVM(
     fun sendMessage(parts: List<UIMessagePart>): Boolean {
         if (parts.isEmpty() || isBusy) return false
         _errorMessage.value = null
-        if (!validateRemoteCliInput(parts)) return false
-
         val modelEntity = currentOrFallbackModelEntity()
         val category = modelEntity.modelCategory
+        if (!validateInput(parts, category)) return false
 
         val userMessage = UIMessage(
             role = MessageRole.USER,
@@ -569,9 +583,8 @@ class AgentVM(
         val node = current.messageNodes[nodeIndex]
         val historyBefore = current.messageNodes.take(nodeIndex).map { it.currentMessage }
         val userMsg = historyBefore.lastOrNull { it.role == MessageRole.USER } ?: return
-        if (!validateRemoteCliInput(userMsg.parts)) return
-
         val modelEntity = currentOrFallbackModelEntity()
+        if (!validateInput(userMsg.parts, modelEntity.modelCategory)) return
         val prompt = buildPromptFromParts(userMsg.parts)
         val sources = extractSourcesFromParts(userMsg.parts)
         val images = extractImagesFromParts(userMsg.parts)
@@ -840,8 +853,7 @@ class AgentVM(
         if (docNames.isNotEmpty()) {
             return "请处理附件文件：${docNames.joinToString(", ")}"
         }
-        val hasImages = parts.any { it is UIMessagePart.Image }
-        return if (hasImages) "请查看并处理图片" else ""
+        return ""
     }
 
     private fun extractImagesFromParts(parts: List<UIMessagePart>): List<String> {
