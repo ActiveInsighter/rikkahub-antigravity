@@ -347,6 +347,7 @@ class AgentRepository(
         agentModel: String? = null,
         thinkingLevel: String? = null,
         systemPrompt: String? = null,
+        initialHistory: List<RemoteHistoryTurn> = emptyList(),
     ): Deferred<Result<Unit>> {
         val session = workflowRepository.session.value
         val startedAt = System.currentTimeMillis()
@@ -369,6 +370,7 @@ class AgentRepository(
                             agentModelOverride = agentModel,
                             thinkingLevelOverride = thinkingLevel,
                             systemPromptOverride = systemPrompt,
+                            initialHistory = initialHistory,
                         )
                         if (workflowRepository.session.value == session) {
                             saveConversation(conversation, submitted.jobId, submitted.threadRoot, submitted.status)

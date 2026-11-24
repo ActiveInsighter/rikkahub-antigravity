@@ -22,6 +22,9 @@ internal fun Settings.withBuiltInDefaults(): Settings {
         val defaultProvider = DEFAULT_PROVIDERS.find { it.id == provider.id }
         val recommendedProvider = RECOMMENDED_PROVIDERS.find { it.id == provider.id }
         when {
+            defaultProvider != null && isClaudeCodeProvider(provider.id) ->
+                defaultProvider.copyProvider(enabled = provider.enabled)
+
             defaultProvider != null -> provider.copyProvider(
                 builtIn = defaultProvider.builtIn,
                 description = defaultProvider.description,

@@ -31,11 +31,6 @@ require(examDocsKey.isEmpty() || examDocsKey.matches(Regex("sb_publishable_[A-Za
     "EXAM_DOCS_PUBLISHABLE_KEY must be the public Supabase publishable key"
 }
 
-// modelflare gateway keys. Injected from CI secrets so they never live in the public repo; when
-// unset the providers still ship, just with an empty key the user can paste in settings.
-val modelflareClaudeKey = providers.environmentVariable("MODELFLARE_CLAUDE_KEY").orNull.orEmpty().trim()
-val modelflareGptKey = providers.environmentVariable("MODELFLARE_GPT_KEY").orNull.orEmpty().trim()
-
 android {
     namespace = "me.rerere.rikkahub"
     compileSdk {
@@ -51,8 +46,6 @@ android {
         versionCode = 198
         versionName = "3.3.1"
         buildConfigField("String", "EXAM_DOCS_PUBLISHABLE_KEY", "\"$examDocsKey\"")
-        buildConfigField("String", "MODELFLARE_CLAUDE_KEY", "\"$modelflareClaudeKey\"")
-        buildConfigField("String", "MODELFLARE_GPT_KEY", "\"$modelflareGptKey\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

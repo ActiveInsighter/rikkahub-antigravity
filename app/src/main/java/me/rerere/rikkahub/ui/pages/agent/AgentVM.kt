@@ -40,6 +40,7 @@ import me.rerere.rikkahub.data.agent.AgentGatewayClient
 import me.rerere.rikkahub.data.agent.AgentModelCategory
 import me.rerere.rikkahub.data.agent.AgentModelEntity
 import me.rerere.rikkahub.data.agent.ANTIGRAVITY_CLI_MODEL
+import me.rerere.rikkahub.data.agent.CLAUDE_CODE_MODEL
 import me.rerere.rikkahub.data.agent.COMMAND_CODE_MODEL
 import me.rerere.rikkahub.data.agent.isAntigravityAgentModel
 import me.rerere.rikkahub.data.agent.isAntigravityCliModel
@@ -52,9 +53,11 @@ import me.rerere.rikkahub.data.agent.DEFAULT_AGENT_MODELS
 import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
 import me.rerere.rikkahub.data.agent.MAX_AGENT_IMAGES
 import me.rerere.rikkahub.data.agent.RemoteAgentSourceInput
+import me.rerere.rikkahub.data.agent.RemoteHistoryTurn
 import me.rerere.rikkahub.data.agent.isAgentImageUrl
 import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_CLI_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_PROVIDER_ID
+import me.rerere.rikkahub.data.datastore.isClaudeCodeProvider
 import me.rerere.rikkahub.data.datastore.CODEX_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.COMMAND_CODE_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
@@ -425,7 +428,7 @@ class AgentVM(
             ModelType.CHAT -> AgentModelCategory.CHAT
             else -> AgentModelCategory.inferFromModelId(modelId)
         }
-        // Anthropic-protocol providers (e.g. modelflare) talk to the local gateway over /v1/messages;
+        // Custom Anthropic chat providers use /v1/messages;
         // everything else keeps using the Gemini-native /v1beta gateway.
         val providerType = if (apiKeyProvider is ProviderSetting.Claude) {
             AGENT_PROVIDER_TYPE_ANTHROPIC
@@ -462,6 +465,7 @@ class AgentVM(
         val providerId = selectedModelProvider.value?.id
         val modelId = resolvedChatModel.value?.modelId.orEmpty()
         val name = when {
+            isClaudeCodeProvider(providerId) -> "Claude Code"
             providerId == COMMAND_CODE_PROVIDER_ID || isCommandCodeModel(modelId) -> "Command Code"
             providerId == ANTIGRAVITY_CLI_PROVIDER_ID || isAntigravityCliModel(modelId) -> "Antigravity CLI"
             else -> return true
@@ -774,6 +778,7 @@ class AgentVM(
         val rawModelId = selectedModel?.modelId?.ifBlank { null } ?: "Antigravity"
         val isAntigravityCli = rawProvider?.id == ANTIGRAVITY_CLI_PROVIDER_ID ||
             isAntigravityCliModel(rawModelId)
+        val isClaudeCode = isClaudeCodeProvider(rawProvider?.id)
         val isCommandCode = rawProvider?.id == COMMAND_CODE_PROVIDER_ID || isCommandCodeModel(rawModelId)
         val isCodex = rawProvider?.id == CODEX_PROVIDER_ID ||
             rawProvider?.name.equals("Codex", ignoreCase = true) ||
@@ -782,6 +787,7 @@ class AgentVM(
             rawProvider?.name.equals("Antigravity", ignoreCase = true) ||
             isAntigravityAgentModel(rawModelId)
         val modelName = when {
+            isClaudeCode -> CLAUDE_CODE_MODEL
             isCommandCode -> COMMAND_CODE_MODEL
             isAntigravityCli -> ANTIGRAVITY_CLI_MODEL
             isCodex -> "Codex"
@@ -789,6 +795,7 @@ class AgentVM(
             else -> rawModelId
         }
         val agentModel = when {
+            isClaudeCode -> rawModelId
             isAntigravityCli -> rawModelId.takeUnless(::isAntigravityCliModel)?.trim()
             isCodex && !rawModelId.equals("Codex", ignoreCase = true) -> rawModelId.trim()
             isAntigravity && !rawModelId.equals("Antigravity", ignoreCase = true) -> rawModelId.trim()
@@ -797,6 +804,10 @@ class AgentVM(
         val displayLabel = selectedModel?.displayName?.ifBlank { rawModelId } ?: modelName
         val reasoningLevel = _agentAssistant.value.reasoningLevel
         val thinkingLevel = when {
+            isClaudeCode -> when (reasoningLevel) {
+                ReasoningLevel.AUTO -> ""
+                else -> reasoningLevel.name.lowercase()
+            }
             isAntigravityCli && agentModel != null && reasoningLevel == ReasoningLevel.MAX -> "max"
             isAntigravityCli && agentModel != null && reasoningLevel == ReasoningLevel.XHIGH -> "xhigh"
             isAntigravityCli -> reasoningLevel.toGeminiThinkingLevel()
@@ -828,6 +839,24 @@ class AgentVM(
             )
             baseConversation.copy(messageNodes = baseConversation.messageNodes + newNode)
         }
+        val initialHistory = if (isClaudeCode && parentMessageId == null && replacesMessageId == null &&
+            snapshot.value?.remoteStatus == null
+        ) {
+            val priorNodes = baseConversation.messageNodes.takeWhile { it.id != targetNodeId }.dropLast(1)
+            priorNodes.takeLast(40).mapNotNull { node ->
+                val message = node.currentMessage
+                val text = message.toText()
+                val historyImages = extractImagesFromParts(message.parts).filter { it.isAgentImageUrl() }.take(MAX_AGENT_IMAGES)
+                when {
+                    message.role == MessageRole.USER && (text.isNotBlank() || historyImages.isNotEmpty()) ->
+                        RemoteHistoryTurn("user", text, historyImages)
+                    message.role == MessageRole.ASSISTANT && text.isNotBlank() -> RemoteHistoryTurn("model", text)
+                    else -> null
+                }
+            }
+        } else {
+            emptyList()
+        }
         _pendingRemoteSubmission.value = assistantMsgId to System.currentTimeMillis()
         val task = repository.submitMessage(
             conversation = initialConv,
@@ -841,6 +870,7 @@ class AgentVM(
             agentModel = agentModel,
             thinkingLevel = thinkingLevel,
             systemPrompt = systemPrompt,
+            initialHistory = initialHistory,
         )
         submission = task
         viewModelScope.launch {

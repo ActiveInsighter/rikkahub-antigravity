@@ -2,15 +2,13 @@
 
 ### 本次更新
 
-- 修复文档图片的 SVG 2 箭头兼容问题，邻接表等插图从原始链接直接在设备上渲染。
-- SVG 插图按原比例显示，去掉图片外框、背景和说明文字。
-- 题目字母与判题标记合并到左侧，把更多空间留给选项正文。收藏与笔记入口暂时收起。
+- Claude Code 和 Claude Code GPT 分组改用云端 Claude Code Agent，支持会话续接、实时输出、图片和 Markdown 附件。
+- 在 Agent 输入栏可调整思考深度。两个分组使用已连接的 PocketBase 账号。
 
 ### Updates
 
-- Render linked SVG diagrams on-device, including diagrams that use SVG 2 arrow markers.
-- Display SVG artwork at its original aspect ratio without a surrounding card or caption.
-- Move choice letters and grading badges to the leading edge. Pause the favourites and notes entry.
+- Run both Claude Code model groups through the cloud Claude Code Agent, with session continuity, streaming, images and Markdown attachments.
+- Set reasoning effort in the Agent composer. Both groups use the connected PocketBase account.
 
 - Android 8.0 及以上；普通手机优先下载 **arm64-v8a-debug.apk**，不确定架构时下载 **universal-debug.apk**。
 - 独立包名 `me.rerere.rikkahub.debug`，可与官方正式版并存；**Build 6 起**显式使用固定签名，并核对 APK 证书。Build 3/4 的临时签名不同，升级前请导出数据，再卸载旧修改版、安装新版并导入；从 Build 6 升级后续构建可直接覆盖。

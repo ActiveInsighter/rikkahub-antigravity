@@ -179,6 +179,31 @@ class AgentCloudClientPayloadTest {
     }
 
     @Test
+    fun `routes both Claude Code groups with model, effort, images and context`() {
+        val image = "https://file.any1.tech/api/library/image-sources/00000000-0000-4000-8000-000000000001.png"
+        for (model in listOf("claude-sonnet-5-5", "gpt-6.2-sol")) {
+            val payload = PocketBaseAgentCloudClient.buildSubmitJobPayload(
+                jobId = "abcdefghijklmno",
+                config = RemoteAgentConfig(),
+                prompt = "",
+                sources = emptyList(),
+                images = listOf(image),
+                parentMessageId = "zyxwvutsrqponml",
+                modelOverride = CLAUDE_CODE_MODEL,
+                agentModelOverride = model,
+                thinkingLevelOverride = "max",
+                systemPromptOverride = "Project instructions",
+            )
+            assertEquals(CLAUDE_CODE_MODEL, payload["model"]?.jsonPrimitive?.content)
+            assertEquals(model, payload["agentModel"]?.jsonPrimitive?.content)
+            assertEquals("max", payload["thinkingLevel"]?.jsonPrimitive?.content)
+            assertEquals("Project instructions", payload["systemPrompt"]?.jsonPrimitive?.content)
+            assertEquals("zyxwvutsrqponml", payload["parentMessage"]?.jsonPrimitive?.content)
+            assertEquals(image, payload["images"]?.jsonArray?.single()?.jsonPrimitive?.content)
+        }
+    }
+
+    @Test
     fun `sends one R2 reference per image and supports an empty prompt`() {
         val url = "https://file.any1.tech/api/library/image-sources/00000000-0000-4000-8000-000000000001.png"
         val payload = PocketBaseAgentCloudClient.buildSubmitJobPayload(

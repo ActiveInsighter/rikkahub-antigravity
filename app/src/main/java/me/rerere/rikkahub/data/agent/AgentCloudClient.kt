@@ -123,6 +123,7 @@ data class RemoteGeminiJob(
     val sources: List<RemoteSourceRef> = emptyList(),
     val history: List<RemoteHistoryTurn> = emptyList(),
     val images: List<String> = emptyList(),
+    val agentModel: String = "",
 )
 
 data class RemoteSourceRef(
@@ -246,6 +247,7 @@ interface AgentCloudClient {
         agentModelOverride: String? = null,
         thinkingLevelOverride: String? = null,
         systemPromptOverride: String? = null,
+        initialHistory: List<RemoteHistoryTurn> = emptyList(),
     ): RemoteSubmittedJob
 
     suspend fun cancelJob(jobId: String)
@@ -419,6 +421,7 @@ class PocketBaseAgentCloudClient(
         agentModelOverride: String?,
         thinkingLevelOverride: String?,
         systemPromptOverride: String?,
+        initialHistory: List<RemoteHistoryTurn>,
     ): RemoteSubmittedJob = withContext(Dispatchers.IO) {
         val session = workflowRepository.requireSession()
         val config = fetchConfigBestEffort(session)
@@ -436,6 +439,7 @@ class PocketBaseAgentCloudClient(
             agentModelOverride = agentModelOverride,
             thinkingLevelOverride = thinkingLevelOverride,
             systemPromptOverride = systemPromptOverride,
+            initialHistory = initialHistory,
         )
 
         val created = workflowRepository.executeJsonCancellable(
@@ -781,8 +785,8 @@ class PocketBaseAgentCloudClient(
             createdAt = parseLocalDateTime(if (isHistorical) message?.startedAt?.ifBlank { job.created } ?: job.created else job.created),
             finishedAt = finishedAt,
             modelSnapshot = ModelSnapshot(
-                displayName = agentModelDisplayName(job.model),
-                modelId = job.model.ifBlank { "Antigravity" },
+                displayName = agentModelDisplayName(job),
+                modelId = job.displayModelId(),
             ),
             usage = usage,
             generationTimeMs = durationMs,
@@ -815,8 +819,8 @@ class PocketBaseAgentCloudClient(
                 parts = listOf(UIMessagePart.Text(text)) + images.map { UIMessagePart.Image(url = it) },
                 createdAt = parseLocalDateTime(job.created),
                 modelSnapshot = if (user) null else ModelSnapshot(
-                    displayName = agentModelDisplayName(job.model),
-                    modelId = job.model.ifBlank { "Antigravity" },
+                    displayName = agentModelDisplayName(job),
+                    modelId = job.displayModelId(),
                 ),
             )
             add(MessageNode(
@@ -1017,7 +1021,8 @@ class PocketBaseAgentCloudClient(
                 images = parseImageReferences(o["images"]),
             )
         }
-        val storedImages = (obj["options"] as? JsonObject)?.get("images")
+        val options = obj["options"] as? JsonObject
+        val storedImages = options?.get("images")
         val images = parseImageReferences(storedImages) + parseImageReferences(obj["images"])
         return RemoteGeminiJob(
             id = obj.str("id"),
@@ -1037,6 +1042,7 @@ class PocketBaseAgentCloudClient(
             sources = sources,
             history = history,
             images = images.distinct(),
+            agentModel = (options?.get("agent") as? JsonObject)?.str("model").orEmpty(),
         )
     }
 
@@ -1250,6 +1256,7 @@ class PocketBaseAgentCloudClient(
             agentModelOverride: String? = null,
             thinkingLevelOverride: String? = null,
             systemPromptOverride: String? = null,
+            initialHistory: List<RemoteHistoryTurn> = emptyList(),
         ): JsonObject {
             val selectedModel = modelOverride?.trim()?.takeIf { it.isNotBlank() } ?: if (
                 isAntigravityAgentModel(config.model) || isCodexAgentModel(config.model) || isCommandCodeModel(config.model)
@@ -1260,6 +1267,7 @@ class PocketBaseAgentCloudClient(
             }
             val isAntigravityModel = isAntigravityAgentModel(selectedModel)
             val isCodexModel = isCodexAgentModel(selectedModel)
+            val isClaudeCodeModel = isClaudeCodeModel(selectedModel)
             val effectiveAgentModel = (agentModelOverride ?: config.agentModel.takeIf { isAntigravityModel && !isAntigravityCliModel(selectedModel) })
                 ?.trim()?.takeIf { it.isNotBlank() }
             val selectedThinkingLevel = thinkingLevelOverride ?: config.thinkingLevel
@@ -1274,6 +1282,17 @@ class PocketBaseAgentCloudClient(
                 put("prompt", prompt)
                 put("systemPrompt", selectedSystemPrompt)
                 put("text", "")
+                if (isClaudeCodeModel && initialHistory.isNotEmpty()) {
+                    put("initialHistory", buildJsonArray {
+                        for (turn in initialHistory) {
+                            add(buildJsonObject {
+                                put("role", turn.role)
+                                put("text", turn.text)
+                                if (turn.images.isNotEmpty()) put("images", JsonArray(turn.images.map(::JsonPrimitive)))
+                            })
+                        }
+                    })
+                }
                 if (cleanImages.isNotEmpty()) {
                     put("images", JsonArray(cleanImages.map { JsonPrimitive(it) }))
                 }
@@ -1293,7 +1312,7 @@ class PocketBaseAgentCloudClient(
                 )
                 put("delimiter", config.delimiter.ifBlank { "<!-- aw:split -->" })
                 put("model", selectedModel)
-                if ((isAntigravityModel || isCodexModel) && effectiveAgentModel != null) {
+                if ((isAntigravityModel || isCodexModel || isClaudeCodeModel) && effectiveAgentModel != null) {
                     put("agentModel", effectiveAgentModel)
                 }
                 put("concurrency", config.concurrency.coerceIn(1, 16))
@@ -1348,9 +1367,14 @@ class PocketBaseAgentCloudClient(
 private fun JsonObject.str(key: String): String =
     this[key]?.let { (it as? JsonPrimitive)?.contentOrNull } ?: ""
 
-private fun agentModelDisplayName(modelId: String): String = when {
-    isAntigravityCliModel(modelId) -> "Antigravity CLI"
-    isCodexAgentModel(modelId) -> "Codex Agent"
-    isCommandCodeModel(modelId) -> "Command Code"
+private fun RemoteGeminiJob.displayModelId(): String =
+    agentModel.takeIf { isClaudeCodeModel(model) && it.isNotBlank() }
+        ?: model.ifBlank { "Antigravity" }
+
+private fun agentModelDisplayName(job: RemoteGeminiJob): String = when {
+    isAntigravityCliModel(job.model) -> "Antigravity CLI"
+    isCodexAgentModel(job.model) -> "Codex Agent"
+    isCommandCodeModel(job.model) -> "Command Code"
+    isClaudeCodeModel(job.model) -> job.agentModel.ifBlank { "Claude Code" }
     else -> "Antigravity Agent"
 }
