@@ -172,4 +172,17 @@ val viewModelModule = module {
             settingsStore = get(),
         )
     }
+    viewModel {
+        me.rerere.rikkahub.ui.pages.pocketbase.PocketBaseVM(
+            client = get(),
+            settingsStore = get(),
+        )
+    }
+    viewModel { params ->
+        me.rerere.rikkahub.ui.pages.pocketbase.PocketBaseCollectionVM(
+            collectionName = params.get(),
+            client = get(),
+            settingsStore = get(),
+        )
+    }
 }

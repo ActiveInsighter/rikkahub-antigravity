@@ -152,6 +152,8 @@ val repositoryModule = module {
     single { me.rerere.rikkahub.data.examdocs.DocsProgressRepository(get(), get(), get(), get()) }
     single { me.rerere.rikkahub.data.beszel.BeszelSettingsStore(get()) }
     single { me.rerere.rikkahub.data.beszel.BeszelClient(get()) }
+    single { me.rerere.rikkahub.data.pocketbase.PocketBaseSettingsStore(get()) }
+    single { me.rerere.rikkahub.data.pocketbase.PocketBaseClient(get(), get()) }
 
     single {
         DeepSeekMigrator(get(), get(), get(), get())
