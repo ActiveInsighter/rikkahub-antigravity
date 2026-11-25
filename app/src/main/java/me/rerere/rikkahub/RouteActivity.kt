@@ -147,6 +147,7 @@ import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.pages.agent.AgentPage
 import me.rerere.rikkahub.ui.pages.agent.AgentSettingPage
 import me.rerere.rikkahub.ui.pages.agent.AgentWorkflowPage
+import me.rerere.rikkahub.ui.pages.agent.RemoteAgentPage
 import me.rerere.rikkahub.ui.pages.home.HomePage
 import me.rerere.rikkahub.ui.pages.update.ApkDownloadsPage
 import me.rerere.rikkahub.data.update.usesAntigravityUpdates
@@ -656,6 +657,8 @@ class RouteActivity : ComponentActivity() {
                                 AgentSettingPage()
                             }
 
+                            entry<Screen.RemoteAgent> { RemoteAgentPage() }
+
                             entry<Screen.AgentWorkflow> {
                                 AgentWorkflowPage()
                             }
@@ -943,6 +946,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object AgentSetting : Screen
+
+    @Serializable
+    data object RemoteAgent : Screen
 
     @Serializable
     data object AgentWorkflow : Screen

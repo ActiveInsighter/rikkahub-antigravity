@@ -403,6 +403,10 @@ fun AgentPage(id: Uuid) {
                                             renameText = conversation.title
                                             showRenameDialog = true
                                         },
+                                        onOpenRemote = {
+                                            if (session == null) vm.openConnectDialog()
+                                            else navController.navigate(Screen.RemoteAgent)
+                                        },
                                         onOpenSettings = { navController.navigate(Screen.AgentSetting) },
                                         onClear = { showClearConfirm = true },
                                     )
@@ -779,6 +783,7 @@ private fun AgentPageMenu(
     onTogglePreview: () -> Unit,
     onSyncOrConnect: () -> Unit,
     onRename: () -> Unit,
+    onOpenRemote: () -> Unit,
     onOpenSettings: () -> Unit,
     onClear: () -> Unit,
 ) {
@@ -825,7 +830,7 @@ private fun AgentPageMenu(
                     text = if (previewMode) "返回对话" else "对话概览",
                     icon = HugeIcons.LeftToRightListBullet,
                     index = 0,
-                    count = 4,
+                    count = 5,
                     enabled = hasMessages,
                     onClick = onTogglePreview,
                 )
@@ -833,21 +838,28 @@ private fun AgentPageMenu(
                     text = if (hasSession) "同步远端记录" else "连接云端账号",
                     icon = HugeIcons.Refresh,
                     index = 1,
-                    count = 4,
+                    count = 5,
                     onClick = onSyncOrConnect,
                 )
                 MenuItem(
                     text = "重命名会话",
                     icon = HugeIcons.PencilEdit01,
                     index = 2,
-                    count = 4,
+                    count = 5,
                     onClick = onRename,
+                )
+                MenuItem(
+                    text = "ACP 远程开发",
+                    icon = HugeIcons.LeftToRightListBullet,
+                    index = 3,
+                    count = 5,
+                    onClick = onOpenRemote,
                 )
                 MenuItem(
                     text = "Agent 设置",
                     icon = HugeIcons.Settings03,
-                    index = 3,
-                    count = 4,
+                    index = 4,
+                    count = 5,
                     onClick = onOpenSettings,
                 )
             }

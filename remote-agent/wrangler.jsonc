@@ -1,0 +1,13 @@
+{
+  "name": "rikka-remote-agent",
+  "main": "worker/index.mjs",
+  "compatibility_date": "2026-10-19",
+  "vars": { "POCKETBASE_URL": "https://pb.any1.tech" },
+  "queues": {
+    "producers": [{ "queue": "rikka-agent-tasks", "binding": "TASK_QUEUE" }],
+    "consumers": [{ "queue": "rikka-agent-tasks", "max_batch_timeout": 1, "max_retries": 5 }]
+  },
+  "workflows": [{ "name": "rikka-agent-delay", "binding": "DELAYED_TASK", "class_name": "DelayedTask" }],
+  "triggers": { "crons": ["* * * * *"] },
+  "r2_buckets": [{ "binding": "ARTIFACTS", "bucket_name": "rikka-agent-private" }]
+}

@@ -1,0 +1,30 @@
+[Unit]
+Description=RikkaHub remote development ACP Gateway
+Wants=network-online.target
+After=network-online.target pocketbase.service
+
+[Service]
+Type=simple
+User=rikka-agent
+Group=rikka-agent
+EnvironmentFile=/etc/rikka-agent/gateway.env
+WorkingDirectory=/opt/rikka-remote-agent
+ExecStart=/usr/local/bin/node /opt/rikka-remote-agent/gateway/index.mjs /etc/rikka-agent/gateway.json
+StateDirectory=rikka-agent
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+KillMode=control-group
+TimeoutStopSec=25
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

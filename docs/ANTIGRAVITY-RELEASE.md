@@ -2,10 +2,15 @@
 
 ### 本次更新
 
+- 在 Agent 页右上角打开「更多选项 → ACP 远程开发」。使用已连接的 AnyWorkflow 账号选择授权项目与 Agent，提交后台任务、查看实时输出和审批工具调用。
+- ACP 入口支持 Claude Code、Codex、Antigravity、OpenCode 和 Command Code。模型和思考程度取决于所选 Agent 的会话配置。
+
 - Claude Code 和 Claude Code GPT 分组改用云端 Claude Code Agent，支持会话续接、实时输出、图片和 Markdown 附件。
 - 在 Agent 输入栏可调整思考深度。两个分组使用已连接的 PocketBase 账号。
 
 ### Updates
+
+- Open **Agent → More options → ACP remote development** with your connected AnyWorkflow account. Select an authorized project and Agent, submit background tasks, stream results, and approve tool calls.
 
 - Run both Claude Code model groups through the cloud Claude Code Agent, with session continuity, streaming, images and Markdown attachments.
 - Set reasoning effort in the Agent composer. Both groups use the connected PocketBase account.

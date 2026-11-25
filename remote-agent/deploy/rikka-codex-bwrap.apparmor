@@ -1,0 +1,8 @@
+abi <abi/4.0>,
+include <tunables/global>
+
+# Ubuntu restricts unprivileged user namespaces. Codex creates its own
+# filesystem and network sandbox using this root-owned bubblewrap copy.
+profile rikka-codex-bwrap /opt/rikka-remote-agent/bin/bwrap flags=(unconfined) {
+  userns,
+}

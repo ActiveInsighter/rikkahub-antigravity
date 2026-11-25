@@ -4,6 +4,10 @@
 
 工作流集成架构、远端接口分工与自动化验证说明见 [docs/WORKFLOW_ARCHITECTURE.md](docs/WORKFLOW_ARCHITECTURE.md)。
 
+在 Android 的 Agent 页面打开右上角「更多选项 → ACP 远程开发」，使用现有 AnyWorkflow 账号选择项目和 Agent。任务可以后台执行，重新打开时可恢复输出和审批。
+
+多 Agent 远程开发的并行迁移和 ACP 服务部署见 [迁移方案](docs/REMOTE_AGENT_MIGRATION.md)和 [远程开发 API](remote-agent/README.md)。
+
 ## 下载与配置
 
 打开本仓库的 [Releases](https://github.com/ActiveInsighter/rikkahub-antigravity/releases)，在最新的 Antigravity 构建下载 APK。Android 8.0 及以上，普通手机选 `arm64-v8a`，不确定选 `universal`；`x86_64` 适用于对应模拟器/设备。

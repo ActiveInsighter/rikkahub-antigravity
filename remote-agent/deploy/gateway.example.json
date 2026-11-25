@@ -1,0 +1,36 @@
+{
+  "owner": "<PocketBase aw_clients record ID>",
+  "user": "rikka-agent",
+  "home": "/var/lib/rikka-agent",
+  "path": "/var/lib/rikka-agent/bin:/opt/rikka-remote-agent/adapters/node_modules/.bin:/usr/local/bin:/usr/bin",
+  "repositoryRoot": "/var/lib/rikka-agent/repos",
+  "worktreeRoot": "/var/lib/rikka-agent/worktrees",
+  "pocketbaseUrl": "http://127.0.0.1:8091",
+  "artifactUrl": "https://remote-agent.example.com",
+  "concurrency": 3,
+  "turnTimeoutSeconds": 1800,
+  "passEnvironment": ["GIT_CONFIG_GLOBAL", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"],
+  "mcpServers": [],
+  "projects": {
+    "rikka": { "repository": "/var/lib/rikka-agent/repos/rikkahub-antigravity", "base": "HEAD" }
+  },
+  "agents": {
+    "claude-code": {
+      "command": "/opt/rikka-remote-agent/adapters/node_modules/.bin/claude-agent-acp",
+      "args": [], "passEnvironment": ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"]
+    },
+    "codex": {
+      "command": "/opt/rikka-remote-agent/adapters/node_modules/.bin/codex-acp",
+      "args": [], "passEnvironment": ["CODEX_HOME"]
+    },
+    "antigravity": {
+      "command": "/var/lib/rikka-agent/bin/agy", "args": ["acp", "--sandbox"]
+    },
+    "opencode": {
+      "command": "/opt/rikka-remote-agent/adapters/node_modules/.bin/opencode", "args": ["acp"]
+    },
+    "command-code": {
+      "command": "/var/lib/rikka-agent/bin/cmd", "args": ["acp"]
+    }
+  }
+}
