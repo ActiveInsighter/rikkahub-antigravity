@@ -27,7 +27,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,14 +59,12 @@ import me.rerere.rikkahub.ui.components.ui.Greeting
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
-import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.ui.pages.chat.ConversationList
 import me.rerere.rikkahub.ui.pages.chat.ConversationSortButton
 import me.rerere.rikkahub.ui.pages.chat.DrawerAction
 import me.rerere.rikkahub.ui.pages.chat.DrawerEntry
 import me.rerere.rikkahub.ui.pages.chat.FolderBar
 import me.rerere.rikkahub.utils.toLocalDateTime
-import me.rerere.ui.toast.ToastType
 import org.koin.androidx.compose.koinViewModel
 import kotlin.uuid.Uuid
 
@@ -93,14 +90,6 @@ fun AgentDrawerContent(
     val activeConversationIds by drawerVm.activeConversationIds.collectAsStateWithLifecycle()
     val conversationStatuses by drawerVm.conversationStatuses.collectAsStateWithLifecycle()
     val conversationListState = rememberLazyListState()
-    val mutationError by drawerVm.mutationError.collectAsStateWithLifecycle()
-    val toaster = LocalToaster.current
-    LaunchedEffect(mutationError) {
-        mutationError?.let {
-            toaster.show(it, type = ToastType.Error)
-            drawerVm.dismissMutationError()
-        }
-    }
 
     var showHistorySearchSheet by remember { mutableStateOf(false) }
     var historySearchQuery by remember { mutableStateOf("") }
@@ -248,8 +237,9 @@ fun AgentDrawerContent(
                     renameText = conv.title
                 },
                 onDelete = { conv ->
-                    drawerVm.delete(conv.id) {
-                        if (conv.id == currentConversation.id) onNewConversation()
+                    drawerVm.delete(conv.id)
+                    if (conv.id == currentConversation.id) {
+                        onNewConversation()
                     }
                 },
                 onPin = { conv ->

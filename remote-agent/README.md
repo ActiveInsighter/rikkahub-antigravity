@@ -9,11 +9,9 @@ Worker 提供客户端 API 与任务派发。PocketBase 保存项目、会话、
 | 方法和路径 | 请求与结果 |
 | --- | --- |
 | `GET /v1/projects` | 返回当前账号可访问的项目和启用的 Agent |
-| `GET /v1/sessions` | 返回持久化会话列表和每个会话的最新任务摘要 |
+| `GET /v1/sessions` | 返回持久化会话列表 |
 | `POST /v1/sessions` | 提交 `projectId`、`agent`、`title`，返回会话 |
 | `GET /v1/sessions/{id}` | 返回会话及最近一次 ACP 声明的配置项 |
-| `POST /v1/sessions/{id}/metadata` | 更新 `title` 或 `pinned`，返回会话 |
-| `POST /v1/sessions/{id}/delete` | 将已结束的会话移出列表并阻止新任务，保留服务端记录 |
 | `GET /v1/sessions/{id}/tasks` | 按最新优先返回会话轮次 |
 | `POST /v1/sessions/{id}/tasks` | 提交 `prompt`，可选 `runAt`（Unix 毫秒）、`config` 和 `files`，返回任务 |
 | `GET /v1/tasks/{id}` | 返回任务状态、事件游标和待处理审批 |

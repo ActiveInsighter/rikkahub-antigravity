@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -38,6 +39,7 @@ import androidx.compose.material3.DropdownMenuGroup
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenuPopup
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -71,6 +73,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import kotlinx.serialization.json.jsonObject
+import me.rerere.rikkahub.utils.JsonInstant
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -109,6 +113,7 @@ import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.View
 import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.agent.AgentModelCategory
 import me.rerere.rikkahub.data.agent.AgentModelEntity
 import me.rerere.rikkahub.data.agent.DEFAULT_ANTIGRAVITY_SUB_MODELS
 import me.rerere.rikkahub.data.agent.DEFAULT_CODEX_SUB_MODELS
@@ -124,6 +129,8 @@ import me.rerere.rikkahub.ui.components.ai.rememberChatAttachmentPickerActions
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.ConnectedChoiceButtons
 import me.rerere.rikkahub.ui.components.ui.ConnectedChoiceLabel
+import me.rerere.rikkahub.ui.components.ui.Tag
+import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalSettings
 import me.rerere.rikkahub.ui.context.LocalToaster
@@ -150,8 +157,8 @@ fun AgentPage(id: Uuid) {
     val agentAssistant by vm.agentAssistant.collectAsStateWithLifecycle()
     val resolvedChatModel by vm.resolvedChatModel.collectAsStateWithLifecycle()
     val selectedModelProvider by vm.selectedModelProvider.collectAsStateWithLifecycle()
-    val pendingApproval by vm.pendingApproval.collectAsStateWithLifecycle()
-    val sessionAgentName by vm.sessionAgentName.collectAsStateWithLifecycle()
+    val selectedModelCategory by vm.selectedModelCategory.collectAsStateWithLifecycle()
+    val decisionSchemaJson by vm.decisionSchemaJson.collectAsStateWithLifecycle()
     val isGenerating by vm.isGenerating.collectAsStateWithLifecycle()
     val isSyncing by vm.isSyncing.collectAsStateWithLifecycle()
     val activeStatusTextState = vm.activeStatusText.collectAsStateWithLifecycle()
@@ -351,8 +358,10 @@ fun AgentPage(id: Uuid) {
                                         isGenerating && !activeStatusText.isNullOrBlank() -> "运行中 · $activeStatusText"
                                         !activeStatusText.isNullOrBlank() -> activeStatusText
                                         isSyncing -> "正在同步…"
-                                        session == null -> "连接 AnyWorkflow 以使用 ACP"
-                                        else -> "ACP · ${sessionAgentName ?: modelLabel}"
+                                        selectedModelCategory == AgentModelCategory.CHAT -> "Chat · $modelLabel"
+                                        selectedModelCategory == AgentModelCategory.DECISION -> "Decision · $modelLabel"
+                                        session == null -> "Agent Action · $modelLabel"
+                                        else -> "Agent · $modelLabel"
                                     }
                                     Text(
                                         text = subtitleText,
@@ -403,15 +412,16 @@ fun AgentPage(id: Uuid) {
                     },
                     bottomBar = {
                         Column(modifier = Modifier.fillMaxWidth()) {
-                            pendingApproval?.let { approval ->
-                                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                                    Text(approval.title.ifBlank { "Agent 请求工具审批" })
-                                    approval.options.forEach { option ->
-                                        OutlinedButton(onClick = { vm.approve(approval, option.id) }) {
-                                            Text(option.name)
-                                        }
-                                    }
-                                }
+                            if (selectedModelCategory == AgentModelCategory.DECISION) {
+                                DecisionSchemaBar(
+                                    schemaJson = decisionSchemaJson,
+                                    onUpdateSchema = vm::updateDecisionSchemaJson,
+                                )
+                            }
+                            val inputPlaceholder = when (selectedModelCategory) {
+                                AgentModelCategory.CHAT -> "输入对话内容（流式输出）…"
+                                AgentModelCategory.DECISION -> "输入决策问题（返回结构化 JSON）…"
+                                AgentModelCategory.AGENT -> "输入 Agent 任务指令…"
                             }
                             ChatInput(
                                 state = inputState,
@@ -420,23 +430,20 @@ fun AgentPage(id: Uuid) {
                                 assistant = agentAssistant,
                                 chatModel = resolvedChatModel,
                                 hazeState = hazeState,
-                                placeholderText = "输入 Agent 消息…",
+                                placeholderText = inputPlaceholder,
                                 alwaysShowReasoningButton = false,
                                 showReasoningButton = true,
                                 allowReasoningOff = selectedModelProvider?.id != CLAUDE_CODE_PROVIDER_ID,
                                 showAsrButton = false,
-                                modelTypes = setOf(ModelType.AGENT),
+                                modelTypes = setOf(ModelType.CHAT, ModelType.AGENT, ModelType.DECISION),
                                 onUpdateChatModel = vm::updateAgentModel,
                                 onUpdateAssistant = vm::updateAgentAssistant,
                                 onMoreClick = { showAttachSheet = true },
                                 onCancelClick = { vm.stopGeneration() },
                                 onSendClick = {
                                     val parts = inputState.getContents()
-                                    vm.sendMessage(parts) {
-                                        if (inputState.getContents() == parts) {
-                                            inputState.clearInput()
-                                            vm.saveDraft("")
-                                        }
+                                    if (vm.sendMessage(parts)) {
+                                        inputState.clearInput()
                                         scope.launch {
                                             delay(100.milliseconds)
                                             listState.requestScrollToItem(conversation.messageNodes.size + 5)
@@ -445,11 +452,8 @@ fun AgentPage(id: Uuid) {
                                 },
                                 onLongSendClick = {
                                     val parts = inputState.getContents()
-                                    vm.sendMessage(parts) {
-                                        if (inputState.getContents() == parts) {
-                                            inputState.clearInput()
-                                            vm.saveDraft("")
-                                        }
+                                    if (vm.sendMessage(parts)) {
+                                        inputState.clearInput()
                                     }
                                 },
                             )
@@ -862,3 +866,136 @@ private fun AgentPageMenu(
         }
     }
 }
+
+@Composable
+private fun DecisionSchemaBar(
+    schemaJson: String,
+    onUpdateSchema: (String) -> Unit,
+) {
+    var showEditor by remember { mutableStateOf(false) }
+    var draftSchema by remember(schemaJson) { mutableStateOf(schemaJson) }
+    var schemaError by remember { mutableStateOf<String?>(null) }
+
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        ) {
+            Tag(type = TagType.INFO) {
+                Text("Decision JSON")
+            }
+            Text(
+                text = if (schemaJson.isBlank()) "默认结构化决策输出" else "已配置自定义 Schema",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (schemaJson.isNotBlank()) {
+                TextButton(onClick = { onUpdateSchema("") }) {
+                    Text("清空")
+                }
+            }
+            TextButton(onClick = {
+                draftSchema = schemaJson
+                schemaError = null
+                showEditor = true
+            }) {
+                Text(if (schemaJson.isBlank()) "设置 Schema" else "编辑")
+            }
+        }
+    }
+
+    if (showEditor) {
+        val routePreset = """{"type":"OBJECT","properties":{"route":{"type":"STRING"},"confidence":{"type":"NUMBER"},"reason":{"type":"STRING"}},"required":["route","reason"]}"""
+        val scorePreset = """{"type":"OBJECT","properties":{"approved":{"type":"BOOLEAN"},"score":{"type":"INTEGER"},"summary":{"type":"STRING"}},"required":["approved","score"]}"""
+        AlertDialog(
+            onDismissRequest = { showEditor = false },
+            title = { Text("Decision JSON Schema") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        FilterChip(
+                            selected = draftSchema.isBlank(),
+                            onClick = {
+                                draftSchema = ""
+                                schemaError = null
+                            },
+                            label = { Text("自由 JSON") },
+                        )
+                        FilterChip(
+                            selected = draftSchema == routePreset,
+                            onClick = {
+                                draftSchema = routePreset
+                                schemaError = null
+                            },
+                            label = { Text("路由分类") },
+                        )
+                        FilterChip(
+                            selected = draftSchema == scorePreset,
+                            onClick = {
+                                draftSchema = scorePreset
+                                schemaError = null
+                            },
+                            label = { Text("评分审批") },
+                        )
+                    }
+                    OutlinedTextField(
+                        value = draftSchema,
+                        onValueChange = {
+                            draftSchema = it
+                            schemaError = null
+                        },
+                        label = { Text("responseSchema (可选)") },
+                        placeholder = { Text("留空则由模型自动决定 JSON 字段") },
+                        isError = schemaError != null,
+                        supportingText = schemaError?.let { err -> { Text(err) } },
+                        minLines = 4,
+                        maxLines = 8,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val trimmed = draftSchema.trim()
+                        if (trimmed.isEmpty()) {
+                            onUpdateSchema("")
+                            showEditor = false
+                        } else {
+                            val parsed = runCatching { JsonInstant.parseToJsonElement(trimmed).jsonObject }
+                            if (parsed.isSuccess) {
+                                onUpdateSchema(trimmed)
+                                showEditor = false
+                            } else {
+                                schemaError = "请输入有效的 JSON 对象"
+                            }
+                        }
+                    },
+                ) {
+                    Text("应用")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditor = false }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+}
+

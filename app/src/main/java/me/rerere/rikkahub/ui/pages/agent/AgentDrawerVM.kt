@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.insertSeparators
 import androidx.paging.map
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +20,7 @@ import kotlinx.coroutines.launch
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
-import me.rerere.rikkahub.data.agent.isAgentActiveStatus
+import me.rerere.rikkahub.data.agent.PocketBaseAgentCloudClient
 import me.rerere.rikkahub.data.datastore.ConversationSortOrder
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Folder
@@ -58,7 +57,7 @@ class AgentDrawerVM(
                 map.mapValues { (_, info) ->
                     val status = info.remoteStatus
                     when {
-                        status != null && isAgentActiveStatus(status) ->
+                        status != null && PocketBaseAgentCloudClient.isActiveStatus(status) ->
                             ConversationStatusBadge.RUNNING
                         status.equals("failed", ignoreCase = true) && info.hasUnread ->
                             ConversationStatusBadge.FAILED
@@ -184,35 +183,23 @@ class AgentDrawerVM(
         settingsStore.update { it.copy(conversationSortOrder = order) }
     }
 
-    private val _mutationError = MutableStateFlow<String?>(null)
-    val mutationError = _mutationError.asStateFlow()
-
-    fun dismissMutationError() {
-        _mutationError.value = null
-    }
-
-    fun setPinned(id: Uuid, pinned: Boolean) = mutate {
-        repository.setPinned(id, pinned)
-    }
-
-    fun rename(id: Uuid, title: String) = mutate {
-        if (title.isNotBlank()) repository.renameConversation(id, title)
-    }
-
-    fun delete(id: Uuid, onDeleted: () -> Unit) = mutate {
-        repository.deleteConversation(id)
-        onDeleted()
-    }
-
-    private fun mutate(action: suspend () -> Unit) {
+    fun setPinned(id: Uuid, pinned: Boolean) {
         viewModelScope.launch {
-            try {
-                action()
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                _mutationError.value = error.message ?: "ACP 会话更新失败"
-            }
+            repository.setPinned(id, pinned)
+        }
+    }
+
+    fun rename(id: Uuid, title: String) {
+        val trimmed = title.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            repository.renameConversation(id, trimmed)
+        }
+    }
+
+    fun delete(id: Uuid) {
+        viewModelScope.launch {
+            repository.deleteConversation(id)
         }
     }
 

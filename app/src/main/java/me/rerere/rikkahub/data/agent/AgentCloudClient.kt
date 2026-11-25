@@ -41,33 +41,6 @@ import kotlin.uuid.Uuid
 
 private const val GEMINI_API = "/api/anyworkflow/gemini"
 internal const val MAX_AGENT_IMAGES = 6
-
-// Top-level helpers used by both implementations and AgentRepository
-internal fun isAgentActiveStatus(status: String): Boolean = when (status) {
-    "queued", "dispatching", "pending", "running" -> true
-    else -> false
-}
-
-internal fun stableAgentUuid(seed: String): kotlin.uuid.Uuid {
-    val jUuid = java.util.UUID.nameUUIDFromBytes(seed.toByteArray(Charsets.UTF_8))
-    return kotlin.uuid.Uuid.fromLongs(jUuid.mostSignificantBits, jUuid.leastSignificantBits)
-}
-
-internal fun parseAgentIsoMillis(raw: String): Long {
-    if (raw.isBlank()) return 0L
-    return runCatching {
-        java.time.Instant.parse(raw.replace(' ', 'T')).toEpochMilli()
-    }.getOrElse {
-        runCatching {
-            java.time.OffsetDateTime.parse(raw.replace(' ', 'T'), java.time.format.DateTimeFormatter.ISO_DATE_TIME)
-                .toInstant().toEpochMilli()
-        }.getOrDefault(0L)
-    }
-}
-internal fun parseAgentLocalDateTime(raw: String): LocalDateTime =
-    kotlin.time.Instant.fromEpochMilliseconds(parseAgentIsoMillis(raw))
-        .toLocalDateTime(TimeZone.currentSystemDefault())
-
 private val r2AgentImageUrl = Regex(
     """https://file\.any1\.tech/api/library/image-sources/[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.(jpg|png|webp|gif)""",
 )
@@ -93,7 +66,6 @@ data class RemoteAgentThread(
     val pinned: Boolean,
     val folderId: String? = null,
     val hasFolderIdField: Boolean = false,
-    val hasMetadata: Boolean = true,
 )
 
 data class RemoteAgentFolder(
@@ -133,7 +105,7 @@ data class RemoteAgentConfig(
     val maxOutputTokens: Int = 8192,
 )
 
-data class RemoteAgentJob(
+data class RemoteGeminiJob(
     val id: String,
     val owner: String,
     val threadRoot: String,
@@ -165,7 +137,7 @@ data class RemoteHistoryTurn(
     val images: List<String> = emptyList(),
 )
 
-data class RemoteAgentMessage(
+data class RemoteGeminiMessage(
     val id: String,
     val owner: String,
     val job: String,
@@ -182,13 +154,13 @@ data class RemoteAgentMessage(
     val finishedAt: String,
     val updated: String,
     val streamRevision: Int?,
-    val usage: RemoteAgentUsage,
+    val usage: RemoteGeminiUsage,
     val agentSummaryJson: String? = null,
     val agentTimingsJson: String? = null,
     val timeline: AgentTimeline? = null,
 )
 
-data class RemoteAgentUsage(
+data class RemoteGeminiUsage(
     val totalTokenCount: Int = 0,
     val promptTokenCount: Int = 0,
     val candidatesTokenCount: Int = 0,
@@ -244,24 +216,13 @@ data class RemoteSubmittedJob(
     val status: String,
 )
 
-data class AgentApprovalOption(val id: String, val name: String)
-
-data class AgentApproval(
-    val jobId: String,
-    val id: String,
-    val title: String,
-    val options: List<AgentApprovalOption>,
-)
-
 data class RemoteThreadConversation(
-    val job: RemoteAgentJob,
-    val message: RemoteAgentMessage?,
+    val job: RemoteGeminiJob,
+    val message: RemoteGeminiMessage?,
     val messageNodes: List<MessageNode>,
     val isActive: Boolean,
     val parts: List<RemoteAgentPart>,
     val partsCursor: Int,
-    val pendingApproval: AgentApproval? = null,
-    val acpHistoryComplete: Boolean = false,
 )
 
 interface AgentCloudClient {
@@ -287,13 +248,9 @@ interface AgentCloudClient {
         thinkingLevelOverride: String? = null,
         systemPromptOverride: String? = null,
         initialHistory: List<RemoteHistoryTurn> = emptyList(),
-        threadRoot: String? = null,
-        agentId: String? = null,
     ): RemoteSubmittedJob
 
     suspend fun cancelJob(jobId: String)
-
-    suspend fun approveJob(approval: AgentApproval, optionId: String) {}
 
     suspend fun updateThreadMetadata(
         jobId: String,
@@ -311,8 +268,6 @@ interface AgentCloudClient {
 
     suspend fun deleteRemoteFolder(remoteId: String) {}
 
-    val supportsRecurringSchedules: Boolean get() = false
-
     suspend fun listSchedules(): List<AgentSchedule> = emptyList()
 
     suspend fun createSchedule(schedule: AgentSchedule): AgentSchedule = schedule
@@ -329,8 +284,8 @@ interface AgentCloudClient {
 
     fun buildAssistantUIMessage(
         messageId: Uuid,
-        job: RemoteAgentJob,
-        message: RemoteAgentMessage?,
+        job: RemoteGeminiJob,
+        message: RemoteGeminiMessage?,
         parts: List<RemoteAgentPart>,
     ): UIMessage
 }
@@ -467,8 +422,6 @@ class PocketBaseAgentCloudClient(
         thinkingLevelOverride: String?,
         systemPromptOverride: String?,
         initialHistory: List<RemoteHistoryTurn>,
-        threadRoot: String?,
-        agentId: String?,
     ): RemoteSubmittedJob = withContext(Dispatchers.IO) {
         val session = workflowRepository.requireSession()
         val config = fetchConfigBestEffort(session)
@@ -702,8 +655,8 @@ class PocketBaseAgentCloudClient(
 
     override fun buildAssistantUIMessage(
         messageId: Uuid,
-        job: RemoteAgentJob,
-        message: RemoteAgentMessage?,
+        job: RemoteGeminiJob,
+        message: RemoteGeminiMessage?,
         parts: List<RemoteAgentPart>,
     ): UIMessage {
         val uiParts = mutableListOf<UIMessagePart>()
@@ -844,10 +797,10 @@ class PocketBaseAgentCloudClient(
     }
 
     private fun buildConversationNodes(
-        job: RemoteAgentJob,
-        currentMessage: RemoteAgentMessage?,
+        job: RemoteGeminiJob,
+        currentMessage: RemoteGeminiMessage?,
         currentParts: List<RemoteAgentPart>,
-        ancestors: List<Pair<RemoteAgentJob, RemoteAgentMessage>>,
+        ancestors: List<Pair<RemoteGeminiJob, RemoteGeminiMessage>>,
         ancestorParts: Map<String, List<RemoteAgentPart>>,
     ): List<MessageNode> = buildList {
         // Prompt history can omit empty model replies. Its user entries still identify turns
@@ -883,8 +836,8 @@ class PocketBaseAgentCloudClient(
     }
 
     private fun buildTurnNodes(
-        job: RemoteAgentJob,
-        currentMessage: RemoteAgentMessage?,
+        job: RemoteGeminiJob,
+        currentMessage: RemoteGeminiMessage?,
         currentParts: List<RemoteAgentPart>,
     ): List<MessageNode> {
         val currentId = currentMessage?.id ?: job.id
@@ -949,7 +902,7 @@ class PocketBaseAgentCloudClient(
         }.getOrDefault(RemoteAgentConfig())
     }
 
-    private suspend fun fetchJobView(session: WorkflowSession, jobId: String): Pair<RemoteAgentJob, List<String>> {
+    private suspend fun fetchJobView(session: WorkflowSession, jobId: String): Pair<RemoteGeminiJob, List<String>> {
         val root = workflowRepository.executeJsonCancellable(
             baseUrl = session.baseUrl,
             path = "$GEMINI_API/jobs/$jobId",
@@ -964,7 +917,7 @@ class PocketBaseAgentCloudClient(
         return job to messageIds
     }
 
-    private suspend fun fetchMessage(session: WorkflowSession, jobId: String, messageId: String): RemoteAgentMessage {
+    private suspend fun fetchMessage(session: WorkflowSession, jobId: String, messageId: String): RemoteGeminiMessage {
         val obj = workflowRepository.executeJsonCancellable(
             baseUrl = session.baseUrl,
             path = "$GEMINI_API/jobs/$jobId/messages/$messageId",
@@ -1006,9 +959,9 @@ class PocketBaseAgentCloudClient(
 
     private suspend fun fetchAncestors(
         session: WorkflowSession,
-        job: RemoteAgentJob,
-    ): List<Pair<RemoteAgentJob, RemoteAgentMessage>> {
-        val ancestors = mutableListOf<Pair<RemoteAgentJob, RemoteAgentMessage>>()
+        job: RemoteGeminiJob,
+    ): List<Pair<RemoteGeminiJob, RemoteGeminiMessage>> {
+        val ancestors = mutableListOf<Pair<RemoteGeminiJob, RemoteGeminiMessage>>()
         val visited = HashSet<String>()
         var parentId = job.parentMessage
         // PocketBase caps prompt history at 40 entries. A failed turn can have only a user entry.
@@ -1055,7 +1008,7 @@ class PocketBaseAgentCloudClient(
             (element as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
         }
 
-    private fun parseJob(obj: JsonObject): RemoteAgentJob {
+    private fun parseJob(obj: JsonObject): RemoteGeminiJob {
         val sources = obj["sources"]?.jsonArray.orEmpty().mapNotNull { el ->
             val o = el as? JsonObject ?: return@mapNotNull null
             RemoteSourceRef(id = o.str("id"), name = o.str("name"))
@@ -1071,7 +1024,7 @@ class PocketBaseAgentCloudClient(
         val options = obj["options"] as? JsonObject
         val storedImages = options?.get("images")
         val images = parseImageReferences(storedImages) + parseImageReferences(obj["images"])
-        return RemoteAgentJob(
+        return RemoteGeminiJob(
             id = obj.str("id"),
             owner = obj.str("owner"),
             threadRoot = obj.str("threadRoot"),
@@ -1093,9 +1046,9 @@ class PocketBaseAgentCloudClient(
         )
     }
 
-    private fun parseMessage(obj: JsonObject): RemoteAgentMessage {
+    private fun parseMessage(obj: JsonObject): RemoteGeminiMessage {
         val usageObj = obj["usage"] as? JsonObject
-        val usage = RemoteAgentUsage(
+        val usage = RemoteGeminiUsage(
             totalTokenCount = usageObj?.get("totalTokenCount")?.jsonPrimitive?.intOrNull ?: 0,
             promptTokenCount = usageObj?.get("promptTokenCount")?.jsonPrimitive?.intOrNull ?: 0,
             candidatesTokenCount = usageObj?.get("candidatesTokenCount")?.jsonPrimitive?.intOrNull ?: 0,
@@ -1104,7 +1057,7 @@ class PocketBaseAgentCloudClient(
             toolUseTokenCount = usageObj?.get("toolUseTokenCount")?.jsonPrimitive?.intOrNull ?: 0,
             agentStepCount = usageObj?.get("agentStepCount")?.jsonPrimitive?.intOrNull ?: 0,
         )
-        return RemoteAgentMessage(
+        return RemoteGeminiMessage(
             id = obj.str("id"),
             owner = obj.str("owner"),
             job = obj.str("job"),
@@ -1168,8 +1121,6 @@ class PocketBaseAgentCloudClient(
         }
         return sb.toString()
     }
-
-    override val supportsRecurringSchedules get() = true
 
     override suspend fun listSchedules(): List<AgentSchedule> = withContext(Dispatchers.IO) {
         val session = workflowRepository.requireSession()
@@ -1416,11 +1367,11 @@ class PocketBaseAgentCloudClient(
 private fun JsonObject.str(key: String): String =
     this[key]?.let { (it as? JsonPrimitive)?.contentOrNull } ?: ""
 
-private fun RemoteAgentJob.displayModelId(): String =
+private fun RemoteGeminiJob.displayModelId(): String =
     agentModel.takeIf { isClaudeCodeModel(model) && it.isNotBlank() }
         ?: model.ifBlank { "Antigravity" }
 
-private fun agentModelDisplayName(job: RemoteAgentJob): String = when {
+private fun agentModelDisplayName(job: RemoteGeminiJob): String = when {
     isAntigravityCliModel(job.model) -> "Antigravity CLI"
     isCodexAgentModel(job.model) -> "Codex Agent"
     isCommandCodeModel(job.model) -> "Command Code"

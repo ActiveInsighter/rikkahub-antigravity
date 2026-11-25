@@ -31,7 +31,6 @@ val ANTIGRAVITY_CLI_PROVIDER_ID = Uuid.parse("a1000005-0000-4000-8000-0000000000
 
 val COMMAND_CODE_PROVIDER_ID = Uuid.parse("a1000006-0000-4000-8000-000000000006")
 val CLAUDE_CODE_PROVIDER_ID = Uuid.parse("a1000007-0000-4000-8000-000000000007")
-val OPENCODE_PROVIDER_ID = Uuid.parse("a1000009-0000-4000-8000-000000000009")
 val CLAUDE_CODE_GPT_PROVIDER_ID = Uuid.parse("a1000008-0000-4000-8000-000000000008")
 
 fun isClaudeCodeProvider(id: Uuid?): Boolean =
@@ -45,7 +44,6 @@ val TOP_AGENT_PROVIDER_IDS = listOf(
     COMMAND_CODE_PROVIDER_ID,
     CLAUDE_CODE_PROVIDER_ID,
     CLAUDE_CODE_GPT_PROVIDER_ID,
-    OPENCODE_PROVIDER_ID,
     DECISION_PROVIDER_ID,
 )
 
@@ -269,15 +267,6 @@ val DEFAULT_PROVIDERS = listOf(
                 outputModalities = listOf(Modality.TEXT),
                 abilities = listOf(ModelAbility.REASONING),
             ),
-            Model(
-                id = Uuid.parse("b1000007-0000-4000-8000-000000000003"),
-                modelId = "Claude Code",
-                displayName = "Claude Code (服务端默认)",
-                type = ModelType.AGENT,
-                inputModalities = listOf(Modality.TEXT),
-                outputModalities = listOf(Modality.TEXT),
-                abilities = listOf(ModelAbility.REASONING),
-            ),
         ),
         shortDescription = {
             Text("Claude Code Agent · Claude Sonnet/Opus 5.5")
@@ -285,7 +274,7 @@ val DEFAULT_PROVIDERS = listOf(
     ),
     ProviderSetting.Google(
         id = CLAUDE_CODE_GPT_PROVIDER_ID,
-        name = "Codex GPT-6.2",
+        name = "Claude Code GPT",
         baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
         apiKey = "",
         enabled = true,
@@ -311,27 +300,8 @@ val DEFAULT_PROVIDERS = listOf(
             ),
         ),
         shortDescription = {
-            Text("Codex Agent · GPT-6.2 Sol/Astra")
+            Text("Claude Code Agent · GPT-6.2 Sol/Astra")
         },
-    ),
-    ProviderSetting.Google(
-        id = OPENCODE_PROVIDER_ID,
-        name = "OpenCode",
-        baseUrl = DEFAULT_GEMINI_GATEWAY_URL,
-        apiKey = "",
-        enabled = true,
-        builtIn = true,
-        models = listOf(
-            Model(
-                id = Uuid.parse("b1000009-0000-4000-8000-000000000001"),
-                modelId = "OpenCode",
-                displayName = "OpenCode",
-                type = ModelType.AGENT,
-                inputModalities = listOf(Modality.TEXT),
-                outputModalities = listOf(Modality.TEXT),
-            ),
-        ),
-        shortDescription = { Text("OpenCode · ACP") },
     ),
     ProviderSetting.Google(
         id = DECISION_PROVIDER_ID,

@@ -97,7 +97,7 @@ fun AgentWorkflowPage() {
                 subtitle = { Text("定时执行任务") },
                 navigationIcon = { BackButton() },
                 actions = {
-                    if (backendNotice == null) IconButton(onClick = { vm.refresh() }) {
+                    IconButton(onClick = { vm.refresh() }) {
                         Icon(
                             imageVector = HugeIcons.Refresh03,
                             contentDescription = "刷新",
@@ -109,7 +109,7 @@ fun AgentWorkflowPage() {
             )
         },
         floatingActionButton = {
-            if (backendNotice == null) FloatingActionButton(
+            FloatingActionButton(
                 onClick = {
                     editingSchedule = AgentSchedule(
                         id = "",

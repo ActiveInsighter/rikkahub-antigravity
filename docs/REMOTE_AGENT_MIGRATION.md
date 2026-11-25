@@ -18,12 +18,3 @@ Android 的 Agent 模块通过 AnyWorkflow 的 PocketBase hooks 提交任务，�
 2026-11-25，将远程开发 Worker 发布到独立的 workers.dev 地址，并绑定 `rikka-agent-tasks`、`rikka-agent-delay` 和私有 R2 桶 `rikka-agent-private`。已有 PocketBase 实例完成在线备份后加载新增 hooks，Gateway 以 `rikka-agent` 专用用户运行。主 Agent 账号已登记公开的 RikkaHub Antigravity 项目。
 
 五个 Agent 均通过生产链路读取该项目、调用 Git 并恢复 ACP 会话。生产 R2 的授权上传和下载已通过，原 Android 线程接口的授权读取返回 HTTP 200。GitHub 私有仓库和写入凭据需要按项目单独配置。
-
-
-## Android Agent 页切换
-
-主 Agent 页首条消息通过 ACP 创建会话和任务。客户端将会话 ID 写入 Room，后续发送把新任务提交到同一个会话。Gateway 从该会话的持久记录加载适配器的原生会话 ID 和 Worktree。历史同步按任务和事件游标恢复消息，继续轮询直到终态事件读完。
-
-Android 复用 AnyWorkflow 登录。未迁移的旧 Agent 会话保留本地历史，需要从新会话启动 ACP。周期任务仍需服务端提供相应接口。
-
-2026-11-25 生产部署：PocketBase 0.40.4 在停止服务、记录备份后应用了 `1795570100_remote_session_metadata.js`，并安装了更新后的 `remote_agent.js` hooks。已确认 `aw_remote_sessions` 新增 `pinned`、`deleted`、`originalTitle` 三列并写入迁移账本，原有 7 个会话保持可读。会话重命名、置顶、软删除及重命名后按原请求键重发创建请求均已在生产链路实测通过（重命名/置顶返回更新后的会话，删除后不再出现在列表且详情返回 404）。
