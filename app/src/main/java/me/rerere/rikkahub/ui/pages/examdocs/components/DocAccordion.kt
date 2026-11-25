@@ -1,5 +1,8 @@
 package me.rerere.rikkahub.ui.pages.examdocs.components
 
+import androidx.compose.runtime.LaunchedEffect
+import me.rerere.rikkahub.ui.pages.examdocs.LocalDocsQuestionJump
+import me.rerere.rikkahub.ui.pages.examdocs.containsDockQuestion
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
@@ -38,6 +41,11 @@ internal fun DocAccordion(
     defaultExpanded: Boolean = false,
 ) {
     var expanded by rememberSaveable(block.title, block.type) { mutableStateOf(defaultExpanded) }
+    val jump = LocalDocsQuestionJump.current
+    LaunchedEffect(jump) {
+        val target = jump?.block ?: return@LaunchedEffect
+        if (containsDockQuestion(block, target)) expanded = true
+    }
     val rotation by animateFloatAsState(if (expanded) 90f else 0f, label = "DocAccordionArrow")
     val isSolution = block.type == "solution"
     val defaultTitle = if (isSolution) "参考答案与解析" else "展开详情"

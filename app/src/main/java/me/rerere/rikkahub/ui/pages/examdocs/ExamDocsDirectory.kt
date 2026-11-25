@@ -1,5 +1,11 @@
 package me.rerere.rikkahub.ui.pages.examdocs
 
+import androidx.compose.material3.HorizontalDivider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import me.rerere.hugeicons.stroke.UserCircle
+import me.rerere.rikkahub.data.examdocs.DocsAccountRepository
+import me.rerere.rikkahub.data.examdocs.supportsCloudProgress
+import org.koin.compose.koinInject
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandHorizontally
@@ -77,13 +83,14 @@ internal fun ExamDocsDirectorySheet(
     onSelectModule: (Int) -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onRetry: () -> Unit,
+    onAccount: () -> Unit,
     onSelectPage: (ExamDocNode.Page) -> Unit,
 ) {
     val currentUrl = state.currentPage?.url
     val error = state.treeError
     Column(
-        Modifier.fillMaxWidth().fillMaxHeight(0.86f).padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.fillMaxWidth().fillMaxHeight().padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -98,6 +105,8 @@ internal fun ExamDocsDirectorySheet(
             DocsSiteSelector(state.sites, state.activeSite, onSelectSite)
         }
 
+        if (state.activeSite.supportsCloudProgress()) DocsDrawerAccount(onAccount)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
         OutlinedTextField(
             value = state.searchQuery,
             onValueChange = onSearchQueryChange,
@@ -340,7 +349,7 @@ private fun DirectoryTree(
                 expanded = entry.expanded,
                 modifier = Modifier
                     .animateItem()
-                    .padding(start = (entry.depth.coerceAtMost(10) * 14).dp),
+                    .padding(start = (entry.depth.coerceAtMost(6) * 10).dp),
                 onClick = {
                     when (node) {
                         is ExamDocNode.Folder -> overrides[entry.key] = !entry.expanded
@@ -445,6 +454,33 @@ private fun DirectoryRow(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DocsDrawerAccount(onClick: () -> Unit) {
+    val account by koinInject<DocsAccountRepository>().state.collectAsStateWithLifecycle()
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(HugeIcons.UserCircle, null, Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(account.user?.email ?: "Exam Docs 账号", style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(when {
+                    account.restoring -> "正在读取账号…"
+                    account.needsLogin -> "登录已过期 · 重新登录"
+                    account.user != null -> "已登录 · 管理同步"
+                    else -> "访客模式 · 登录同步进度"
+                }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(HugeIcons.ArrowRight01, "账号设置", Modifier.size(18.dp))
         }
     }
 }

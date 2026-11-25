@@ -1,5 +1,13 @@
 package me.rerere.rikkahub.ui.pages.examdocs
 
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.PermanentNavigationDrawer
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.widthIn
 import android.content.ClipData
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -102,7 +110,7 @@ import org.koin.core.parameter.parametersOf
 
 private val externalLinkSchemes = setOf("https", "http", "mailto", "tel")
 
-private enum class ReaderSheet { Directory, Outline }
+private enum class ReaderSheet { Outline }
 
 @Composable
 fun ExamDocsPage(
@@ -122,6 +130,9 @@ fun ExamDocsPage(
         value = true
     }
     var sheet by rememberSaveable { mutableStateOf<ReaderSheet?>(null) }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val wide = LocalWindowInfo.current.containerDpSize.width >= 840.dp
+    val openDirectory: () -> Unit = { if (!wide) scope.launch { drawerState.open() } }
     val page = state.currentPage
     val document = state.document
     val listState = key(state.activeSite.baseUrl, page?.url) { rememberLazyListState() }
@@ -150,6 +161,26 @@ fun ExamDocsPage(
         }
     }
 
+    val drawerContent: @Composable () -> Unit = {
+        ModalDrawerSheet(modifier = Modifier.width(300.dp)) {
+            ExamDocsDirectorySheet(
+                state = state,
+                onSelectSite = vm::switchSite,
+                onSelectModule = vm::selectModule,
+                onSearchQueryChange = vm::updateSearchQuery,
+                onRetry = vm::reload,
+                onAccount = {
+                    scope.launch { drawerState.close() }
+                    navController.navigate(Screen.ExamDocsAccount)
+                },
+                onSelectPage = {
+                    scope.launch { drawerState.close() }
+                    vm.openPage(it)
+                },
+            )
+        }
+    }
+    val readerContent: @Composable () -> Unit = {
     Surface(
         color = MaterialTheme.colorScheme.background,
         modifier = Modifier.fillMaxSize(),
@@ -161,14 +192,14 @@ fun ExamDocsPage(
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                     navigationIcon = {
-                        ChatTopBarCapsule(
+                        if (!wide) ChatTopBarCapsule(
                             hazeState = hazeState,
                             displaySetting = docsDisplaySetting,
                             showBackground = listScrolledUnderTopBar,
                             modifier = Modifier.padding(start = 8.dp, end = 4.dp),
                         ) {
                             IconButton(
-                                onClick = { sheet = ReaderSheet.Directory },
+                                onClick = { openDirectory() },
                                 enabled = state.sitesReady,
                             ) {
                                 Icon(HugeIcons.LeftToRightListBullet, "文档目录")
@@ -177,7 +208,7 @@ fun ExamDocsPage(
                     },
                     title = {
                         Surface(
-                            onClick = { if (state.sitesReady) sheet = ReaderSheet.Directory },
+                            onClick = { if (state.sitesReady) openDirectory() },
                             color = Color.Transparent,
                             shape = RoundedCornerShape(16.dp),
                         ) {
@@ -286,12 +317,17 @@ fun ExamDocsPage(
                             title = "文档加载失败",
                             message = contentError,
                             onRetry = vm::reload,
-                            onSecondaryAction = { sheet = ReaderSheet.Directory },
+                            onSecondaryAction = { openDirectory() },
                             secondaryLabel = "打开目录",
                         )
                     }
                     document != null && page != null -> CompositionLocalProvider(LocalSettings provides docsSettings) {
                         ExamDocsProgressProvider(state.activeSite, page.url, document) {
+                            var jump by remember(document) { mutableStateOf<DocsQuestionJump?>(null) }
+                            val topOffset = with(LocalDensity.current) { (innerPadding.calculateTopPadding() + 12.dp).roundToPx() }
+                            val questions = remember(document) { indexDockQuestions(document.blocks) }
+                            CompositionLocalProvider(LocalDocsQuestionJump provides jump) {
+                            Box(Modifier.fillMaxSize()) {
                             ExamDocsArticle(
                                 document = document,
                                 listState = listState,
@@ -305,34 +341,41 @@ fun ExamDocsPage(
                                 next = state.nextPage,
                                 onPage = vm::openPage,
                                 onLink = vm::openLink,
+                                extraBottomPadding = if (questions.isNotEmpty()) 84.dp else 0.dp,
                             )
+                            if (questions.isNotEmpty()) {
+                                ExamDocsQuestionDock(
+                                    questions = questions,
+                                    listState = listState,
+                                    hazeState = hazeState,
+                                    displaySetting = docsDisplaySetting,
+                                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = innerPadding.calculateBottomPadding() + 16.dp),
+                                    onJump = { question ->
+                                        jump = DocsQuestionJump(question.block, (jump?.sequence ?: 0) + 1)
+                                        scope.launch { listState.scrollToItem(question.blockIndex, -topOffset) }
+                                    },
+                                )
+                            }
+                            }
+                            }
                         }
                     }
                     else -> Box(Modifier.padding(innerPadding)) {
-                        Button(onClick = { sheet = ReaderSheet.Directory }) { Text("浏览文档目录") }
+                        Button(onClick = { openDirectory() }) { Text("浏览文档目录") }
                     }
                 }
             }
         }
     }
 
+    }
+    if (wide) {
+        PermanentNavigationDrawer(drawerContent = drawerContent, content = readerContent)
+    } else {
+        ModalNavigationDrawer(drawerState = drawerState, drawerContent = drawerContent, content = readerContent)
+    }
+
     when (sheet) {
-        ReaderSheet.Directory -> ModalBottomSheet(
-            onDismissRequest = { sheet = null },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        ) {
-            ExamDocsDirectorySheet(
-                state = state,
-                onSelectSite = vm::switchSite,
-                onSelectModule = vm::selectModule,
-                onSearchQueryChange = vm::updateSearchQuery,
-                onRetry = vm::reload,
-                onSelectPage = {
-                    sheet = null
-                    vm.openPage(it)
-                },
-            )
-        }
         ReaderSheet.Outline -> ModalBottomSheet(onDismissRequest = { sheet = null }) {
             val activeHeadingIndex = remember(document?.headings, listState.firstVisibleItemIndex) {
                 val headings = document?.headings.orEmpty()
@@ -359,6 +402,7 @@ private fun ExamDocsArticle(
     hazeState: HazeState,
     topPadding: Dp,
     bottomPadding: Dp,
+    extraBottomPadding: Dp = 0.dp,
     fontSizeRatio: Float,
     previous: ExamDocNode.Page?,
     next: ExamDocNode.Page?,
@@ -404,7 +448,7 @@ private fun ExamDocsArticle(
                     start = 16.dp,
                     end = 16.dp,
                     top = topPadding + 14.dp,
-                    bottom = bottomPadding + 28.dp,
+                    bottom = bottomPadding + 28.dp + extraBottomPadding,
                 ),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {

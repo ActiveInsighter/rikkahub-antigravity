@@ -1,5 +1,6 @@
 package me.rerere.rikkahub.ui.components.ai
 
+import androidx.compose.ui.draw.shadow
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
@@ -40,6 +41,7 @@ fun ChatTopBarCapsule(
                 modifier = Modifier
                     .matchParentSize()
                     .graphicsLayer { alpha = backgroundAlpha }
+                    .shadow(3.dp, CircleShape, clip = false)
                     .clip(CircleShape)
                     .chatInputHaze(
                         hazeState = hazeState,

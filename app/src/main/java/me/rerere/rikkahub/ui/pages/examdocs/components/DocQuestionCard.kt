@@ -1,5 +1,9 @@
 package me.rerere.rikkahub.ui.pages.examdocs.components
 
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import me.rerere.rikkahub.ui.pages.examdocs.LocalDocsQuestionJump
+import kotlinx.coroutines.delay
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
@@ -114,7 +118,7 @@ private enum class SelfGradeOption(val letter: String, val label: String, val re
     Incorrect("C", "错误", GradeResult.Incorrect),
 }
 
-private enum class GradeResult(val icon: ImageVector) {
+internal enum class GradeResult(val icon: ImageVector) {
     Correct(HugeIcons.CheckmarkCircle02),
     Partial(HugeIcons.Alert02),
     Missed(HugeIcons.Alert02),
@@ -329,9 +333,17 @@ internal fun DocQuestionCard(
         }
     }
     val hasActions = result != null || multiple || blankCount > 0 || solution != null
+    val jump = LocalDocsQuestionJump.current
+    val requester = remember { BringIntoViewRequester() }
+    LaunchedEffect(jump) {
+        if (jump?.block === block) {
+            delay(400)
+            requester.bringIntoView()
+        }
+    }
 
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().bringIntoViewRequester(requester),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.extraLarge,
     ) {
@@ -891,4 +903,36 @@ private fun countBlankPlaceholders(segment: ExamDocsSegment): Int = when (segmen
         } else 0
     }
     is ExamDocsSegment.CustomBlock -> segment.blocks.sumOf(::countBlankPlaceholders)
+}
+
+/** Grade a saved answer with the same normalization and verdict rules as the card. */
+internal fun savedQuestionGrade(block: ExamDocsSegment.CustomBlock, answer: DocsAnswerState): GradeResult? {
+    if (!answer.submitted) return null
+    val kind = QuestionKind.entries.firstOrNull { it.name.equals(block.attrs["type"], ignoreCase = true) } ?: QuestionKind.Essay
+    if (kind == QuestionKind.Essay) {
+        SelfGradeOption.entries.firstOrNull { it.letter == answer.selected.firstOrNull() }?.let { return it.result }
+    }
+    val correct = if (kind == QuestionKind.Boolean) {
+        when (block.attrs["answer"]?.lowercase()?.toBooleanStrictOrNull()) {
+            true -> setOf("A")
+            false -> setOf("B")
+            null -> emptySet()
+        }
+    } else {
+        block.blocks.filterIsInstance<ExamDocsSegment.CustomBlock>().filter { it.type == "option" }
+            .mapIndexedNotNull { index, option ->
+                (option.attrs["label"] ?: ('A' + index).toString()).takeIf { option.attrs["correct"] == "true" }
+            }.toSet()
+    }
+    val keys = block.attrs["blanks"]?.let { runCatching { Json.decodeFromString<List<BlankKey>>(it) }.getOrNull() }.orEmpty()
+    val stem = block.blocks.filterNot { it is ExamDocsSegment.CustomBlock && (it.type == "option" || it.type == "solution") }
+    val count = if (kind == QuestionKind.Blank) maxOf(1, keys.size, stem.sumOf(::countBlankPlaceholders)) else 0
+    val matches = List(count) { index ->
+        when {
+            "blank:$index:correct" in answer.selected -> true
+            "blank:$index:incorrect" in answer.selected -> false
+            else -> keys.getOrNull(index)?.matches(answer.values.getOrElse(index) { "" })
+        }
+    }
+    return gradeAnswer(answer.selected, correct, matches).grade
 }
