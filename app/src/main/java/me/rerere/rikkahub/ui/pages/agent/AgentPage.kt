@@ -403,10 +403,6 @@ fun AgentPage(id: Uuid) {
                                             renameText = conversation.title
                                             showRenameDialog = true
                                         },
-                                        onOpenRemote = {
-                                            if (session == null) vm.openConnectDialog()
-                                            else navController.navigate(Screen.RemoteAgent)
-                                        },
                                         onOpenSettings = { navController.navigate(Screen.AgentSetting) },
                                         onClear = { showClearConfirm = true },
                                     )
@@ -783,7 +779,6 @@ private fun AgentPageMenu(
     onTogglePreview: () -> Unit,
     onSyncOrConnect: () -> Unit,
     onRename: () -> Unit,
-    onOpenRemote: () -> Unit,
     onOpenSettings: () -> Unit,
     onClear: () -> Unit,
 ) {
@@ -845,21 +840,14 @@ private fun AgentPageMenu(
                     text = "重命名会话",
                     icon = HugeIcons.PencilEdit01,
                     index = 2,
-                    count = 5,
+                    count = 4,
                     onClick = onRename,
-                )
-                MenuItem(
-                    text = "ACP 远程开发",
-                    icon = HugeIcons.LeftToRightListBullet,
-                    index = 3,
-                    count = 5,
-                    onClick = onOpenRemote,
                 )
                 MenuItem(
                     text = "Agent 设置",
                     icon = HugeIcons.Settings03,
-                    index = 4,
-                    count = 5,
+                    index = 3,
+                    count = 4,
                     onClick = onOpenSettings,
                 )
             }
