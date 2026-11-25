@@ -124,7 +124,7 @@ val repositoryModule = module {
     }
 
     single<me.rerere.rikkahub.data.agent.AgentCloudClient> {
-        me.rerere.rikkahub.data.agent.PocketBaseAgentCloudClient(get())
+        me.rerere.rikkahub.data.agent.AcpAgentCloudClient(get(), get())
     }
 
     single {
