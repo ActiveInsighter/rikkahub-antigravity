@@ -112,28 +112,7 @@ internal fun TopBarMoreMenu(
             groups.forEachIndexed { groupIndex, items ->
                 if (groupIndex > 0) Spacer(Modifier.height(MenuDefaults.GroupSpacing))
                 val groupShapes = MenuDefaults.groupShape(index = groupIndex, count = groups.size)
-                val menuShape = groupShapes.toRoundedCornerShape()
-                DropdownMenuGroup(
-                    shapes = groupShapes,
-                    modifier = if (styled) {
-                        Modifier.topBarMenuHaze(
-                            hazeState = hazeState,
-                            displaySetting = displaySetting,
-                            containerColor = baseContainerColor,
-                            shape = menuShape,
-                        )
-                    } else {
-                        Modifier
-                    },
-                    containerColor = if (styled) {
-                        topBarMenuGroupContainerColor(displaySetting, baseContainerColor)
-                    } else {
-                        MenuDefaults.groupStandardContainerColor
-                    },
-                    tonalElevation = if (styled) 0.dp else MenuDefaults.GroupTonalElevation,
-                    shadowElevation = if (styled) 0.dp else MenuDefaults.GroupShadowElevation,
-                    border = if (styled) topBarMenuGroupBorder(displaySetting) else null,
-                ) {
+                val groupContent: @Composable () -> Unit = {
                     items.forEachIndexed { index, item ->
                         DropdownMenuItem(
                             text = { Text(item.label) },
@@ -151,6 +130,28 @@ internal fun TopBarMoreMenu(
                                 MenuDefaults.itemColors()
                             },
                         )
+                    }
+                }
+                if (styled) {
+                    val menuShape = groupShapes.toRoundedCornerShape()
+                    DropdownMenuGroup(
+                        shapes = groupShapes,
+                        modifier = Modifier.topBarMenuHaze(
+                            hazeState = hazeState,
+                            displaySetting = displaySetting,
+                            containerColor = baseContainerColor,
+                            shape = menuShape,
+                        ),
+                        containerColor = topBarMenuGroupContainerColor(displaySetting, baseContainerColor),
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp,
+                        border = topBarMenuGroupBorder(displaySetting),
+                    ) {
+                        groupContent()
+                    }
+                } else {
+                    DropdownMenuGroup(shapes = groupShapes) {
+                        groupContent()
                     }
                 }
             }
