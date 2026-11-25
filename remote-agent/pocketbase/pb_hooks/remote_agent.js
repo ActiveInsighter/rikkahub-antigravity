@@ -30,6 +30,10 @@ function save(app, record, values) {
 function create(app, collection, values) {
   return save(app, new Record(app.findCollectionByNameOrId(collection)), values);
 }
+function visibleSession(record) {
+  if (record.getBool('deleted')) throw new NotFoundError();
+  return record;
+}
 function json(record, key, fallback) {
   return JSON.parse(record.getString(key) || 'null') ?? fallback;
 }
@@ -39,7 +43,8 @@ function projectView(record) {
 function sessionView(record) {
   return {
     id: record.id, projectId: record.getString('project'), agent: record.getString('agent'),
-    title: record.getString('title'), options: json(record, 'options', []), updated: record.getString('updated'),
+    title: record.getString('title'), pinned: record.getBool('pinned'), options: json(record, 'options', []),
+    created: record.getString('created'), updated: record.getString('updated'),
   };
 }
 function taskView(record) {
@@ -144,11 +149,17 @@ function publicRequest(e) {
       return pageOf(projects, 'owner = {:owner} && enabled = true', { owner }, '+name,+id', projectView);
     }
     if (group === 'sessions' && path.length === 1) {
-      return pageOf(sessions, 'owner = {:owner}', { owner }, '-created,-id', sessionView);
+      return pageOf(sessions, 'owner = {:owner} && deleted = false', { owner }, '-created,-id', record => {
+        const task = find(app, tasks, 'session = {:session}', { session: record.id }, '-created,-id')[0];
+        return {
+          ...sessionView(record),
+          latestTask: task ? { id: task.id, state: task.getString('state'), created: task.getString('created') } : null,
+        };
+      });
     }
-    if (group === 'sessions' && path.length === 2) return sessionView(owned(app, sessions, id, owner));
+    if (group === 'sessions' && path.length === 2) return sessionView(visibleSession(owned(app, sessions, id, owner)));
     if (group === 'sessions' && path.length === 3 && action === 'tasks') {
-      owned(app, sessions, id, owner);
+      visibleSession(owned(app, sessions, id, owner));
       return pageOf(tasks, 'owner = {:owner} && session = {:id}', { owner, id }, '-created,-id', taskView);
     }
     if (group === 'tasks' && path.length === 2) return taskView(owned(app, tasks, id, owner));
@@ -175,14 +186,37 @@ function publicRequest(e) {
       const requestKey = keys(body);
       const existing = find(tx, sessions, 'owner = {:owner} && requestKey = {:requestKey}', { owner, requestKey })[0];
       if (existing) {
+        visibleSession(existing);
+        const originalTitle = existing.getString('originalTitle') || existing.getString('title');
         if (existing.getString('project') !== project.id || existing.getString('agent') !== agent ||
-          existing.getString('title') !== title) conflict('Idempotency key already used with different arguments');
+          originalTitle !== title) conflict('Idempotency key already used with different arguments');
         return sessionView(existing);
       }
       return sessionView(create(tx, sessions, { owner, project: project.id, agent, title, requestKey }));
     }
     if (group === 'sessions' && path.length === 3 && action === 'tasks') {
-      return newTask(tx, owner, owned(tx, sessions, id, owner), body);
+      return newTask(tx, owner, visibleSession(owned(tx, sessions, id, owner)), body);
+    }
+    if (group === 'sessions' && path.length === 3 && action === 'metadata') {
+      const session = visibleSession(owned(tx, sessions, id, owner));
+      if (body.title !== undefined) {
+        const title = checkedText(body.title, 120, 'title');
+        if (!session.getString('originalTitle')) session.set('originalTitle', session.getString('title'));
+        session.set('title', title);
+      }
+      if (body.pinned !== undefined) {
+        if (typeof body.pinned !== 'boolean') reject('Invalid pinned value');
+        session.set('pinned', body.pinned);
+      }
+      tx.save(session);
+      return sessionView(session);
+    }
+    if (group === 'sessions' && path.length === 3 && action === 'delete') {
+      const session = owned(tx, sessions, id, owner);
+      const pending = find(tx, tasks, 'session = {:id} && (state = "scheduled" || state = "queued" || state = "running" || state = "canceling")', { id })[0];
+      if (pending) conflict('Cancel the active session tasks before deleting');
+      if (!session.getBool('deleted')) save(tx, session, { deleted: true });
+      return { id, deleted: true };
     }
     if (group !== 'tasks') throw new NotFoundError();
     const task = owned(tx, tasks, id, owner);
@@ -194,7 +228,7 @@ function publicRequest(e) {
     }
     if (path.length === 3 && action === 'retry') {
       if (!['failed', 'canceled', 'interrupted'].includes(state)) conflict('Task cannot be retried');
-      return newTask(tx, owner, owned(tx, sessions, task.getString('session'), owner), body, task);
+      return newTask(tx, owner, visibleSession(owned(tx, sessions, task.getString('session'), owner)), body, task);
     }
     if (path.length === 4 && action === 'approvals') {
       if (state !== 'running' || task.getString('approvalId') !== approvalId) conflict('Approval is closed');

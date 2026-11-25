@@ -29,19 +29,12 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
 import me.rerere.ai.ui.ModelSnapshot
-import me.rerere.ai.ui.StreamChunkHandler
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.rikkahub.data.agent.AgentApproval
+import me.rerere.rikkahub.data.agent.acpAgentName
 import me.rerere.rikkahub.data.agent.AgentAssistantEntity
-import me.rerere.rikkahub.data.agent.AGENT_PROVIDER_TYPE_ANTHROPIC
-import me.rerere.rikkahub.data.agent.AGENT_PROVIDER_TYPE_GEMINI
 import me.rerere.rikkahub.data.agent.AgentConversationSnapshot
-import me.rerere.rikkahub.data.agent.AgentGatewayClient
-import me.rerere.rikkahub.data.agent.AgentModelCategory
-import me.rerere.rikkahub.data.agent.AgentModelEntity
-import me.rerere.rikkahub.data.agent.ANTIGRAVITY_CLI_MODEL
-import me.rerere.rikkahub.data.agent.CLAUDE_CODE_MODEL
-import me.rerere.rikkahub.data.agent.COMMAND_CODE_MODEL
 import me.rerere.rikkahub.data.agent.isAntigravityAgentModel
 import me.rerere.rikkahub.data.agent.isAntigravityCliModel
 import me.rerere.rikkahub.data.agent.isCodexAgentModel
@@ -49,17 +42,15 @@ import me.rerere.rikkahub.data.agent.isCommandCodeModel
 import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
 import me.rerere.rikkahub.data.agent.AgentUiSettings
-import me.rerere.rikkahub.data.agent.DEFAULT_AGENT_MODELS
-import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
-import me.rerere.rikkahub.data.agent.MAX_AGENT_IMAGES
 import me.rerere.rikkahub.data.agent.RemoteAgentSourceInput
 import me.rerere.rikkahub.data.agent.RemoteHistoryTurn
 import me.rerere.rikkahub.data.agent.isAgentImageUrl
 import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_CLI_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.ANTIGRAVITY_PROVIDER_ID
-import me.rerere.rikkahub.data.datastore.CLAUDE_CODE_PROVIDER_ID
+import me.rerere.rikkahub.data.datastore.CLAUDE_CODE_GPT_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.CODEX_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.COMMAND_CODE_PROVIDER_ID
+import me.rerere.rikkahub.data.datastore.OPENCODE_PROVIDER_ID
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.TOP_AGENT_PROVIDER_IDS
@@ -84,7 +75,6 @@ class AgentVM(
     private val settingsStore: AgentSettingsStore,
     private val globalSettingsStore: SettingsStore,
     private val workflowRepository: WorkflowRepository,
-    private val gatewayClient: AgentGatewayClient,
 ) : ViewModel() {
     private val conversationId: Uuid = Uuid.parse(id)
 
@@ -114,18 +104,13 @@ class AgentVM(
     val selectedModel: StateFlow<Model?> = _selectedModel.asStateFlow()
 
     private val snapshot = MutableStateFlow<AgentConversationSnapshot?>(null)
-    private val localGeneration: StateFlow<me.rerere.rikkahub.data.agent.LocalGenerationState?> =
-        repository.localGenerations
-            .map { it[conversationId] }
-            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private val _pendingRemoteSubmission = MutableStateFlow<Pair<Uuid, Long>?>(null)
 
     val isGenerating: StateFlow<Boolean> = combine(
         snapshot,
         repository.submittingIds,
-        localGeneration,
-    ) { cached, submitting, localGen ->
-        cached?.isActive == true || conversationId in submitting || localGen != null
+    ) { cached, submitting ->
+        cached?.isActive == true || conversationId in submitting
     }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private val _isSyncing = MutableStateFlow(false)
@@ -137,10 +122,9 @@ class AgentVM(
     val activeStatusText: StateFlow<String?> = combine(
         isGenerating,
         snapshot,
-        localGeneration,
         repository.submittingStartedAt,
         _pendingRemoteSubmission,
-    ) { generating, cached, localGen, submittingMap, pendingRemote ->
+    ) { generating, cached, submittingMap, pendingRemote ->
         if (!generating) {
             _pendingRemoteSubmission.value = null
             null
@@ -150,7 +134,6 @@ class AgentVM(
                 node.messages.any { it.id == pendingRemote.first }
             } == true
             when {
-                localGen != null -> localGen.startedAt
                 submittingStart != null -> submittingStart
                 pendingRemote != null && !pendingHasLanded -> pendingRemote.second
                 else -> {
@@ -203,7 +186,7 @@ class AgentVM(
     val uiSettings: StateFlow<AgentUiSettings> = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, settingsStore.current)
 
-    private val allowedModelTypes = setOf(ModelType.CHAT, ModelType.AGENT, ModelType.DECISION)
+    private val allowedModelTypes = setOf(ModelType.AGENT)
 
     val resolvedChatModel: StateFlow<Model?> = combine(
         _agentAssistant,
@@ -224,7 +207,7 @@ class AgentVM(
                 if (topIdx >= 0) topIdx else Int.MAX_VALUE
             }
             .flatMap { it.models.asSequence() }
-            .firstOrNull { it.type in allowedModelTypes }
+            .firstOrNull { it.type in allowedModelTypes && it.modelId == "Antigravity" }
         byAssistant ?: byManual ?: fallback
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
@@ -235,27 +218,21 @@ class AgentVM(
         model?.findProvider(providers = settings.providers, checkOverwrite = false)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    val selectedModelCategory: StateFlow<AgentModelCategory> = resolvedChatModel
-        .map { model ->
-            when (model?.type) {
-                ModelType.AGENT -> AgentModelCategory.AGENT
-                ModelType.DECISION -> AgentModelCategory.DECISION
-                ModelType.CHAT -> AgentModelCategory.CHAT
-                else -> AgentModelCategory.AGENT
+    val sessionAgentName = snapshot.map { cached ->
+        if (cached?.remoteJobId == null) null else cached.conversation.messageNodes.lastOrNull()
+            ?.currentMessage?.modelSnapshot?.displayName
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val pendingApproval = repository.approvals.map { it[conversationId] }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun approve(approval: AgentApproval, optionId: String) {
+        viewModelScope.launch {
+            repository.approveConversationJob(conversationId, approval, optionId).onFailure {
+                _errorMessage.value = it.message
             }
         }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, AgentModelCategory.AGENT)
-
-    private val _decisionSchemaJson = MutableStateFlow("")
-    val decisionSchemaJson: StateFlow<String> = _decisionSchemaJson.asStateFlow()
-
-    val availableAgentModels: StateFlow<List<String>> = settingsStore.settingsFlow
-        .map { (DEFAULT_AGENT_MODELS + it.customGeminiModels).distinct() }
-        .stateIn(
-            viewModelScope,
-            SharingStarted.Eagerly,
-            (DEFAULT_AGENT_MODELS + settingsStore.current.customGeminiModels).distinct(),
-        )
+    }
 
     private val _initialDraft = MutableStateFlow<String?>(null)
     val initialDraft: StateFlow<String?> = _initialDraft.asStateFlow()
@@ -269,20 +246,13 @@ class AgentVM(
     private var submission: Deferred<Result<Unit>>? = null
     private val isBusy: Boolean
         get() = snapshot.value?.isActive == true || conversationId in repository.submittingIds.value ||
-            repository.localGenerations.value[conversationId] != null || _isInitialLoading.value ||
+            _isInitialLoading.value ||
             (session.value != null && snapshot.value?.waitingForMessages == true)
 
     init {
         viewModelScope.launch {
-            combine(
-                repository.observeConversation(conversationId),
-                localGeneration,
-            ) { cached, localGen ->
-                cached to localGen
-            }.collect { (cached, localGen) ->
-                if (localGen != null) {
-                    _conversation.value = localGen.conversation
-                } else if (cached != null) {
+            repository.observeConversation(conversationId).collect { cached ->
+                if (cached != null) {
                     _conversation.value = cached.conversation
                 } else if (snapshot.value != null) {
                     _conversation.value = Conversation(
@@ -300,20 +270,6 @@ class AgentVM(
         viewModelScope.launch {
             _initialDraft.value = repository.getDraft(conversationId).orEmpty()
             _agentAssistant.value = repository.ensureDefaultAssistant().toDomainAssistant()
-            repository.ensureDefaultModels()
-        }
-    }
-
-    fun updateDecisionSchemaJson(schema: String) {
-        _decisionSchemaJson.value = schema
-    }
-
-    fun updateGatewayConfig(baseUrl: String, apiKey: String) {
-        settingsStore.update {
-            it.copy(
-                gatewayBaseUrl = baseUrl.trim().ifBlank { DEFAULT_GEMINI_GATEWAY_URL },
-                gatewayApiKey = apiKey.trim(),
-            )
         }
     }
 
@@ -411,82 +367,26 @@ class AgentVM(
         }
     }
 
-    private fun currentOrFallbackModelEntity(): AgentModelEntity {
-        val model = resolvedChatModel.value
-        val settings = globalSettingsStore.settingsFlow.value
-        val effectiveProvider = model?.findProvider(providers = settings.providers, checkOverwrite = true)
-        val apiKeyProvider = effectiveProvider as? ProviderSetting.ApiKey
-        val baseUrl = apiKeyProvider?.baseUrl?.ifBlank { null }
-            ?: settingsStore.current.gatewayBaseUrl.ifBlank { DEFAULT_GEMINI_GATEWAY_URL }
-        val apiKey = apiKeyProvider?.apiKey?.ifBlank { null }
-            ?: settingsStore.current.gatewayApiKey
-        val now = System.currentTimeMillis()
-        val modelId = model?.modelId?.ifBlank { null } ?: "Antigravity"
-        val displayName = model?.displayName?.ifBlank { modelId } ?: modelId
-        val category = when (model?.type) {
-            ModelType.AGENT -> AgentModelCategory.AGENT
-            ModelType.DECISION -> AgentModelCategory.DECISION
-            ModelType.CHAT -> AgentModelCategory.CHAT
-            else -> AgentModelCategory.inferFromModelId(modelId)
-        }
-        // Custom Anthropic chat providers use /v1/messages;
-        // everything else keeps using the Gemini-native /v1beta gateway.
-        val providerType = if (apiKeyProvider is ProviderSetting.Claude) {
-            AGENT_PROVIDER_TYPE_ANTHROPIC
-        } else {
-            AGENT_PROVIDER_TYPE_GEMINI
-        }
-        return AgentModelEntity(
-            id = model?.id?.toString() ?: "fallback-$modelId",
-            modelId = modelId,
-            displayName = displayName,
-            category = category.name,
-            providerType = providerType,
-            baseUrl = baseUrl,
-            apiKey = apiKey,
-            createdAt = now,
-            updatedAt = now,
-        )
-    }
-
-    private fun validateInput(parts: List<UIMessagePart>, category: AgentModelCategory): Boolean {
-        val images = extractImagesFromParts(parts)
-        if (images.isNotEmpty()) {
-            _errorMessage.value = when {
-                category == AgentModelCategory.DECISION -> "当前决策接口仅接收文本。请选择支持图片的聊天或 Agent 模型。"
-                category != AgentModelCategory.AGENT -> null
-                session.value == null -> "请先连接 PocketBase 账号，再发送 Agent 图片。"
-                images.size > MAX_AGENT_IMAGES -> "每条消息最多添加 6 张图片。"
-                images.any { !it.isAgentImageUrl() } -> "图片须先上传至资料库。可点击失败的附件重试，或重新添加图片。"
-                else -> null
-            }
-            if (_errorMessage.value != null) return false
-        }
-
-        val providerId = selectedModelProvider.value?.id
-        val modelId = resolvedChatModel.value?.modelId.orEmpty()
-        val name = when {
-            isClaudeCodeProvider(providerId) -> "Claude Code"
-            providerId == COMMAND_CODE_PROVIDER_ID || isCommandCodeModel(modelId) -> "Command Code"
-            providerId == ANTIGRAVITY_CLI_PROVIDER_ID || isAntigravityCliModel(modelId) -> "Antigravity CLI"
-            else -> return true
-        }
+    private fun validateInput(parts: List<UIMessagePart>, sources: List<RemoteAgentSourceInput>): Boolean {
+        val documents = parts.filterIsInstance<UIMessagePart.Document>()
         _errorMessage.value = when {
-            session.value == null -> "请先连接 PocketBase 账号，再使用 $name。"
-            parts.any { it !is UIMessagePart.Text && it !is UIMessagePart.Image &&
-                !(it is UIMessagePart.Document && it.fileName.endsWith(".md", ignoreCase = true))
-            } -> "$name 支持文本、图片和 Markdown 附件。"
+            session.value == null -> "请先连接 AnyWorkflow 账号，再使用 ACP Agent。"
+            snapshot.value?.remoteStatus == "unavailable" -> "此会话没有可用的 ACP 记录，请新建对话。"
+            parts.any { it !is UIMessagePart.Text && it !is UIMessagePart.Image && it !is UIMessagePart.Document } ->
+                "ACP Agent 支持文本、图片链接和 Markdown 附件。"
+            documents.any { !it.fileName.endsWith(".md", ignoreCase = true) } -> "附件须为 Markdown 文件。"
+            sources.size != documents.size -> "无法读取 Markdown 附件。"
+            extractImagesFromParts(parts).any { !it.isAgentImageUrl() } -> "请先将图片上传到资料库。"
             else -> null
         }
         return _errorMessage.value == null
     }
 
-    fun sendMessage(parts: List<UIMessagePart>): Boolean {
-        if (parts.isEmpty() || isBusy) return false
+    fun sendMessage(parts: List<UIMessagePart>, onSubmitted: () -> Unit) {
+        if (parts.isEmpty() || isBusy) return
         _errorMessage.value = null
-        val modelEntity = currentOrFallbackModelEntity()
-        val category = modelEntity.modelCategory
-        if (!validateInput(parts, category)) return false
+        val sources = extractSourcesFromParts(parts)
+        if (!validateInput(parts, sources)) return
 
         val userMessage = UIMessage(
             role = MessageRole.USER,
@@ -498,7 +398,7 @@ class AgentVM(
             userMessage.toText().trim()
                 .replace('\n', ' ')
                 .take(36)
-                .ifBlank { modelEntity.displayName.ifBlank { "Agent" } }
+                .ifBlank { resolvedChatModel.value?.displayName ?: "Agent" }
         } else {
             current.title
         }
@@ -510,75 +410,11 @@ class AgentVM(
             newConversation = false,
         )
         val prompt = buildPromptFromParts(parts)
-        val sources = extractSourcesFromParts(parts)
         val images = extractImagesFromParts(parts)
-
-        when (category) {
-            AgentModelCategory.CHAT -> {
-                repository.startLocalChat(
-                    baseConversation = updatedWithUser,
-                    modelEntity = modelEntity,
-                    systemPrompt = _agentAssistant.value.systemPrompt,
-                    reasoningLevel = _agentAssistant.value.reasoningLevel,
-                    temperature = _agentAssistant.value.temperature,
-                    fallbackBaseUrl = settingsStore.current.gatewayBaseUrl,
-                    fallbackApiKey = settingsStore.current.gatewayApiKey,
-                    targetNodeId = null,
-                    onError = { msg -> _errorMessage.value = msg },
-                )
-            }
-            AgentModelCategory.DECISION -> {
-                repository.startLocalDecision(
-                    baseConversation = updatedWithUser,
-                    modelEntity = modelEntity,
-                    prompt = prompt,
-                    historyMessages = updatedWithUser.messageNodes.map { it.currentMessage },
-                    systemPrompt = _agentAssistant.value.systemPrompt,
-                    reasoningLevel = _agentAssistant.value.reasoningLevel,
-                    temperature = _agentAssistant.value.temperature,
-                    schemaJson = _decisionSchemaJson.value.takeIf { it.isNotBlank() },
-                    fallbackBaseUrl = settingsStore.current.gatewayBaseUrl,
-                    fallbackApiKey = settingsStore.current.gatewayApiKey,
-                    targetNodeId = null,
-                    onError = { msg -> _errorMessage.value = msg },
-                )
-            }
-            AgentModelCategory.AGENT -> {
-                if (session.value != null) {
-                    submitRemote(
-                        baseConversation = updatedWithUser,
-                        prompt = prompt,
-                        sources = sources,
-                        images = images,
-                        parentMessageId = snapshot.value?.lastRemoteMessageId,
-                        replacesMessageId = null,
-                        title = if (current.title.isBlank()) nextTitle else "",
-                        targetNodeId = null,
-                    )
-                } else {
-                    repository.startGatewayAgentDispatch(
-                        baseConversation = updatedWithUser,
-                        modelEntity = modelEntity,
-                        prompt = prompt,
-                        reasoningLevel = _agentAssistant.value.reasoningLevel,
-                        fallbackBaseUrl = settingsStore.current.gatewayBaseUrl,
-                        fallbackApiKey = settingsStore.current.gatewayApiKey,
-                        targetNodeId = null,
-                        onError = { msg -> _errorMessage.value = msg },
-                    )
-                }
-            }
-        }
-
-        saveDraft("")
-        return true
+        submitRemote(updatedWithUser, prompt, sources, images, nextTitle, onSubmitted = onSubmitted)
     }
 
     fun stopGeneration() {
-        if (repository.localGenerations.value[conversationId] != null) {
-            repository.cancelLocalGeneration(conversationId)
-            return
-        }
         viewModelScope.launch {
             if (submission?.await()?.isFailure == true) return@launch
             repository.cancelConversationJob(conversationId).onFailure {
@@ -590,81 +426,26 @@ class AgentVM(
     fun regenerate(message: UIMessage) {
         if (isBusy) return
         val current = _conversation.value
-        val nodeIndex = current.messageNodes.indexOfFirst { node ->
-            node.messages.any { it.id == message.id }
+        val jobId = snapshot.value?.remoteJobId
+        if (jobId == null || snapshot.value?.remoteStatus !in setOf("failed", "canceled") ||
+            current.messageNodes.lastOrNull()?.currentMessage?.id != message.id
+        ) {
+            _errorMessage.value = "可重试失败、取消或中断的最新 ACP 轮次。"
+            return
         }
-        if (nodeIndex < 0) return
-
-        val node = current.messageNodes[nodeIndex]
-        val historyBefore = current.messageNodes.take(nodeIndex).map { it.currentMessage }
-        val userMsg = historyBefore.lastOrNull { it.role == MessageRole.USER } ?: return
-        val modelEntity = currentOrFallbackModelEntity()
-        if (!validateInput(userMsg.parts, modelEntity.modelCategory)) return
-        val prompt = buildPromptFromParts(userMsg.parts)
-        val sources = extractSourcesFromParts(userMsg.parts)
-        val images = extractImagesFromParts(userMsg.parts)
-
-        when (modelEntity.modelCategory) {
-            AgentModelCategory.CHAT -> {
-                repository.startLocalChat(
-                    baseConversation = current,
-                    modelEntity = modelEntity,
-                    systemPrompt = _agentAssistant.value.systemPrompt,
-                    reasoningLevel = _agentAssistant.value.reasoningLevel,
-                    temperature = _agentAssistant.value.temperature,
-                    fallbackBaseUrl = settingsStore.current.gatewayBaseUrl,
-                    fallbackApiKey = settingsStore.current.gatewayApiKey,
-                    targetNodeId = node.id,
-                    historyOverride = historyBefore,
-                    onError = { msg -> _errorMessage.value = msg },
-                )
-            }
-            AgentModelCategory.DECISION -> {
-                repository.startLocalDecision(
-                    baseConversation = current,
-                    modelEntity = modelEntity,
-                    prompt = prompt,
-                    historyMessages = historyBefore,
-                    systemPrompt = _agentAssistant.value.systemPrompt,
-                    reasoningLevel = _agentAssistant.value.reasoningLevel,
-                    temperature = _agentAssistant.value.temperature,
-                    schemaJson = _decisionSchemaJson.value.takeIf { it.isNotBlank() },
-                    fallbackBaseUrl = settingsStore.current.gatewayBaseUrl,
-                    fallbackApiKey = settingsStore.current.gatewayApiKey,
-                    targetNodeId = node.id,
-                    onError = { msg -> _errorMessage.value = msg },
-                )
-            }
-            AgentModelCategory.AGENT -> {
-                if (session.value != null) {
-                    submitRemote(
-                        baseConversation = current,
-                        prompt = prompt,
-                        sources = sources,
-                        images = images,
-                        parentMessageId = null,
-                        replacesMessageId = snapshot.value?.lastRemoteMessageId,
-                        title = "",
-                        targetNodeId = node.id,
-                    )
-                } else {
-                    repository.startGatewayAgentDispatch(
-                        baseConversation = current,
-                        modelEntity = modelEntity,
-                        prompt = prompt,
-                        reasoningLevel = _agentAssistant.value.reasoningLevel,
-                        fallbackBaseUrl = settingsStore.current.gatewayBaseUrl,
-                        fallbackApiKey = settingsStore.current.gatewayApiKey,
-                        targetNodeId = node.id,
-                        onError = { msg -> _errorMessage.value = msg },
-                    )
-                }
-            }
+        if (session.value == null) {
+            _errorMessage.value = "请先连接 AnyWorkflow 账号。"
+            return
         }
+        submitRemote(current, "", emptyList(), emptyList(), current.title, retryJobId = jobId)
     }
 
     fun editMessage(message: UIMessage, newParts: List<UIMessagePart>) {
         if (isBusy || newParts.isEmpty()) return
+        if (snapshot.value?.remoteJobId != null) {
+            _errorMessage.value = "ACP 会话使用服务端记录。继续发送新消息，或新建会话。"
+            return
+        }
         val current = _conversation.value
         val newNodes = current.messageNodes.map { node ->
             if (node.messages.any { it.id == message.id }) {
@@ -688,6 +469,10 @@ class AgentVM(
 
     fun deleteMessage(message: UIMessage) {
         if (isBusy) return
+        if (snapshot.value?.remoteJobId != null) {
+            _errorMessage.value = "ACP 会话使用服务端记录。继续发送新消息，或新建会话。"
+            return
+        }
         val current = _conversation.value
         val newNodes = current.messageNodes.mapNotNull { node ->
             if (node.messages.any { it.id == message.id }) {
@@ -715,6 +500,10 @@ class AgentVM(
 
     fun updateMessageNode(node: MessageNode) {
         if (isBusy) return
+        if (snapshot.value?.remoteJobId != null) {
+            _errorMessage.value = "ACP 会话使用服务端记录。继续发送新消息，或新建会话。"
+            return
+        }
         val current = _conversation.value
         val newNodes = current.messageNodes.map {
             if (it.id == node.id) node else it
@@ -739,13 +528,23 @@ class AgentVM(
             _conversation.value = updated
         } else {
             viewModelScope.launch {
-                repository.renameConversation(conversationId, trimmed)
+                try {
+                    repository.renameConversation(conversationId, trimmed)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    _errorMessage.value = error.message ?: "无法重命名会话"
+                }
             }
         }
     }
 
     fun clearMessages() {
         if (isBusy) return
+        if (snapshot.value?.remoteJobId != null) {
+            _errorMessage.value = "ACP 会话使用服务端记录。继续发送新消息，或新建会话。"
+            return
+        }
         val updated = _conversation.value.copy(
             messageNodes = emptyList(),
             updateAt = Instant.now(),
@@ -757,130 +556,82 @@ class AgentVM(
         }
     }
 
-    private fun ReasoningLevel.toGeminiThinkingLevel(): String = when (this) {
-        ReasoningLevel.OFF, ReasoningLevel.AUTO -> ""
-        ReasoningLevel.LOW -> "low"
-        ReasoningLevel.MEDIUM -> "medium"
-        ReasoningLevel.HIGH, ReasoningLevel.XHIGH, ReasoningLevel.MAX -> "high"
-    }
-
     private fun submitRemote(
-        baseConversation: Conversation,
+        conversation: Conversation,
         prompt: String,
         sources: List<RemoteAgentSourceInput>,
-        images: List<String> = emptyList(),
-        parentMessageId: String?,
-        replacesMessageId: String?,
+        images: List<String>,
         title: String,
-        targetNodeId: Uuid?,
+        retryJobId: String? = null,
+        onSubmitted: () -> Unit = {},
     ) {
-        val selectedModel = resolvedChatModel.value
-        val rawProvider = selectedModelProvider.value
-        val rawModelId = selectedModel?.modelId?.ifBlank { null } ?: "Antigravity"
-        val isAntigravityCli = rawProvider?.id == ANTIGRAVITY_CLI_PROVIDER_ID ||
-            isAntigravityCliModel(rawModelId)
-        val isClaudeCode = isClaudeCodeProvider(rawProvider?.id)
-        val isCommandCode = rawProvider?.id == COMMAND_CODE_PROVIDER_ID || isCommandCodeModel(rawModelId)
-        val isCodex = rawProvider?.id == CODEX_PROVIDER_ID ||
-            rawProvider?.name.equals("Codex", ignoreCase = true) ||
-            isCodexAgentModel(rawModelId)
-        val isAntigravity = rawProvider?.id == ANTIGRAVITY_PROVIDER_ID ||
-            rawProvider?.name.equals("Antigravity", ignoreCase = true) ||
-            isAntigravityAgentModel(rawModelId)
-        val modelName = when {
-            isClaudeCode -> CLAUDE_CODE_MODEL
-            isCommandCode -> COMMAND_CODE_MODEL
-            isAntigravityCli -> ANTIGRAVITY_CLI_MODEL
-            isCodex -> "Codex"
-            isAntigravity -> "Antigravity"
-            else -> rawModelId
-        }
-        val agentModel = when {
-            isClaudeCode -> rawModelId
-            isAntigravityCli -> rawModelId.takeUnless(::isAntigravityCliModel)?.trim()
-            isCodex && !rawModelId.equals("Codex", ignoreCase = true) -> rawModelId.trim()
-            isAntigravity && !rawModelId.equals("Antigravity", ignoreCase = true) -> rawModelId.trim()
-            else -> null
-        }
-        val displayLabel = selectedModel?.displayName?.ifBlank { rawModelId } ?: modelName
-        val reasoningLevel = _agentAssistant.value.reasoningLevel
-        val thinkingLevel = when {
-            isClaudeCode -> when (reasoningLevel) {
-                ReasoningLevel.AUTO -> ""
-                ReasoningLevel.OFF -> if (rawProvider?.id == CLAUDE_CODE_PROVIDER_ID) "" else "off"
-                else -> reasoningLevel.name.lowercase()
+        val selected = resolvedChatModel.value
+        val rawModel = selected?.modelId ?: "Antigravity"
+        val provider = selectedModelProvider.value?.id
+        val agent = when {
+            // GPT-6.2 models are only offered by the Codex adapter; the Claude Code
+            // adapter's picker is limited to Claude aliases and rejects them.
+            provider == CLAUDE_CODE_GPT_PROVIDER_ID -> "codex"
+            isClaudeCodeProvider(provider) -> "claude-code"
+            provider == COMMAND_CODE_PROVIDER_ID || isCommandCodeModel(rawModel) -> "command-code"
+            provider == OPENCODE_PROVIDER_ID || rawModel.equals("OpenCode", ignoreCase = true) -> "opencode"
+            provider == CODEX_PROVIDER_ID || isCodexAgentModel(rawModel) -> "codex"
+            provider == ANTIGRAVITY_PROVIDER_ID || provider == ANTIGRAVITY_CLI_PROVIDER_ID ||
+                isAntigravityAgentModel(rawModel) || isAntigravityCliModel(rawModel) -> "antigravity"
+            else -> {
+                _errorMessage.value = "所选模型没有 ACP 适配器。"
+                return
             }
-            isAntigravityCli && agentModel != null && reasoningLevel == ReasoningLevel.MAX -> "max"
-            isAntigravityCli && agentModel != null && reasoningLevel == ReasoningLevel.XHIGH -> "xhigh"
-            isAntigravityCli -> reasoningLevel.toGeminiThinkingLevel()
-            isCodex && reasoningLevel in listOf(ReasoningLevel.XHIGH, ReasoningLevel.MAX) -> "xhigh"
-            isCodex && reasoningLevel == ReasoningLevel.OFF -> "off"
-            isAntigravity || isCommandCode -> ""
-            else -> reasoningLevel.toGeminiThinkingLevel()
         }
-        val systemPrompt = _agentAssistant.value.systemPrompt.takeIf { it.isNotBlank() }
-        val assistantMsgId = Uuid.random()
-        val nodeId = targetNodeId ?: Uuid.random()
-        val placeholderMsg = UIMessage(
-            id = assistantMsgId,
+        val model = rawModel.takeUnless {
+            it.equals(acpAgentName(agent), ignoreCase = true) ||
+                isAntigravityCliModel(it) || isCommandCodeModel(it)
+        }
+        val effort = _agentAssistant.value.reasoningLevel.takeIf {
+            selected?.abilities?.contains(ModelAbility.REASONING) == true &&
+                it != ReasoningLevel.AUTO && it != ReasoningLevel.OFF
+        }?.let {
+            if (agent == "codex" && it == ReasoningLevel.MAX) "xhigh" else it.name.lowercase()
+        }
+        val assistant = UIMessage(
             role = MessageRole.ASSISTANT,
             parts = listOf(UIMessagePart.Text("")),
-            modelSnapshot = ModelSnapshot(
-                displayName = displayLabel,
-                modelId = rawModelId,
-            ),
+            modelSnapshot = ModelSnapshot(rawModel, selected?.displayName ?: acpAgentName(agent)),
         )
-
-        val initialConv = if (targetNodeId != null) {
-            baseConversation.upsertMessage(nodeId, placeholderMsg)
+        val pending = if (retryJobId == null) {
+            conversation.copy(messageNodes = conversation.messageNodes + assistant.toMessageNode())
         } else {
-            val newNode = MessageNode(
-                id = nodeId,
-                messages = listOf(placeholderMsg),
-                selectIndex = 0,
-            )
-            baseConversation.copy(messageNodes = baseConversation.messageNodes + newNode)
+            conversation
         }
-        val initialHistory = if (isClaudeCode && parentMessageId == null && replacesMessageId == null &&
-            snapshot.value?.remoteStatus == null
-        ) {
-            val priorNodes = baseConversation.messageNodes.takeWhile { it.id != targetNodeId }.dropLast(1)
-            priorNodes.takeLast(40).mapNotNull { node ->
-                val message = node.currentMessage
-                val text = message.toText()
-                val historyImages = extractImagesFromParts(message.parts).filter { it.isAgentImageUrl() }.take(MAX_AGENT_IMAGES)
-                when {
-                    message.role == MessageRole.USER && (text.isNotBlank() || historyImages.isNotEmpty()) ->
-                        RemoteHistoryTurn("user", text, historyImages)
-                    message.role == MessageRole.ASSISTANT && text.isNotBlank() -> RemoteHistoryTurn("model", text)
-                    else -> null
-                }
+        val priorNodes = if (snapshot.value?.remoteJobId == null) conversation.messageNodes.dropLast(1) else emptyList()
+        val history = priorNodes.takeLast(40).mapNotNull { node ->
+            val message = node.currentMessage
+            val text = message.toText()
+            if (text.isBlank()) return@mapNotNull null
+            when (message.role) {
+                MessageRole.USER -> RemoteHistoryTurn("user", text)
+                MessageRole.ASSISTANT -> RemoteHistoryTurn("model", text)
+                else -> null
             }
-        } else {
-            emptyList()
         }
-        _pendingRemoteSubmission.value = assistantMsgId to System.currentTimeMillis()
+        _pendingRemoteSubmission.value = assistant.id to System.currentTimeMillis()
         val task = repository.submitMessage(
-            conversation = initialConv,
+            conversation = pending,
             prompt = prompt,
             sources = sources,
             images = images,
-            parentMessageId = parentMessageId,
-            replacesMessageId = replacesMessageId,
+            replacesMessageId = retryJobId,
             title = title,
-            model = modelName,
-            agentModel = agentModel,
-            thinkingLevel = thinkingLevel,
-            systemPrompt = systemPrompt,
-            initialHistory = initialHistory,
+            model = model,
+            agentId = agent,
+            thinkingLevel = effort,
+            systemPrompt = _agentAssistant.value.systemPrompt.takeIf { it.isNotBlank() },
+            initialHistory = history,
         )
         submission = task
         viewModelScope.launch {
-            task.await().onFailure { error ->
-                val message = error.message ?: "触发 Agent Action 失败"
-                _errorMessage.value = message
-                val errorMessage = placeholderMsg.copy(parts = listOf(UIMessagePart.Notice(title = "请求失败", text = message)))
-                repository.saveConversation(initialConv.upsertMessage(nodeId, errorMessage))
+            task.await().onSuccess { onSubmitted() }.onFailure { error ->
+                _errorMessage.value = error.message ?: "ACP 任务提交失败"
             }
             if (submission === task) submission = null
         }

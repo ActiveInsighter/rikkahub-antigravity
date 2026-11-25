@@ -5,19 +5,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -27,20 +20,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.PencilEdit01
-import me.rerere.hugeicons.stroke.View
-import me.rerere.hugeicons.stroke.ViewOff
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.agent.AgentSettingsStore
 import me.rerere.rikkahub.data.agent.AgentUiSettings
-import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
 import me.rerere.rikkahub.data.datastore.BackgroundEffectType
 import me.rerere.rikkahub.data.datastore.ChatFontFamily
 import me.rerere.rikkahub.ui.components.nav.BackButton
@@ -63,8 +48,6 @@ fun AgentSettingPage() {
     val toaster = LocalToaster.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var showResetConfirm by remember { mutableStateOf(false) }
-    var showGatewayUrlDialog by remember { mutableStateOf(false) }
-    var showGatewayKeyDialog by remember { mutableStateOf(false) }
 
     fun update(transform: (AgentUiSettings) -> AgentUiSettings) {
         settingsStore.update(transform)
@@ -88,53 +71,6 @@ fun AgentSettingPage() {
             contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            item {
-                CardGroup(title = { Text("Gemini Gateway 默认配置") }) {
-                    val effectiveUrl = uiSettings.gatewayBaseUrl.ifBlank { DEFAULT_GEMINI_GATEWAY_URL }
-                    val keySummary = if (uiSettings.gatewayApiKey.isBlank()) {
-                        "未配置（留空则不发送鉴权头或使用单模型密钥）"
-                    } else {
-                        "已配置 (${uiSettings.gatewayApiKey.take(4)}••••)"
-                    }
-                    item(
-                        onClick = { showGatewayUrlDialog = true },
-                        headlineContent = { Text("默认请求地址") },
-                        supportingContent = {
-                            Text(
-                                text = effectiveUrl,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        trailingContent = {
-                            Icon(
-                                imageVector = HugeIcons.PencilEdit01,
-                                contentDescription = "编辑",
-                                modifier = Modifier.size(18.dp),
-                            )
-                        },
-                    )
-                    item(
-                        onClick = { showGatewayKeyDialog = true },
-                        headlineContent = { Text("全局网关密钥") },
-                        supportingContent = {
-                            Text(
-                                text = keySummary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        trailingContent = {
-                            Icon(
-                                imageVector = HugeIcons.PencilEdit01,
-                                contentDescription = "编辑",
-                                modifier = Modifier.size(18.dp),
-                            )
-                        },
-                    )
-                }
-            }
-
             item {
                 CardGroup(title = { Text("导航与滚动") }) {
                     switchItem(
@@ -418,100 +354,5 @@ fun AgentSettingPage() {
         onDismiss = { showResetConfirm = false },
     ) {
         Text("确定要将 Agent 界面设置恢复为默认值吗？")
-    }
-
-    if (showGatewayUrlDialog) {
-        var draftUrl by remember(uiSettings.gatewayBaseUrl) {
-            mutableStateOf(uiSettings.gatewayBaseUrl.ifBlank { DEFAULT_GEMINI_GATEWAY_URL })
-        }
-        AlertDialog(
-            onDismissRequest = { showGatewayUrlDialog = false },
-            title = { Text("默认请求地址") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "新建模型或未单独指定地址时默认使用该 Gemini Gateway 地址。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutlinedTextField(
-                        value = draftUrl,
-                        onValueChange = { draftUrl = it },
-                        placeholder = { Text(DEFAULT_GEMINI_GATEWAY_URL) },
-                        trailingIcon = if (draftUrl.trim() != DEFAULT_GEMINI_GATEWAY_URL) {
-                            {
-                                TextButton(onClick = { draftUrl = DEFAULT_GEMINI_GATEWAY_URL }) {
-                                    Text("默认")
-                                }
-                            }
-                        } else null,
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val cleaned = draftUrl.trim().ifBlank { DEFAULT_GEMINI_GATEWAY_URL }
-                        update { it.copy(gatewayBaseUrl = cleaned) }
-                        showGatewayUrlDialog = false
-                    },
-                ) { Text("保存") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showGatewayUrlDialog = false }) { Text("取消") }
-            },
-        )
-    }
-
-    if (showGatewayKeyDialog) {
-        var draftKey by remember(uiSettings.gatewayApiKey) {
-            mutableStateOf(uiSettings.gatewayApiKey)
-        }
-        var showKey by remember { mutableStateOf(false) }
-        AlertDialog(
-            onDismissRequest = { showGatewayKeyDialog = false },
-            title = { Text("全局网关密钥") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "对应 Worker 中的 GATEWAY_AUTH_TOKEN。留空则不发送鉴权头或使用单模型密钥。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutlinedTextField(
-                        value = draftKey,
-                        onValueChange = { draftKey = it },
-                        placeholder = { Text("GATEWAY_AUTH_TOKEN") },
-                        visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            IconButton(onClick = { showKey = !showKey }) {
-                                Icon(
-                                    imageVector = if (showKey) HugeIcons.ViewOff else HugeIcons.View,
-                                    contentDescription = if (showKey) "隐藏" else "显示",
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        update { it.copy(gatewayApiKey = draftKey.trim()) }
-                        showGatewayKeyDialog = false
-                    },
-                ) { Text("保存") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showGatewayKeyDialog = false }) { Text("取消") }
-            },
-        )
     }
 }

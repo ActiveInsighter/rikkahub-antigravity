@@ -1,110 +1,126 @@
 package me.rerere.rikkahub.data.agent
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.*
+import kotlinx.coroutines.delay
+import kotlinx.serialization.DeserializationStrategy
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.serializer
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.put
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.ModelSnapshot
-import me.rerere.ai.ui.ServerToolStatus
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
 import me.rerere.rikkahub.data.workflow.WorkflowApiException
 import me.rerere.rikkahub.data.workflow.WorkflowRepository
-import okhttp3.OkHttpClient
-import java.time.format.DateTimeFormatter
+import me.rerere.rikkahub.data.workflow.WorkflowSession
 import kotlin.uuid.Uuid
 
 internal const val ACP_WORKER_URL = "https://rikka-remote-agent.2212148739lbw.workers.dev"
 
-/**
- * AgentCloudClient backed by the ACP remote-agent Worker.
- *
- * Data model mapping:
- *   ACP session  ←→  thread / conversation  (threadRoot = session ID, jobId = latest task ID)
- *   ACP task     ←→  job turn               (one task per user message)
- *   ACP events   ←→  RemoteAgentPart list   (streamed via polling /v1/tasks/{id}/events)
- *
- * Session continuity: on the first submitMessage the client creates a new ACP session and
- * stores its ID as the PocketBase remoteThreadRoot.  Subsequent turns pass parentMessageId =
- * the previous task ID, which this client uses to look up the existing session.
- *
- * The companion object exposes helpers shared with AgentRepository.
- */
-class AcpAgentCloudClient(
-    private val workflowRepository: WorkflowRepository,
-    @Suppress("UNUSED_PARAMETER") httpClient: OkHttpClient,
+class AcpAgentCloudClient internal constructor(
+    private val accountProvider: () -> WorkflowSession?,
+    private val request: AcpRequest,
 ) : AgentCloudClient {
+    constructor(workflow: WorkflowRepository) : this(
+        { workflow.session.value },
+        AcpRequest { account, path, body, query ->
+            workflow.executeJsonCancellable(
+                baseUrl = ACP_WORKER_URL, path = "/v1$path", method = if (body == null) "GET" else "POST",
+                query = query, body = body, token = account.token, authPrefix = "Bearer ",
+            )
+        },
+    )
 
-    // ── Public interface ─────────────────────────────────────────────────────
+    private val parser = Json { ignoreUnknownKeys = true }
 
-    override fun hasSession(): Boolean = workflowRepository.session.value != null
+    override fun hasSession() = accountProvider()?.baseUrl?.trimEnd('/') == DEFAULT_POCKETBASE_URL
 
-    override suspend fun listRemoteThreads(threadRoot: String?): List<RemoteAgentThread> =
-        withContext(Dispatchers.IO) {
-            val session = workflowRepository.requireSession()
-            val sessions = fetchPagedSessions(session)
-            sessions.mapNotNull { s ->
-                val latestTask = fetchPagedTasks(session, s.id, limit = 1).firstOrNull()
-                RemoteAgentThread(
-                    jobId = latestTask?.id ?: return@mapNotNull null,
-                    threadRoot = s.id,
-                    title = s.title,
-                    status = latestTask.state.toStatus(),
-                    created = s.updated,
-                    updated = s.updated,
-                    parentMessage = "",
-                    archived = false,
-                    pinned = false,
-                )
-            }.let { all ->
-                if (threadRoot != null) all.filter { it.threadRoot == threadRoot } else all
-            }
+    override suspend fun listRemoteThreads(threadRoot: String?): List<RemoteAgentThread> {
+        val api = api()
+        val sessions = if (threadRoot == null) api.list<AcpSession>("/sessions") else {
+            listOf(api.call<AcpSession>("/sessions/$threadRoot"))
         }
+        return sessions.mapNotNull { session ->
+            val task = session.latestTask ?: if (session.pinned == null || threadRoot != null) {
+                api.page<AcpTaskRef>("/sessions/${session.id}/tasks", 1).items.firstOrNull()
+            } else null
+            if (task == null) return@mapNotNull null
+            RemoteAgentThread(
+                jobId = task.id,
+                threadRoot = session.id,
+                title = session.title,
+                status = task.state.toAgentStatus(),
+                created = session.created.ifBlank { task.created },
+                updated = task.created,
+                parentMessage = "",
+                archived = false,
+                pinned = session.pinned ?: false,
+                hasMetadata = session.pinned != null,
+            )
+        }
+    }
 
     override suspend fun fetchThreadConversation(
         latestJobId: String,
         previous: RemoteThreadConversation?,
         refreshJob: Boolean,
-    ): RemoteThreadConversation = withContext(Dispatchers.IO) {
-        val session = workflowRepository.requireSession()
-
-        val task = fetchTask(session, latestJobId)
-        val sessionId = task.sessionId
-
-        val prevCursor = previous?.partsCursor?.takeIf {
-            previous.job.id == latestJobId
-        } ?: 0
-        val events = fetchEvents(session, latestJobId, after = prevCursor)
-
-        val prevParts = previous?.parts.orEmpty()
-            .takeIf { previous?.job?.id == latestJobId } ?: emptyList()
-        val newParts = events.toRemoteAgentParts(latestJobId)
-        val mergedParts = mergeParts(prevParts, newParts)
-        val newCursor = events.lastOrNull()?.sequence ?: prevCursor
-
-        val isActive = task.state in setOf("scheduled", "queued", "running", "canceling")
-        val job = task.toRemoteGeminiJob(sessionId)
-        val message = task.toRemoteGeminiMessage(sessionId)
-
-        val nodes: List<MessageNode> = if (previous?.job?.id == latestJobId && previous.messageNodes.isNotEmpty()) {
-            // Incremental update: refresh only the last assistant node.
-            val last = previous.messageNodes.last()
-            val updatedMsg = buildAssistantUIMessage(last.currentMessage.id, job, message, mergedParts)
-            previous.messageNodes.dropLast(1) + last.copy(messages = listOf(updatedMsg))
+    ): RemoteThreadConversation {
+        val api = api()
+        val cached = previous?.takeIf { it.job.id == latestJobId }
+        val task = if (cached == null || refreshJob) api.call<AcpTask>("/tasks/$latestJobId") else null
+        val sessionId = task?.sessionId ?: checkNotNull(cached).job.threadRoot
+        val session = if (cached?.acpHistoryComplete != true) api.call<AcpSession>("/sessions/$sessionId") else null
+        val events = api.events(latestJobId, cached?.partsCursor ?: 0, task?.cursor ?: 0)
+        // Prefer the event response's state. A terminal snapshot may still have unread events.
+        val status = events.state.toAgentStatus()
+        val active = !events.done
+        val parts = cached?.parts.orEmpty() + events.items.map { it.toPart(latestJobId) }
+        val error = parts.lastOrNull { it.part.text("type") == "error" }?.part?.text("code").orEmpty()
+        val job = (cached?.job ?: checkNotNull(task).toJob(checkNotNull(session))).copy(
+            status = if (active && !isAgentActiveStatus(status)) "running" else status,
+            error = error,
+            cancelRequested = events.state == "canceling",
+        )
+        val message = job.toMessage(events.cursor)
+        var approval = task?.approval(parts)
+        var historyComplete = true
+        val nodes = if (cached?.acpHistoryComplete == true && cached.messageNodes.isNotEmpty()) {
+            val assistant = cached.messageNodes.last()
+            cached.messageNodes.dropLast(1) + assistant.copy(
+                messages = listOf(buildAssistantUIMessage(assistant.currentMessage.id, job, message, parts)),
+            )
         } else {
-            // Full load: build nodes for every past task in this session, then the current one.
-            val allTasks = fetchPagedTasks(session, sessionId)
-            buildAllTurnNodes(allTasks, latestTaskId = latestJobId, latestParts = mergedParts, session = session)
+            val knownNodes = previous?.takeIf {
+                it.job.threadRoot == sessionId && it.acpHistoryComplete && !it.isActive
+            }?.messageNodes.orEmpty().associateBy { it.id }
+            val history = api.list<AcpTask>("/sessions/$sessionId/tasks")
+                .dropWhile { it.id != latestJobId }.drop(1).asReversed()
+            val priorNodes = history.flatMap { turn ->
+                val user = knownNodes[stableAgentUuid("acp-user:${turn.id}")]
+                val assistant = knownNodes[stableAgentUuid("acp-assistant:${turn.id}")]
+                if (user != null && assistant != null) {
+                    listOf(user, assistant)
+                } else {
+                    val priorEvents = api.events(turn.id, 0, turn.cursor)
+                    historyComplete = historyComplete && priorEvents.done
+                    val priorJob = turn.toJob(checkNotNull(session)).copy(status = priorEvents.state.toAgentStatus())
+                    val priorParts = priorEvents.items.map { it.toPart(turn.id) }
+                    if (approval == null && !priorEvents.done) approval = turn.approval(priorParts)
+                    turnNodes(priorJob, priorParts)
+                }
+            }
+            priorNodes + turnNodes(job, parts)
         }
-
-        RemoteThreadConversation(
-            job = job,
-            message = message,
-            messageNodes = nodes,
-            isActive = isActive,
-            parts = mergedParts,
-            partsCursor = newCursor,
+        return RemoteThreadConversation(
+            if (historyComplete) job else job.copy(status = "running"),
+            message, nodes, active || !historyComplete, parts, events.cursor, approval,
+            acpHistoryComplete = historyComplete,
         )
     }
 
@@ -120,535 +136,315 @@ class AcpAgentCloudClient(
         thinkingLevelOverride: String?,
         systemPromptOverride: String?,
         initialHistory: List<RemoteHistoryTurn>,
-    ): RemoteSubmittedJob = withContext(Dispatchers.IO) {
-        val session = workflowRepository.requireSession()
-
-        // Find the existing ACP session or create a new one.
-        val sessionId = if (parentMessageId != null) {
-            // parentMessageId is a task ID from a previous turn → look up its session.
-            runCatching { fetchTask(session, parentMessageId).sessionId }
-                .getOrNull() ?: createSession(session, title, agentModelOverride ?: "antigravity")
-        } else {
-            createSession(session, title, agentModelOverride ?: "antigravity")
+        threadRoot: String?,
+        agentId: String?,
+    ): RemoteSubmittedJob {
+        val api = api()
+        val selectedAgent = agentId ?: "antigravity"
+        val taskKey = Uuid.random().toString()
+        val existing = threadRoot?.let { root ->
+            try {
+                api.call<AcpSession>("/sessions/$root")
+            } catch (error: WorkflowApiException) {
+                if (error.statusCode != 404) throw error
+                throw WorkflowApiException("此会话没有可用的 ACP 会话记录，请新建对话。", 404)
+            }
         }
-
-        val config = buildJsonObject {
-            if (!modelOverride.isNullOrBlank()) put("model", modelOverride)
-            if (!thinkingLevelOverride.isNullOrBlank()) put("thought_level", thinkingLevelOverride)
+        val retry = if (existing != null && replacesMessageId != null) {
+            api.call<AcpTask>("/tasks/$replacesMessageId").takeIf {
+                it.sessionId == existing.id && it.state in setOf("failed", "canceled", "interrupted")
+            }
+        } else null
+        if (replacesMessageId != null && retry == null) {
+            throw WorkflowApiException("ACP 支持重试失败、取消或中断的最新轮次。")
         }
-
+        if (retry != null) {
+            val task = api.postWithRetry<AcpTask>("/tasks/${retry.id}/retry", buildJsonObject { put("requestKey", taskKey) })
+            return task.toSubmittedJob()
+        }
+        val history = if (existing == null) initialHistory else emptyList()
+        val expandedPrompt = buildAcpPrompt(prompt, sources, images, systemPromptOverride, history)
+        // A conversation keeps its original agent and worktree. A model selection from
+        // another agent must never be sent as an option to this session's adapter.
+        val useSelectedConfig = existing == null || existing.agent == selectedAgent
         val payload = buildJsonObject {
-            put("prompt", prompt)
-            put("requestKey", Uuid.random().toString())
-            if (config.isNotEmpty()) put("config", config)
+            put("prompt", expandedPrompt)
+            put("requestKey", taskKey)
+            put("config", buildJsonObject {
+                if (useSelectedConfig && !modelOverride.isNullOrBlank()) {
+                    put("model", acpModelValue(selectedAgent, modelOverride))
+                }
+                if (useSelectedConfig && !thinkingLevelOverride.isNullOrBlank()) put("thought_level", thinkingLevelOverride)
+            })
         }
-
-        val resp = workflowRepository.executeJsonCancellable(
-            baseUrl = ACP_WORKER_URL,
-            path = "/v1/sessions/$sessionId/tasks",
-            method = "POST",
-            body = payload,
-            token = session.token,
-            authPrefix = "Bearer ",
-        ).jsonObject
-
-        val taskId = resp.str("id").ifBlank { throw WorkflowApiException("ACP task ID missing") }
-        val state = resp.str("state").ifBlank { "queued" }
-
-        RemoteSubmittedJob(
-            jobId = taskId,
-            threadRoot = sessionId,
-            status = state.toStatus(),
-        )
+        if (payload.toString().toByteArray().size > 65_536) {
+            throw WorkflowApiException("ACP 消息超出请求长度限制。请缩短消息或附件。")
+        }
+        val session = existing ?: run {
+            val project = api.list<AcpProject>("/projects").firstOrNull { selectedAgent in it.agents }
+                ?: throw WorkflowApiException("当前账号没有启用 ${acpAgentName(selectedAgent)} 的 ACP 项目。")
+            api.postWithRetry<AcpSession>("/sessions", buildJsonObject {
+                put("projectId", project.id)
+                put("agent", selectedAgent)
+                put("title", title.trim().take(120).ifBlank { acpAgentName(selectedAgent) })
+                put("requestKey", Uuid.random().toString())
+            })
+        }
+        return api.postWithRetry<AcpTask>("/sessions/${session.id}/tasks", payload).toSubmittedJob()
     }
 
-    override suspend fun cancelJob(jobId: String): Unit = withContext(Dispatchers.IO) {
-        val session = workflowRepository.requireSession()
-        workflowRepository.executeJsonCancellable(
-            baseUrl = ACP_WORKER_URL,
-            path = "/v1/tasks/$jobId/cancel",
-            method = "POST",
-            body = buildJsonObject {},
-            token = session.token,
-            authPrefix = "Bearer ",
-        )
+    override suspend fun cancelJob(jobId: String) {
+        api().call<AcpTask>("/tasks/$jobId/cancel", buildJsonObject {})
+    }
+
+    override suspend fun approveJob(approval: AgentApproval, optionId: String) {
+        api().call<AcpTask>("/tasks/${approval.jobId}/approvals/${approval.id}", buildJsonObject {
+            put("optionId", optionId)
+        })
     }
 
     override suspend fun updateThreadMetadata(
-        jobId: String,
-        title: String?,
-        pinned: Boolean?,
-        archived: Boolean?,
-        folderId: String?,
-    ) = Unit // ACP sessions don't support metadata updates yet
+        jobId: String, title: String?, pinned: Boolean?, archived: Boolean?, folderId: String?,
+    ) {
+        if (title == null && pinned == null) return
+        val api = api()
+        val task = api.call<AcpTask>("/tasks/$jobId")
+        api.call<AcpSession>("/sessions/${task.sessionId}/metadata", buildJsonObject {
+            title?.let { put("title", it.trim().take(120)) }
+            pinned?.let { put("pinned", it) }
+        })
+    }
 
-    override suspend fun deleteThread(jobId: String) = Unit // Not supported by ACP
+    override suspend fun deleteThread(jobId: String) {
+        val api = api()
+        val task = api.call<AcpTask>("/tasks/$jobId")
+        api.call<JsonObject>("/sessions/${task.sessionId}/delete", buildJsonObject {})
+    }
 
     override fun buildAssistantUIMessage(
-        messageId: Uuid,
-        job: RemoteGeminiJob,
-        message: RemoteGeminiMessage?,
-        parts: List<RemoteAgentPart>,
-    ): UIMessage {
-        val uiParts = mutableListOf<UIMessagePart>()
-        val isActive = isAgentActiveStatus(job.status) || isAgentActiveStatus(message?.status.orEmpty())
-        val sorted = parts.sortedBy { it.sequence }
-        for (part in sorted) {
-            when (part.part.str("type")) {
-                "text" -> {
-                    val t = part.part.str("text")
-                    if (t.isNotBlank()) uiParts += UIMessagePart.Text(t)
-                }
-                "reasoning" -> {
-                    val t = part.part.str("text")
-                    if (t.isNotBlank()) uiParts += UIMessagePart.Thinking(t)
-                }
-                "tool_call" -> {
-                    uiParts += UIMessagePart.ServerTool(
-                        toolCallId = part.part.str("id"),
-                        toolName = part.part.str("name"),
-                        input = part.part["input"],
-                        output = null,
-                        status = if (isActive) ServerToolStatus.IN_PROGRESS else ServerToolStatus.COMPLETED,
-                    )
-                }
-                "tool_result" -> {
-                    // Merge result into the matching tool_call part if present, otherwise emit notice.
-                    val callId = part.part.str("callId")
-                    val existing = uiParts.indexOfLast { p ->
-                        p is UIMessagePart.ServerTool && p.toolCallId == callId
-                    }
-                    if (existing >= 0) {
-                        val prev = uiParts[existing] as UIMessagePart.ServerTool
-                        uiParts[existing] = prev.copy(
-                            output = part.part["result"],
-                            status = if (isActive) ServerToolStatus.IN_PROGRESS else ServerToolStatus.COMPLETED,
-                        )
-                    }
-                }
-                "artifact" -> {
-                    val path = part.part.str("path")
-                    val size = part.part["size"]?.jsonPrimitive?.intOrNull ?: 0
-                    if (path.isNotBlank()) uiParts += UIMessagePart.Text("📎 $path ($size bytes)")
-                }
-                "approval" -> {
-                    uiParts += UIMessagePart.Notice(
-                        title = "工具调用待审批",
-                        text = part.part.str("toolName").ifBlank { "需要您的审批才能继续" },
-                    )
-                }
-                "error" -> {
-                    val code = part.part.str("code")
-                    uiParts += UIMessagePart.Notice(title = "执行出错", text = code)
-                }
-            }
-        }
-        if (uiParts.isEmpty() && isActive) uiParts += UIMessagePart.Text("")
+        messageId: Uuid, job: RemoteAgentJob, message: RemoteAgentMessage?, parts: List<RemoteAgentPart>,
+    ): UIMessage = UIMessage(
+        id = messageId,
+        role = MessageRole.ASSISTANT,
+        parts = renderAcpParts(parts, job.status, kotlin.time.Instant.fromEpochMilliseconds(parseAgentIsoMillis(job.created))),
+        createdAt = parseAgentLocalDateTime(job.created),
+        modelSnapshot = ModelSnapshot(job.model, job.agentModel),
+    )
 
-        val agentName = job.agentModel.ifBlank { job.model }.ifBlank { "Agent" }
-        return UIMessage(
-            id = messageId,
-            role = MessageRole.ASSISTANT,
-            parts = uiParts,
-            annotations = emptyList(),
-            createdAt = PocketBaseAgentCloudClient.parseLocalDateTime(job.created),
-            modelSnapshot = ModelSnapshot(displayName = agentName, modelId = job.model),
+    private fun turnNodes(job: RemoteAgentJob, parts: List<RemoteAgentPart>): List<MessageNode> {
+        val messages = listOf(
+            UIMessage(
+                id = stableAgentUuid("acp-user:${job.id}"),
+                role = MessageRole.USER,
+                parts = listOf(UIMessagePart.Text(job.prompt)),
+                createdAt = parseAgentLocalDateTime(job.created),
+            ),
+            buildAssistantUIMessage(stableAgentUuid("acp-assistant:${job.id}"), job, null, parts),
         )
+        return messages.map { MessageNode(id = it.id, messages = listOf(it)) }
     }
 
-    // ── Private helpers ──────────────────────────────────────────────────────
-
-    private suspend fun createSession(
-        session: me.rerere.rikkahub.data.workflow.WorkflowSession,
-        title: String,
-        agent: String,
-    ): String {
-        val projects = fetchProjects(session)
-        val project = projects.firstOrNull()
-            ?: throw WorkflowApiException("无可用的 ACP 项目，请先在 Gateway 配置项目授权")
-        val selectedAgent = if (agent in project.agents) agent else project.agents.firstOrNull() ?: "antigravity"
-        val resp = workflowRepository.executeJsonCancellable(
-            baseUrl = ACP_WORKER_URL,
-            path = "/v1/sessions",
-            method = "POST",
-            body = buildJsonObject {
-                put("projectId", project.id)
-                put("agent", selectedAgent)
-                put("title", title)
-                put("requestKey", Uuid.random().toString())
-            },
-            token = session.token,
-            authPrefix = "Bearer ",
-        ).jsonObject
-        return resp.str("id").ifBlank { throw WorkflowApiException("ACP session ID missing") }
-    }
-
-    private suspend fun fetchProjects(
-        session: me.rerere.rikkahub.data.workflow.WorkflowSession,
-    ): List<AcpProject> {
-        val resp = workflowRepository.executeJsonCancellable(
-            baseUrl = ACP_WORKER_URL, path = "/v1/projects", method = "GET",
-            token = session.token, authPrefix = "Bearer ",
-        ).jsonObject
-        return resp["items"]?.jsonArray.orEmpty().mapNotNull { it.jsonObject.toAcpProject() }
-    }
-
-    private suspend fun fetchPagedSessions(
-        session: me.rerere.rikkahub.data.workflow.WorkflowSession,
-    ): List<AcpSession> {
-        val result = mutableListOf<AcpSession>()
-        var page = 1
-        while (page <= 20) {
-            val resp = workflowRepository.executeJsonCancellable(
-                baseUrl = ACP_WORKER_URL, path = "/v1/sessions", method = "GET",
-                query = mapOf("page" to "$page"),
-                token = session.token, authPrefix = "Bearer ",
-            ).jsonObject
-            val items = resp["items"]?.jsonArray ?: break
-            items.forEach { result += it.jsonObject.toAcpSession() }
-            page = resp["nextPage"]?.jsonPrimitive?.intOrNull ?: break
+    private fun api(): Api {
+        val account = accountProvider() ?: throw WorkflowApiException("请先连接 AnyWorkflow 账号。")
+        if (account.baseUrl.trimEnd('/') != DEFAULT_POCKETBASE_URL) {
+            throw WorkflowApiException("请使用默认 AnyWorkflow 账号连接 ACP。")
         }
-        return result
+        return Api(account)
     }
 
-    private suspend fun fetchPagedTasks(
-        session: me.rerere.rikkahub.data.workflow.WorkflowSession,
-        sessionId: String,
-        limit: Int = Int.MAX_VALUE,
-    ): List<AcpTaskSnapshot> {
-        val result = mutableListOf<AcpTaskSnapshot>()
-        var page = 1
-        while (page <= 20 && result.size < limit) {
-            val resp = workflowRepository.executeJsonCancellable(
-                baseUrl = ACP_WORKER_URL,
-                path = "/v1/sessions/$sessionId/tasks",
-                method = "GET",
-                query = mapOf("page" to "$page"),
-                token = session.token, authPrefix = "Bearer ",
-            ).jsonObject
-            val items = resp["items"]?.jsonArray ?: break
-            items.forEach { result += it.jsonObject.toAcpTask() }
-            page = resp["nextPage"]?.jsonPrimitive?.intOrNull ?: break
-        }
-        return result.take(limit)
-    }
+    private inner class Api(val account: WorkflowSession) {
+        suspend inline fun <reified T> call(
+            path: String, body: JsonObject? = null, query: Map<String, String> = emptyMap(),
+        ): T = decode(serializer<T>(), path, body, query)
 
-    private suspend fun fetchTask(
-        session: me.rerere.rikkahub.data.workflow.WorkflowSession,
-        taskId: String,
-    ): AcpTaskSnapshot {
-        val resp = workflowRepository.executeJsonCancellable(
-            baseUrl = ACP_WORKER_URL, path = "/v1/tasks/$taskId", method = "GET",
-            token = session.token, authPrefix = "Bearer ",
-        ).jsonObject
-        return resp.toAcpTask()
-    }
+        suspend fun <T> decode(
+            serializer: DeserializationStrategy<T>, path: String, body: JsonObject?, query: Map<String, String>,
+        ): T = parser.decodeFromJsonElement(serializer, request.execute(account, path, body, query))
 
-    private suspend fun fetchEvents(
-        session: me.rerere.rikkahub.data.workflow.WorkflowSession,
-        taskId: String,
-        after: Int,
-    ): List<AcpEvent> {
-        val resp = workflowRepository.executeJsonCancellable(
-            baseUrl = ACP_WORKER_URL,
-            path = "/v1/tasks/$taskId/events",
-            method = "GET",
-            query = mapOf("after" to "$after"),
-            token = session.token, authPrefix = "Bearer ",
-        ).jsonObject
-        return resp["items"]?.jsonArray.orEmpty().mapNotNull { it.jsonObject.toAcpEvent() }
-    }
-
-    private fun buildTurnNodes(
-        job: RemoteGeminiJob,
-        message: RemoteGeminiMessage?,
-        parts: List<RemoteAgentPart>,
-        session: me.rerere.rikkahub.data.workflow.WorkflowSession,
-    ): List<MessageNode> {
-        val turnId = job.id
-        val userMsg = UIMessage(
-            id = stableAgentUuid("acp-user:$turnId"),
-            role = MessageRole.USER,
-            parts = listOf(UIMessagePart.Text(job.prompt)),
-            createdAt = PocketBaseAgentCloudClient.parseLocalDateTime(job.created),
-        )
-        val assistantMsg = buildAssistantUIMessage(
-            messageId = stableAgentUuid("acp-asst:$turnId"),
-            job = job,
-            message = message,
-            parts = parts,
-        )
-        return listOf(
-            MessageNode(id = stableAgentUuid("acp-node-u:$turnId"), messages = listOf(userMsg), selectIndex = 0),
-            MessageNode(id = stableAgentUuid("acp-node-a:$turnId"), messages = listOf(assistantMsg), selectIndex = 0),
-        )
-    }
-
-    /** Build nodes for all tasks in a session, using empty parts for historical turns. */
-    private fun buildAllTurnNodes(
-        tasks: List<AcpTaskSnapshot>,
-        latestTaskId: String,
-        latestParts: List<RemoteAgentPart>,
-        session: me.rerere.rikkahub.data.workflow.WorkflowSession,
-    ): List<MessageNode> = tasks.flatMap { task ->
-        val parts = if (task.id == latestTaskId) latestParts else emptyList()
-        val job = task.toRemoteGeminiJob(task.sessionId)
-        val message = task.toRemoteGeminiMessage(task.sessionId)
-        buildTurnNodes(job, message, parts, session)
-    }
-
-    private fun mergeParts(
-        existing: List<RemoteAgentPart>,
-        incoming: List<RemoteAgentPart>,
-    ): List<RemoteAgentPart> {
-        val byKey = existing.associateByTo(LinkedHashMap()) { it.key }
-        for (p in incoming) {
-            if (p.revision > (byKey[p.key]?.revision ?: -1)) byKey[p.key] = p
-        }
-        return byKey.values.sortedBy { it.sequence }
-    }
-
-    // ── ACP event → RemoteAgentPart conversion ───────────────────────────────
-
-    private fun List<AcpEvent>.toRemoteAgentParts(taskId: String): List<RemoteAgentPart> {
-        val parts = mutableListOf<RemoteAgentPart>()
-        // Accumulate consecutive chunks of the same type together.
-        var accText = StringBuilder()
-        var accThinking = StringBuilder()
-        var lastTextSeq = -1
-        var lastThinkingSeq = -1
-
-        fun flushText(seq: Int) {
-            if (accText.isNotEmpty()) {
-                parts += RemoteAgentPart(
-                    key = "$taskId-text-$seq",
-                    sequence = seq,
-                    revision = seq,
-                    part = buildJsonObject { put("type", "text"); put("text", accText.toString()) },
-                )
-                accText = StringBuilder()
-            }
-        }
-        fun flushThinking(seq: Int) {
-            if (accThinking.isNotEmpty()) {
-                parts += RemoteAgentPart(
-                    key = "$taskId-reasoning-$seq",
-                    sequence = seq,
-                    revision = seq,
-                    part = buildJsonObject { put("type", "reasoning"); put("text", accThinking.toString()) },
-                )
-                accThinking = StringBuilder()
+        suspend inline fun <reified T> postWithRetry(path: String, body: JsonObject): T {
+            try {
+                return call(path, body)
+            } catch (error: WorkflowApiException) {
+                if (error.statusCode != 0 && error.statusCode !in 500..599) throw error
+                delay(350)
+                return call(path, body)
             }
         }
 
-        for (event in this) {
-            when (event.type) {
-                "update" -> {
-                    val data = event.data ?: continue
-                    val kind = data.str("sessionUpdate")
-                    val content = data["content"]?.jsonObject
-                    when (kind) {
-                        "agent_message_chunk" -> {
-                            if (content?.str("type") == "text") {
-                                flushThinking(lastThinkingSeq)
-                                accText.append(content.str("text"))
-                                lastTextSeq = event.sequence
-                            }
-                        }
-                        "agent_thought_chunk" -> {
-                            if (content?.str("type") == "text") {
-                                flushText(lastTextSeq)
-                                accThinking.append(content.str("text"))
-                                lastThinkingSeq = event.sequence
-                            }
-                        }
-                        "tool_call" -> {
-                            flushText(lastTextSeq); flushThinking(lastThinkingSeq)
-                            val tc = data["toolCall"]?.jsonObject ?: continue
-                            parts += RemoteAgentPart(
-                                key = "$taskId-tc-${event.sequence}",
-                                sequence = event.sequence,
-                                revision = event.sequence,
-                                part = buildJsonObject {
-                                    put("type", "tool_call")
-                                    put("id", tc.str("id"))
-                                    put("name", tc.str("name"))
-                                    tc["input"]?.let { put("input", it) }
-                                },
-                            )
-                        }
-                        "tool_result" -> {
-                            val tr = data["toolResult"]?.jsonObject ?: continue
-                            parts += RemoteAgentPart(
-                                key = "$taskId-tr-${event.sequence}",
-                                sequence = event.sequence,
-                                revision = event.sequence,
-                                part = buildJsonObject {
-                                    put("type", "tool_result")
-                                    put("callId", tr.str("toolCallId"))
-                                    tr["result"]?.let { put("result", it) }
-                                },
-                            )
-                        }
-                        "config_option_update" -> { /* ignore */ }
-                    }
-                }
-                "approval" -> {
-                    flushText(lastTextSeq); flushThinking(lastThinkingSeq)
-                    val data = event.data ?: continue
-                    parts += RemoteAgentPart(
-                        key = "$taskId-approval-${event.sequence}",
-                        sequence = event.sequence,
-                        revision = event.sequence,
-                        part = buildJsonObject {
-                            put("type", "approval")
-                            put("id", data.str("id"))
-                            data["toolCall"]?.let { put("toolCall", it) }
-                            data["options"]?.let { put("options", it) }
-                        },
-                    )
-                }
-                "artifact" -> {
-                    flushText(lastTextSeq); flushThinking(lastThinkingSeq)
-                    val data = event.data ?: continue
-                    parts += RemoteAgentPart(
-                        key = "$taskId-artifact-${event.sequence}",
-                        sequence = event.sequence,
-                        revision = event.sequence,
-                        part = buildJsonObject {
-                            put("type", "artifact")
-                            put("path", data.str("path"))
-                            data["size"]?.let { put("size", it) }
-                            data["id"]?.let { put("fileId", it) }
-                        },
-                    )
-                }
-                "stop" -> { /* terminal marker, nothing to emit */ }
-                "error" -> {
-                    flushText(lastTextSeq); flushThinking(lastThinkingSeq)
-                    val data = event.data ?: continue
-                    parts += RemoteAgentPart(
-                        key = "$taskId-error-${event.sequence}",
-                        sequence = event.sequence,
-                        revision = event.sequence,
-                        part = buildJsonObject {
-                            put("type", "error")
-                            put("code", data.str("code"))
-                        },
-                    )
-                }
+        suspend inline fun <reified T> page(path: String, page: Int): AcpPage<T> =
+            call(path, query = mapOf("page" to page.toString()))
+
+        suspend inline fun <reified T> list(path: String): List<T> = list(path, serializer<AcpPage<T>>())
+
+        suspend fun <T> list(path: String, serializer: DeserializationStrategy<AcpPage<T>>): List<T> {
+            val result = mutableListOf<T>()
+            var next: Int? = 1
+            while (next != null) {
+                val page = decode(serializer, path, null, mapOf("page" to next.toString()))
+                result.addAll(page.items)
+                next = page.nextPage
             }
+            return result
         }
-        // Flush any remaining accumulated text/thinking.
-        flushText(lastTextSeq); flushThinking(lastThinkingSeq)
-        return parts
+
+        suspend fun events(id: String, after: Int, through: Int): AcpEvents {
+            val items = mutableListOf<AcpEvent>()
+            var cursor = after
+            var batch: AcpEvents
+            do {
+                batch = call("/tasks/$id/events", query = mapOf("after" to cursor.toString()))
+                require(batch.cursor >= cursor && (batch.items.isEmpty() || batch.cursor > cursor))
+                items += batch.items
+                cursor = batch.cursor
+                // Take a snapshot of running turns, and drain terminal turns completely.
+                // An empty page signals that we have caught up even while the agent is running.
+            } while (batch.items.isNotEmpty() && !batch.done &&
+                (cursor < through || batch.items.size == 50 || batch.state.toAgentStatus() in TERMINAL_STATUSES))
+            return batch.copy(items = items)
+        }
     }
 }
 
-// ── Internal ACP data classes ─────────────────────────────────────────────────
+internal fun interface AcpRequest {
+    suspend fun execute(
+        account: WorkflowSession, path: String, body: JsonObject?, query: Map<String, String>,
+    ): kotlinx.serialization.json.JsonElement
+}
 
-private data class AcpProject(val id: String, val name: String, val agents: List<String>)
-private data class AcpSession(val id: String, val agent: String, val title: String, val updated: String)
-internal data class AcpTaskSnapshot(
+@Serializable
+private data class AcpPage<T>(val items: List<T>, val nextPage: Int? = null)
+
+@Serializable
+private data class AcpProject(val id: String, val agents: List<String>)
+
+@Serializable
+private data class AcpSession(
+    val id: String,
+    val agent: String,
+    val title: String,
+    val created: String = "",
+    val pinned: Boolean? = null,
+    val latestTask: AcpTaskRef? = null,
+)
+
+@Serializable
+private data class AcpTaskRef(val id: String, val state: String, val created: String)
+
+@Serializable
+private data class AcpTask(
     val id: String,
     val sessionId: String,
     val prompt: String,
     val state: String,
     val cursor: Int,
     val created: String,
-    val updated: String,
     val config: JsonObject,
-    val retryOf: String?,
-)
-private data class AcpEvent(val sequence: Int, val type: String, val data: JsonObject?)
+    val retryOf: String? = null,
+    val pendingApproval: AcpApproval? = null,
+) {
+    fun approval(parts: List<RemoteAgentPart>): AgentApproval? = pendingApproval?.let { pending ->
+        val data = parts.lastOrNull {
+            it.part.text("type") == "approval" && it.part.text("id") == pending.id
+        }?.part
+        val title = (data?.get("toolCall") as? JsonObject)?.text("title").orEmpty()
+        AgentApproval(id, pending.id, title, pending.options.map { AgentApprovalOption(it.optionId, it.name) })
+    }
 
-// ── JsonObject → data class parsers ──────────────────────────────────────────
+    fun toSubmittedJob() = RemoteSubmittedJob(id, sessionId, state.toAgentStatus())
 
-private fun JsonObject.toAcpProject() = AcpProject(
-    id = str("id").ifBlank { return null },
-    name = str("name"),
-    agents = this["agents"]?.jsonArray.orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull },
-)
-
-private fun JsonObject.toAcpSession() = AcpSession(
-    id = str("id"),
-    agent = str("agent"),
-    title = str("title"),
-    updated = str("updated"),
-)
-
-private fun JsonObject.toAcpTask() = AcpTaskSnapshot(
-    id = str("id"),
-    sessionId = str("sessionId"),
-    prompt = str("prompt"),
-    state = str("state"),
-    cursor = this["cursor"]?.jsonPrimitive?.intOrNull ?: 0,
-    created = str("created"),
-    updated = str("updated"),
-    config = this["config"]?.jsonObject ?: JsonObject(emptyMap()),
-    retryOf = str("retryOf").ifBlank { null },
-)
-
-private fun JsonObject.toAcpEvent(): AcpEvent? = AcpEvent(
-    sequence = this["sequence"]?.jsonPrimitive?.intOrNull ?: return null,
-    type = str("type").ifBlank { return null },
-    data = this["data"]?.jsonObject,
-)
-
-// ── AcpTaskSnapshot → Gemini-compatible view objects ─────────────────────────
-
-private fun AcpTaskSnapshot.toStatus(): String = state.toStatus()
-
-private fun String.toStatus(): String = when (this) {
-    "scheduled", "queued" -> "queued"
-    "running", "canceling" -> "running"
-    "succeeded" -> "completed"
-    "failed", "canceled", "interrupted" -> "failed"
-    else -> "queued"
+    fun toJob(session: AcpSession) = RemoteAgentJob(
+        id = id, owner = "", threadRoot = sessionId, parentMessage = "", replacesMessage = retryOf.orEmpty(),
+        title = session.title,
+        prompt = prompt, model = config.text("model").ifBlank { session.agent },
+        status = state.toAgentStatus(), error = "", cancelRequested = state == "canceling",
+        githubRunId = "", created = created, updated = created, agentModel = acpAgentName(session.agent),
+    )
 }
 
-internal fun AcpTaskSnapshot.toRemoteGeminiJob(sessionId: String) = RemoteGeminiJob(
-    id = id,
-    owner = "",
-    threadRoot = sessionId,
-    parentMessage = "",
-    replacesMessage = retryOf ?: "",
-    title = prompt.take(80),
-    prompt = prompt,
-    model = config.str("model").ifBlank { "antigravity" },
-    status = state.toStatus(),
-    error = "",
-    cancelRequested = state == "canceling",
-    githubRunId = "",
-    created = created,
-    updated = updated,
-    agentModel = config.str("model").ifBlank { "antigravity" },
+@Serializable
+private data class AcpApproval(val id: String, val options: List<AcpApprovalOption>)
+
+@Serializable
+private data class AcpApprovalOption(val optionId: String, val name: String)
+
+@Serializable
+internal data class AcpEvent(val sequence: Int, val type: String, val data: JsonObject?) {
+    fun toPart(taskId: String) = RemoteAgentPart(
+        key = "$taskId:$sequence", sequence = sequence, revision = sequence,
+        part = buildJsonObject {
+            data?.forEach { (key, value) -> put(key, value) }
+            put("type", type)
+        },
+    )
+}
+
+@Serializable
+private data class AcpEvents(val items: List<AcpEvent>, val cursor: Int, val state: String, val done: Boolean)
+
+private val TERMINAL_STATUSES = setOf("succeeded", "failed", "canceled")
+
+internal fun String.toAgentStatus(): String = when (this) {
+    "scheduled", "queued" -> "queued"
+    "running", "canceling" -> "running"
+    "succeeded" -> "succeeded"
+    "canceled" -> "canceled"
+    else -> "failed"
+}
+
+private fun RemoteAgentJob.toMessage(cursor: Int) = RemoteAgentMessage(
+    id = id, owner = owner, job = id, index = 0, part = 0, sourceName = "", sourceId = "",
+    inputText = prompt, status = status, reply = "", error = error, finishReason = "",
+    startedAt = created, finishedAt = updated, updated = updated, streamRevision = cursor,
+    usage = RemoteAgentUsage(),
 )
 
-internal fun AcpTaskSnapshot.toRemoteGeminiMessage(sessionId: String) = RemoteGeminiMessage(
-    id = "$id-msg",
-    owner = "",
-    job = id,
-    index = 0,
-    part = 0,
-    sourceName = "",
-    sourceId = "",
-    inputText = "",
-    status = state.toStatus(),
-    reply = "",
-    error = "",
-    finishReason = when (state) {
-        "succeeded" -> "STOP"
-        "failed", "interrupted" -> "ERROR"
-        "canceled" -> "CANCELLED"
-        else -> ""
-    },
-    startedAt = created,
-    finishedAt = updated,
-    updated = updated,
-    streamRevision = cursor,
-    usage = RemoteGeminiUsage(),
-)
+internal fun acpAgentName(agent: String): String = when (agent) {
+    "antigravity" -> "Antigravity"
+    "codex" -> "Codex"
+    "claude-code" -> "Claude Code"
+    "command-code" -> "Command Code"
+    "opencode" -> "OpenCode"
+    else -> agent
+}
 
-private fun JsonObject.str(key: String): String =
-    this[key]?.let { (it as? JsonPrimitive)?.contentOrNull } ?: ""
+/**
+ * Adapters advertise stable picker values, not upstream model ids. Sending the raw id
+ * makes the Gateway reject the turn with `unsupported_model`, taking the thinking level
+ * down with it because the whole config fails.
+ */
+internal fun acpModelValue(agent: String, modelId: String): String {
+    val clean = modelId.trim().removePrefix("models/")
+    if (agent != "claude-code") return clean
+    return when (clean) {
+        "claude-sonnet-5-5" -> "sonnet"
+        "claude-opus-5-5" -> "opus"
+        "claude-haiku-5-5" -> "haiku"
+        else -> clean
+    }
+}
+
+internal fun JsonObject.text(key: String): String = (this[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
+
+internal fun buildAcpPrompt(
+    prompt: String, sources: List<RemoteAgentSourceInput>, images: List<String>, instructions: String?,
+    history: List<RemoteHistoryTurn>,
+): String = buildString {
+    instructions?.takeIf { it.isNotBlank() }?.let { append("会话指令：\n").append(it).append("\n\n") }
+    if (history.isNotEmpty()) {
+        appendLine("此前对话：")
+        for (turn in history) {
+            appendLine(if (turn.role == "user") "用户：" else "助手：")
+            appendLine(turn.text)
+            turn.images.forEach { appendLine(it) }
+        }
+        appendLine()
+        appendLine("当前消息：")
+    }
+    append(prompt)
+    sources.forEach { append("\n\n附件 ").append(it.name).append("：\n").append(it.content) }
+    images.forEach { append("\n图片链接：").append(it) }
+}.trim().also {
+    if (it.isBlank() || it.length > 48_000 || it.toByteArray().size > 60_000) {
+        throw WorkflowApiException("ACP 消息为空或超出长度限制。请缩短消息或附件。")
+    }
+}

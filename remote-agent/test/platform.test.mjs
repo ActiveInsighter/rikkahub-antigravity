@@ -85,6 +85,8 @@ test('Worker → PocketBase → Linux Gateway → ACP', {
       'commit', '-m', 'Authorized read-only fixture']);
     const migrations = join(root, 'migrations');
     await cp(join(here, 'pocketbase/pb_migrations'), migrations, { recursive: true });
+    const metadataMigration = '1795570100_remote_session_metadata.js';
+    await rm(join(migrations, metadataMigration));
     await writeFile(join(migrations, '1795569900_fixture.js'), `
       migrate(app => app.save(new Collection({ name: 'aw_clients', type: 'auth' })), app => {});
     `);
@@ -114,14 +116,21 @@ test('Worker → PocketBase → Linux Gateway → ACP', {
     const other = await user('other');
     const real = process.env.RIKKA_TEST_REAL_CONFIG
       ? JSON.parse(await readFile(process.env.RIKKA_TEST_REAL_CONFIG, 'utf8')) : {};
-    await stop(pb);
-    pbEnv.RIKKA_GATEWAY_OWNER = owner;
-    pb = startPB();
-    await wait(() => fetch(pbUrl + '/api/health').then(r => r.ok));
     const project = await checked(pbUrl, '/api/collections/aw_remote_projects/records', {
       token: admin, body: { owner, name: 'Authorized test repository', workspaceKey: 'authorized',
         agents: ['fixture', ...Object.keys(real)], enabled: true },
     });
+    const creation = { projectId: project.id, agent: 'fixture', title: 'Original session', requestKey: id() };
+    const s = await checked(pbUrl, '/api/collections/aw_remote_sessions/records', {
+      token: admin,
+      body: { owner, project: project.id, agent: creation.agent, title: creation.title, requestKey: creation.requestKey },
+    });
+    await stop(pb);
+    await cp(join(here, 'pocketbase/pb_migrations', metadataMigration), join(migrations, metadataMigration));
+    await exec(pocketbase, [...args, 'migrate', 'up']);
+    pbEnv.RIKKA_GATEWAY_OWNER = owner;
+    pb = startPB();
+    await wait(() => fetch(pbUrl + '/api/health').then(r => r.ok));
     assert.equal((await checked(pbUrl, '/api/rikka/remote/v1/projects', { token })).items[0].id, project.id);
     const configPath = join(root, 'gateway.json');
     await writeFile(configPath, JSON.stringify({
@@ -154,7 +163,10 @@ test('Worker → PocketBase → Linux Gateway → ACP', {
     })).status, 404);
     assert.equal((await call(workerUrl, '/v1/projects', { token: 'invalid' })).status, 401);
     const session = async agent => request('/sessions', { projectId: project.id, agent, title: agent, requestKey: id() });
-    const s = await session('fixture');
+    const upgraded = (await request('/sessions')).items.find(item => item.id === s.id);
+    assert.equal(upgraded.title, creation.title);
+    assert.equal(upgraded.pinned, false);
+    assert.equal(upgraded.created, s.created);
     assert.equal((await call(workerUrl, '/v1/sessions/' + s.id, { token: other.token })).status, 404);
 
     const submit = (s, prompt, extra = {}) => request('/sessions/' + s.id + '/tasks', { prompt, requestKey: id(), ...extra });
@@ -162,6 +174,7 @@ test('Worker → PocketBase → Linux Gateway → ACP', {
     const duplicated = () => submit(s, 'approve', { requestKey: firstKey, config: { thought_level: 'high' } });
     const [first, duplicate] = await Promise.all([duplicated(), duplicated()]);
     assert.equal(duplicate.id, first.id);
+    assert.equal((await call(workerUrl, '/v1/sessions/' + s.id + '/delete', { token, body: {} })).status, 409);
     assert.equal((await call(workerUrl, '/v1/sessions/' + s.id + '/tasks',
       { token, body: { requestKey: firstKey, prompt: 'different' } })).status, 409);
     const task = id => request('/tasks/' + id);
@@ -193,11 +206,18 @@ test('Worker → PocketBase → Linux Gateway → ACP', {
     assert.match(resumed.headers.get('Content-Type'), /text\/event-stream/);
     assert.doesNotMatch(await resumed.text(), /event: approval/);
 
-    const delayed = await submit(s, 'second turn', { runAt: Date.now() + 3500 });
+    const memory = id();
+    const remembered = await submit(s, 'remember ' + memory);
+    assert.equal((await finish(remembered.id)).state, 'succeeded');
+    const delayed = await submit(s, 'recall', { runAt: Date.now() + 3500 });
     assert.equal((await task(delayed.id)).state, 'scheduled');
     await fetch(workerUrl + '/__scheduled');
     assert.equal((await task(delayed.id)).state, 'scheduled');
-    assert.equal((await finish(delayed.id)).state, 'succeeded');
+    const continued = await finish(delayed.id);
+    assert.equal(continued.state, 'succeeded');
+    assert.match(JSON.stringify(continued.items), new RegExp('remembered=' + memory + '.*effort=high'));
+    assert.doesNotMatch(JSON.stringify(continued.items), /REPLAYED HISTORY/);
+    assert.equal((await request('/sessions')).items.find(item => item.id === s.id).latestTask.id, delayed.id);
     const workflow = await submit(s, 'workflow turn', { runAt: Date.now() + 8000 });
     assert.equal((await task(workflow.id)).state, 'scheduled');
     assert.equal((await finish(workflow.id, 30000)).state, 'succeeded');
@@ -247,6 +267,25 @@ test('Worker → PocketBase → Linux Gateway → ACP', {
     assert.equal(await (await fetch(workerUrl + '/v1/artifacts/' + generated.id, {
       headers: { Authorization: 'Bearer ' + token },
     })).text(), marker);
+
+    const metadata = await request('/sessions/' + s.id + '/metadata', { title: 'Renamed session', pinned: true });
+    assert.equal(metadata.title, 'Renamed session');
+    assert.equal(metadata.pinned, true);
+    const index = (await request('/sessions')).items.find(item => item.id === s.id);
+    assert.equal(index.title, metadata.title);
+    assert.equal(index.pinned, true);
+    const replay = await request('/sessions', creation);
+    assert.equal(replay.id, s.id);
+    assert.equal(replay.title, metadata.title);
+    assert.equal((await call(workerUrl, '/v1/sessions',
+      { token, body: { ...creation, title: metadata.title } })).status, 409);
+    assert.equal((await call(workerUrl, '/v1/sessions/' + s.id + '/delete',
+      { token: other.token, body: {} })).status, 404);
+    await request('/sessions/' + s.id + '/delete', {});
+    assert.equal((await request('/sessions')).items.some(item => item.id === s.id), false);
+    assert.equal((await call(workerUrl, '/v1/sessions/' + s.id, { token })).status, 404);
+    assert.equal((await call(workerUrl, '/v1/sessions/' + s.id + '/tasks',
+      { token, body: { prompt: 'after deletion', requestKey: id() } })).status, 404);
 
     await Promise.all(Object.keys(real).map(agent => t.test(agent, async () => {
       const agentSession = await session(agent);

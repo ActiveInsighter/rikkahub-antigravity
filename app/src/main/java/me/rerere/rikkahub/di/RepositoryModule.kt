@@ -124,23 +124,15 @@ val repositoryModule = module {
     }
 
     single<me.rerere.rikkahub.data.agent.AgentCloudClient> {
-        me.rerere.rikkahub.data.agent.AcpAgentCloudClient(get(), get())
+        me.rerere.rikkahub.data.agent.AcpAgentCloudClient(get())
     }
 
     single {
-        me.rerere.rikkahub.data.agent.AgentGatewayClient(get())
+        me.rerere.rikkahub.data.agent.AgentRepository(get(), get(), get(), get(), get())
     }
 
     single {
-        me.rerere.rikkahub.data.agent.AgentRepository(get(), get(), get(), get(), get(), get())
-    }
-
-    single {
-        me.rerere.rikkahub.data.agent.PocketBaseAgentRealtime(get())
-    }
-
-    single {
-        me.rerere.rikkahub.data.agent.AgentRealtimeSync(get(), get(), get())
+        me.rerere.rikkahub.data.agent.AgentSync(get(), get())
     }
 
     single {

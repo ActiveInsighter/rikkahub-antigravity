@@ -129,7 +129,6 @@ val viewModelModule = module {
             settingsStore = get(),
             globalSettingsStore = get(),
             workflowRepository = get(),
-            gatewayClient = get(),
         )
     }
     viewModel {

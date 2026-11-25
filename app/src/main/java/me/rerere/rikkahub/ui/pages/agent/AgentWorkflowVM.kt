@@ -50,9 +50,13 @@ class AgentWorkflowVM(
         viewModelScope.launch {
             session.collectLatest { current ->
                 _schedules.value = emptyList()
-                _backendNotice.value = if (current == null) "请先连接 AnyWorkflow 云端账号" else null
+                _backendNotice.value = when {
+                    current == null -> "请先连接 AnyWorkflow 云端账号"
+                    !cloudClient.supportsRecurringSchedules -> "ACP 服务暂未开放周期任务。"
+                    else -> null
+                }
                 _isLoading.value = false
-                if (current != null) refresh()
+                if (current != null && cloudClient.supportsRecurringSchedules) refresh()
             }
         }
     }
@@ -104,6 +108,10 @@ class AgentWorkflowVM(
         val current = session.value
         if (current == null) {
             _statusMessage.value = "请先连接 AnyWorkflow 云端账号"
+            return
+        }
+        if (!cloudClient.supportsRecurringSchedules) {
+            _statusMessage.value = _backendNotice.value
             return
         }
         if (_isLoading.value) return

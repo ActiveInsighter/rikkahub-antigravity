@@ -65,7 +65,7 @@ import me.rerere.ui.toast.rememberToasterState
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import me.rerere.rikkahub.data.agent.AgentRealtimeSync
+import me.rerere.rikkahub.data.agent.AgentSync
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
 import me.rerere.rikkahub.data.db.MigrationState
@@ -331,9 +331,9 @@ class RouteActivity : ComponentActivity() {
         }
 
         val navigator = remember(backStack) { Navigator(backStack) }
-        val agentRealtime = koinInject<AgentRealtimeSync>()
-        LaunchedEffect(agentRealtime, backStack) {
-            agentRealtime.keepSynced(
+        val agentSync = koinInject<AgentSync>()
+        LaunchedEffect(agentSync, backStack) {
+            agentSync.keepSynced(
                 combine(
                     lifecycle.currentStateFlow,
                     snapshotFlow { (backStack.lastOrNull() as? Screen.Agent)?.id },
