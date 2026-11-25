@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.chat
 
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.AlertCircle
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Forward02
 import me.rerere.hugeicons.stroke.Pin
@@ -24,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -316,121 +318,150 @@ private fun ConversationItem(
             }
             when {
                 statusBadge == ConversationStatusBadge.RUNNING -> {
-                    androidx.compose.material3.LoadingIndicator(
+                    Box(
                         modifier = Modifier
-                            .size(14.dp)
+                            .size(16.dp)
                             .semantics { contentDescription = "Running" },
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(13.dp),
+                            strokeWidth = 1.75.dp,
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                        )
+                    }
                 }
                 statusBadge == ConversationStatusBadge.COMPLETED_UNREAD -> {
                     Box(
                         modifier = Modifier
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary)
-                            .size(8.dp)
-                            .semantics { contentDescription = "Unread" }
-                    )
+                            .size(16.dp)
+                            .semantics { contentDescription = "Unread" },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(12.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary)
+                            )
+                        }
+                    }
                 }
                 statusBadge == ConversationStatusBadge.FAILED -> {
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = CircleShape,
-                        modifier = Modifier.semantics { contentDescription = "Failed" },
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .semantics { contentDescription = "Failed" },
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = "失败",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                        Icon(
+                            imageVector = HugeIcons.AlertCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp),
+                            tint = MaterialTheme.colorScheme.error,
                         )
                     }
                 }
                 loading -> {
-                    androidx.compose.material3.LoadingIndicator(
+                    Box(
                         modifier = Modifier
-                            .size(14.dp)
+                            .size(16.dp)
                             .semantics { contentDescription = "Loading" },
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(13.dp),
+                            strokeWidth = 1.75.dp,
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                        )
+                    }
                 }
             }
-            DropdownMenu(
-                expanded = showDropdownMenu,
-                onDismissRequest = { showDropdownMenu = false },
-            ) {
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            if (conversation.isPinned) stringResource(R.string.unpin_chat) else stringResource(R.string.pin_chat)
-                        )
-                    },
-                    onClick = {
-                        onPin(conversation)
-                        showDropdownMenu = false
-                    },
-                    leadingIcon = {
-                        Icon(
-                            if (conversation.isPinned) HugeIcons.PinOff else HugeIcons.Pin,
-                            null
-                        )
-                    }
-                )
-
-                DropdownMenuItem(
-                    text = {
-                        Text(stringResource(id = R.string.chat_page_regenerate_title))
-                    },
-                    onClick = {
-                        onRegenerateTitle(conversation)
-                        showDropdownMenu = false
-                    },
-                    leadingIcon = {
-                        Icon(HugeIcons.Refresh01, null)
-                    }
-                )
-
-                if (showMoveToAssistant) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(stringResource(R.string.chat_page_move_to_assistant))
-                        },
-                        onClick = {
-                            onMoveToAssistant(conversation)
-                            showDropdownMenu = false
-                        },
-                        leadingIcon = {
-                            Icon(HugeIcons.Forward02, null, modifier = Modifier.mirrorForRtl())
-                        }
+        }
+        DropdownMenu(
+            expanded = showDropdownMenu,
+            onDismissRequest = { showDropdownMenu = false },
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        if (conversation.isPinned) stringResource(R.string.unpin_chat) else stringResource(R.string.pin_chat)
+                    )
+                },
+                onClick = {
+                    onPin(conversation)
+                    showDropdownMenu = false
+                },
+                leadingIcon = {
+                    Icon(
+                        if (conversation.isPinned) HugeIcons.PinOff else HugeIcons.Pin,
+                        null
                     )
                 }
+            )
 
+            DropdownMenuItem(
+                text = {
+                    Text(stringResource(id = R.string.chat_page_regenerate_title))
+                },
+                onClick = {
+                    onRegenerateTitle(conversation)
+                    showDropdownMenu = false
+                },
+                leadingIcon = {
+                    Icon(HugeIcons.Refresh01, null)
+                }
+            )
+
+            if (showMoveToAssistant) {
                 DropdownMenuItem(
                     text = {
-                        Text(stringResource(R.string.chat_page_move_to_folder))
+                        Text(stringResource(R.string.chat_page_move_to_assistant))
                     },
                     onClick = {
-                        onMoveToFolder(conversation)
+                        onMoveToAssistant(conversation)
                         showDropdownMenu = false
                     },
                     leadingIcon = {
-                        Icon(HugeIcons.Folder01, null)
-                    }
-                )
-
-                DropdownMenuItem(
-                    text = {
-                        Text(stringResource(id = R.string.chat_page_delete))
-                    },
-                    onClick = {
-                        onDelete(conversation)
-                        showDropdownMenu = false
-                    },
-                    leadingIcon = {
-                        Icon(HugeIcons.Delete01, null)
+                        Icon(HugeIcons.Forward02, null, modifier = Modifier.mirrorForRtl())
                     }
                 )
             }
+
+            DropdownMenuItem(
+                text = {
+                    Text(stringResource(R.string.chat_page_move_to_folder))
+                },
+                onClick = {
+                    onMoveToFolder(conversation)
+                    showDropdownMenu = false
+                },
+                leadingIcon = {
+                    Icon(HugeIcons.Folder01, null)
+                }
+            )
+
+            DropdownMenuItem(
+                text = {
+                    Text(stringResource(id = R.string.chat_page_delete))
+                },
+                onClick = {
+                    onDelete(conversation)
+                    showDropdownMenu = false
+                },
+                leadingIcon = {
+                    Icon(HugeIcons.Delete01, null)
+                }
+            )
         }
     }
 }
