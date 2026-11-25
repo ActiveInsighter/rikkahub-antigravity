@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -29,6 +30,8 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Book02
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
+import me.rerere.rikkahub.ui.pages.examdocs.LocalDocsQuestionJump
+import me.rerere.rikkahub.ui.pages.examdocs.containsDockQuestion
 
 @Composable
 internal fun DocAccordion(
@@ -38,6 +41,10 @@ internal fun DocAccordion(
     defaultExpanded: Boolean = false,
 ) {
     var expanded by rememberSaveable(block.title, block.type) { mutableStateOf(defaultExpanded) }
+    val jump = LocalDocsQuestionJump.current?.value
+    LaunchedEffect(jump) {
+        if (jump != null && block.containsDockQuestion(jump.block)) expanded = true
+    }
     val rotation by animateFloatAsState(if (expanded) 90f else 0f, label = "DocAccordionArrow")
     val isSolution = block.type == "solution"
     val defaultTitle = if (isSolution) "参考答案与解析" else "展开详情"

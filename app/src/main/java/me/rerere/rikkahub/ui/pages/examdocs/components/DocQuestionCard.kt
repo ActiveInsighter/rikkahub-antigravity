@@ -99,6 +99,11 @@ import me.rerere.rikkahub.data.examdocs.DocsWrite
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 import me.rerere.rikkahub.ui.components.ui.cardGroupItemShape
 import me.rerere.rikkahub.ui.pages.examdocs.LocalDocsReadingProgress
+import me.rerere.rikkahub.ui.pages.examdocs.LocalDocsQuestionJump
+import me.rerere.rikkahub.ui.pages.examdocs.DocsDockStatus
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import kotlinx.coroutines.delay
 
 private enum class QuestionKind(val label: String, val icon: ImageVector) {
     Single("单选题", HugeIcons.CheckmarkCircle02),
@@ -219,6 +224,16 @@ internal fun DocQuestionCard(
     renderChildren: @Composable (List<ExamDocsSegment>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val jumpState = LocalDocsQuestionJump.current
+    val jump = jumpState?.value
+    val requester = remember { BringIntoViewRequester() }
+    LaunchedEffect(jump) {
+        if (jump?.block === block) {
+            delay(350)
+            requester.bringIntoView()
+            if (jumpState?.value === jump) jumpState?.value = null
+        }
+    }
     val kind = remember(block.attrs["type"]) {
         QuestionKind.entries.firstOrNull { it.name.equals(block.attrs["type"], ignoreCase = true) }
             ?: QuestionKind.Essay
@@ -331,7 +346,7 @@ internal fun DocQuestionCard(
     val hasActions = result != null || multiple || blankCount > 0 || solution != null
 
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().bringIntoViewRequester(requester),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.extraLarge,
     ) {
@@ -891,4 +906,48 @@ private fun countBlankPlaceholders(segment: ExamDocsSegment): Int = when (segmen
         } else 0
     }
     is ExamDocsSegment.CustomBlock -> segment.blocks.sumOf(::countBlankPlaceholders)
+}
+
+internal fun dockQuestionStatus(block: ExamDocsSegment.CustomBlock, saved: DocsSavedAnswer?): DocsDockStatus {
+    val answer = saved?.state ?: return DocsDockStatus.Idle
+    if (!answer.submitted) return if (answer.selected.isNotEmpty() ||
+        answer.values.any(String::isNotBlank) || saved.draft.isNotBlank()) DocsDockStatus.Draft else DocsDockStatus.Idle
+    val kind = QuestionKind.entries.firstOrNull { it.name.equals(block.attrs["type"], ignoreCase = true) }
+        ?: QuestionKind.Essay
+    val grade = when (kind) {
+        QuestionKind.Essay -> SelfGradeOption.entries.firstOrNull { it.letter == answer.selected.firstOrNull() }?.result
+            ?: GradeResult.Recorded
+        QuestionKind.Blank -> {
+            val keys = block.attrs["blanks"]?.let { runCatching { Json.decodeFromString<List<BlankKey>>(it) }.getOrNull() }.orEmpty()
+            val stem = block.blocks.filterNot { it is ExamDocsSegment.CustomBlock && (it.type == "option" || it.type == "solution") }
+            val count = maxOf(1, keys.size, stem.sumOf(::countBlankPlaceholders))
+            val matches = List(count) { index ->
+                when {
+                    "blank:$index:correct" in answer.selected -> true
+                    "blank:$index:incorrect" in answer.selected -> false
+                    else -> keys.getOrNull(index)?.matches(answer.values.getOrElse(index) { "" })
+                }
+            }
+            gradeAnswer(answer.selected, emptySet(), matches).grade
+        }
+        else -> {
+            val correct = if (kind == QuestionKind.Boolean) {
+                when (block.attrs["answer"]?.lowercase()?.toBooleanStrictOrNull()) {
+                    true -> setOf("A")
+                    false -> setOf("B")
+                    null -> emptySet()
+                }
+            } else block.blocks.filterIsInstance<ExamDocsSegment.CustomBlock>().filter { it.type == "option" }
+                .mapIndexedNotNull { index, option ->
+                    if (option.attrs["correct"] == "true") option.attrs["label"] ?: ('A' + index).toString() else null
+                }.toSet()
+            gradeAnswer(answer.selected, correct, emptyList()).grade
+        }
+    }
+    return when (grade) {
+        GradeResult.Correct -> DocsDockStatus.Correct
+        GradeResult.Partial, GradeResult.Missed -> DocsDockStatus.Partial
+        GradeResult.Incorrect -> DocsDockStatus.Incorrect
+        GradeResult.Recorded -> DocsDockStatus.Recorded
+    }
 }

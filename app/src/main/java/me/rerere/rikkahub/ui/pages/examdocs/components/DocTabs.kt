@@ -54,6 +54,8 @@ import me.rerere.bettertext.markdown.MarkdownBlock
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
+import me.rerere.rikkahub.ui.pages.examdocs.LocalDocsQuestionJump
+import me.rerere.rikkahub.ui.pages.examdocs.containsDockQuestion
 import kotlin.math.roundToInt
 
 private data class TabMeasurement(
@@ -77,6 +79,13 @@ internal fun DocTabs(
 
     val isCodeTabs = block.type == "codetabs"
     var selectedIndex by rememberSaveable(tabs.size, block.type) { mutableIntStateOf(0) }
+    val jump = LocalDocsQuestionJump.current?.value
+    LaunchedEffect(jump) {
+        if (jump != null) {
+            val index = tabs.indexOfFirst { it.containsDockQuestion(jump.block) }
+            if (index >= 0) selectedIndex = index
+        }
+    }
     val safeIndex = selectedIndex.coerceIn(0, tabs.lastIndex)
 
     val useCodeLayout = isCodeTabs || remember(tabs) { tabs.all { it.isSingleCodeBlock() } }

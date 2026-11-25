@@ -67,6 +67,8 @@ import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Internet
 import me.rerere.hugeicons.stroke.Search01
+import me.rerere.hugeicons.stroke.UserCircle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.data.examdocs.ExamDocNode
 import me.rerere.rikkahub.data.examdocs.ExamDocsSite
 
@@ -78,12 +80,13 @@ internal fun ExamDocsDirectorySheet(
     onSearchQueryChange: (String) -> Unit,
     onRetry: () -> Unit,
     onSelectPage: (ExamDocNode.Page) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val currentUrl = state.currentPage?.url
     val error = state.treeError
     Column(
-        Modifier.fillMaxWidth().fillMaxHeight(0.86f).padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -95,8 +98,8 @@ internal fun ExamDocsDirectorySheet(
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
-            DocsSiteSelector(state.sites, state.activeSite, onSelectSite)
         }
+        DocsSiteSelector(state.sites, state.activeSite, onSelectSite)
 
         OutlinedTextField(
             value = state.searchQuery,
@@ -340,7 +343,7 @@ private fun DirectoryTree(
                 expanded = entry.expanded,
                 modifier = Modifier
                     .animateItem()
-                    .padding(start = (entry.depth.coerceAtMost(10) * 14).dp),
+                    .padding(start = (entry.depth.coerceAtMost(5) * 10).dp),
                 onClick = {
                     when (node) {
                         is ExamDocNode.Folder -> overrides[entry.key] = !entry.expanded
@@ -379,7 +382,7 @@ private fun DirectoryRow(
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+            Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -445,6 +448,46 @@ private fun DirectoryRow(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun ExamDocsDrawerAccount(onClick: () -> Unit) {
+    val account by org.koin.compose.koinInject<me.rerere.rikkahub.data.examdocs.DocsAccountRepository>().state
+        .collectAsStateWithLifecycle()
+    val user = account.user
+    Surface(
+        onClick = onClick,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+                Icon(HugeIcons.UserCircle, null, Modifier.padding(9.dp).size(24.dp),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(user?.email ?: "Exam Docs 账号", style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    when {
+                        account.restoring -> "正在读取账号…"
+                        account.needsLogin -> "登录已过期 · 点击重新登录"
+                        user == null -> "未登录 · 本机保存"
+                        else -> "已登录 · 管理学习同步"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                )
+            }
+            Icon(HugeIcons.ArrowRight01, "账号设置", Modifier.size(18.dp))
         }
     }
 }
