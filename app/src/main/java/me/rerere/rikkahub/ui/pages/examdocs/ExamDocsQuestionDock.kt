@@ -51,7 +51,7 @@ internal data class DocsDockItem(
     val ordinal: Int,
 )
 
-private fun dockItems(document: ExamDocsDocument): List<DocsDockItem> = buildList {
+internal fun dockItems(document: ExamDocsDocument): List<DocsDockItem> = buildList {
     fun visit(segment: ExamDocsSegment, blockIndex: Int) {
         if (segment !is ExamDocsSegment.CustomBlock) return
         if (segment.type == "question") {
