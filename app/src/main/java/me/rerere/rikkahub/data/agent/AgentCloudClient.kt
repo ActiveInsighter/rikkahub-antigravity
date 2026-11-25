@@ -41,6 +41,29 @@ import kotlin.uuid.Uuid
 
 private const val GEMINI_API = "/api/anyworkflow/gemini"
 internal const val MAX_AGENT_IMAGES = 6
+
+// Top-level helpers used by both implementations and AgentRepository
+internal fun isAgentActiveStatus(status: String): Boolean = when (status) {
+    "queued", "dispatching", "pending", "running" -> true
+    else -> false
+}
+
+internal fun stableAgentUuid(seed: String): kotlin.uuid.Uuid {
+    val jUuid = java.util.UUID.nameUUIDFromBytes(seed.toByteArray(Charsets.UTF_8))
+    return kotlin.uuid.Uuid.fromLongs(jUuid.mostSignificantBits, jUuid.leastSignificantBits)
+}
+
+internal fun parseAgentIsoMillis(raw: String): Long {
+    if (raw.isBlank()) return 0L
+    return runCatching {
+        java.time.Instant.parse(raw.replace(' ', 'T')).toEpochMilli()
+    }.getOrElse {
+        runCatching {
+            java.time.OffsetDateTime.parse(raw.replace(' ', 'T'), java.time.format.DateTimeFormatter.ISO_DATE_TIME)
+                .toInstant().toEpochMilli()
+        }.getOrDefault(0L)
+    }
+}
 private val r2AgentImageUrl = Regex(
     """https://file\.any1\.tech/api/library/image-sources/[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.(jpg|png|webp|gif)""",
 )

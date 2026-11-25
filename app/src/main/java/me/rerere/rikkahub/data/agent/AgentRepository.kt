@@ -124,7 +124,7 @@ class AgentRepository(
     fun observeActiveConversationIds(): Flow<Set<Uuid>> {
         return conversationDao.getAllSortedByUpdateFlow().map { list ->
             list.asSequence()
-                .filter { it.remoteStatus != null && PocketBaseAgentCloudClient.isActiveStatus(it.remoteStatus) }
+                .filter { it.remoteStatus != null && isAgentActiveStatus(it.remoteStatus) }
                 .mapNotNull { runCatching { Uuid.parse(it.id) }.getOrNull() }
                 .toSet()
         }
@@ -184,7 +184,7 @@ class AgentRepository(
             ),
             remoteStatus = entity.remoteStatus,
             lastRemoteMessageId = entity.lastRemoteMessageId,
-            isActive = entity.remoteStatus?.let { PocketBaseAgentCloudClient.isActiveStatus(it) } == true,
+            isActive = entity.remoteStatus?.let { isAgentActiveStatus(it) } == true,
             waitingForMessages = entity.remoteJobId != null && entity.lastRemoteMessageId == null &&
                 (entity.lastSyncedAt == 0L || nodes.isEmpty()),
         )
@@ -209,7 +209,7 @@ class AgentRepository(
         database.withTransaction {
             if (workflowRepository.session.value != session) return@withTransaction
             for (thread in remoteThreads) {
-                val fallbackId = PocketBaseAgentCloudClient.stableUuid("aw-agent:${thread.threadRoot}").toString()
+                val fallbackId = stableAgentUuid("aw-agent:${thread.threadRoot}").toString()
                 val existing = conversationDao.getByRemoteThreadRoot(thread.threadRoot)
                     ?: conversationDao.getById(fallbackId)
                 val now = System.currentTimeMillis()
@@ -290,12 +290,12 @@ class AgentRepository(
                     return@withTransaction null
                 }
 
-                val status = if (remote.isActive && !PocketBaseAgentCloudClient.isActiveStatus(remote.job.status)) {
+                val status = if (remote.isActive && !isAgentActiveStatus(remote.job.status)) {
                     remote.message?.status ?: remote.job.status
                 } else {
                     remote.job.status
                 }
-                val finished = !remote.isActive && PocketBaseAgentCloudClient.isActiveStatus(existing.remoteStatus.orEmpty())
+                val finished = !remote.isActive && isAgentActiveStatus(existing.remoteStatus.orEmpty())
                 val succeeded = status == "succeeded"
                 val becameUnread = (finished && (succeeded || status == "failed")) ||
                     (succeeded && existing.remoteStatus in setOf("failed", "partial"))
@@ -387,7 +387,7 @@ class AgentRepository(
     suspend fun cancelConversationJob(id: Uuid): Result<Unit> = runCatching {
         val existing = conversationDao.getById(id.toString()) ?: return@runCatching
         val jobId = existing.remoteJobId ?: return@runCatching
-        if (PocketBaseAgentCloudClient.isActiveStatus(existing.remoteStatus.orEmpty())) {
+        if (isAgentActiveStatus(existing.remoteStatus.orEmpty())) {
             cloudClient.cancelJob(jobId)
             syncConversationFromRemote(id).getOrThrow()
         }
@@ -452,7 +452,7 @@ class AgentRepository(
     private fun conversationLock(id: Uuid): Mutex = conversationLocks[(id.hashCode() and Int.MAX_VALUE) % conversationLocks.size]
 
     private fun remoteTime(value: String, fallback: Long): Long =
-        PocketBaseAgentCloudClient.parseIsoMillis(value).takeIf { it > 0 } ?: fallback
+        parseAgentIsoMillis(value).takeIf { it > 0 } ?: fallback
 
     private suspend fun saveNodesForConversation(convId: String, nodes: List<MessageNode>) {
         val existing = messageNodeDao.getByConversationId(convId).associateByTo(HashMap()) { it.id }
@@ -698,7 +698,7 @@ class AgentRepository(
         val message = remote.message ?: return null
         val usage = message.usage
         if (usage.totalTokenCount <= 0 && usage.promptTokenCount <= 0 && usage.candidatesTokenCount <= 0) return null
-        val id = PocketBaseAgentCloudClient.stableUuid("aw-agent-usage:${message.id}").toString()
+        val id = stableAgentUuid("aw-agent-usage:${message.id}").toString()
         if (usageRecordDao.getById(id) != null) return null
         val model = remote.job.model.ifBlank { "Antigravity" }
         return AgentUsageRecordEntity(
