@@ -86,6 +86,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlin.time.Duration.Companion.milliseconds
@@ -121,11 +122,16 @@ import me.rerere.rikkahub.data.agent.DEFAULT_GEMINI_GATEWAY_URL
 import me.rerere.rikkahub.data.agent.isAntigravityAgentModel
 import me.rerere.rikkahub.data.agent.isCodexAgentModel
 import me.rerere.rikkahub.data.datastore.CLAUDE_CODE_PROVIDER_ID
+import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.workflow.DEFAULT_POCKETBASE_URL
 import me.rerere.rikkahub.ui.components.ai.AgentFilesPicker
 import me.rerere.rikkahub.ui.components.ai.ChatInput
 import me.rerere.rikkahub.ui.components.ai.ChatTopBarCapsule
 import me.rerere.rikkahub.ui.components.ai.rememberChatAttachmentPickerActions
+import me.rerere.rikkahub.ui.components.nav.toRoundedCornerShape
+import me.rerere.rikkahub.ui.components.nav.topBarMenuGroupBorder
+import me.rerere.rikkahub.ui.components.nav.topBarMenuGroupContainerColor
+import me.rerere.rikkahub.ui.components.nav.topBarMenuHaze
 import me.rerere.rikkahub.ui.components.ui.AutoAIIcon
 import me.rerere.rikkahub.ui.components.ui.ConnectedChoiceButtons
 import me.rerere.rikkahub.ui.components.ui.ConnectedChoiceLabel
@@ -391,6 +397,8 @@ fun AgentPage(id: Uuid) {
                                         hasMessages = conversation.messageNodes.isNotEmpty(),
                                         previewMode = previewMode,
                                         hasSession = session != null,
+                                        hazeState = hazeState,
+                                        displaySetting = composedSettings.displaySetting,
                                         onTogglePreview = { previewMode = !previewMode },
                                         onSyncOrConnect = {
                                             if (session == null) {
@@ -776,6 +784,8 @@ private fun AgentPageMenu(
     hasMessages: Boolean,
     previewMode: Boolean,
     hasSession: Boolean,
+    hazeState: HazeState,
+    displaySetting: DisplaySetting,
     onTogglePreview: () -> Unit,
     onSyncOrConnect: () -> Unit,
     onRename: () -> Unit,
@@ -783,6 +793,9 @@ private fun AgentPageMenu(
     onClear: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val baseContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    val groupContainerColor = topBarMenuGroupContainerColor(displaySetting, baseContainerColor)
+    val groupBorder = topBarMenuGroupBorder(displaySetting)
 
     @Composable
     fun MenuItem(
@@ -820,12 +833,25 @@ private fun AgentPageMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {
-            DropdownMenuGroup(shapes = MenuDefaults.groupShape(index = 0, count = 2)) {
+            val topGroupShapes = MenuDefaults.groupShape(index = 0, count = 2)
+            DropdownMenuGroup(
+                shapes = topGroupShapes,
+                modifier = Modifier.topBarMenuHaze(
+                    hazeState = hazeState,
+                    displaySetting = displaySetting,
+                    containerColor = baseContainerColor,
+                    shape = topGroupShapes.toRoundedCornerShape(),
+                ),
+                containerColor = groupContainerColor,
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+                border = groupBorder,
+            ) {
                 MenuItem(
                     text = if (previewMode) "返回对话" else "对话概览",
                     icon = HugeIcons.LeftToRightListBullet,
                     index = 0,
-                    count = 5,
+                    count = 4,
                     enabled = hasMessages,
                     onClick = onTogglePreview,
                 )
@@ -833,7 +859,7 @@ private fun AgentPageMenu(
                     text = if (hasSession) "同步远端记录" else "连接云端账号",
                     icon = HugeIcons.Refresh,
                     index = 1,
-                    count = 5,
+                    count = 4,
                     onClick = onSyncOrConnect,
                 )
                 MenuItem(
@@ -852,7 +878,20 @@ private fun AgentPageMenu(
                 )
             }
             Spacer(Modifier.height(MenuDefaults.GroupSpacing))
-            DropdownMenuGroup(shapes = MenuDefaults.groupShape(index = 1, count = 2)) {
+            val bottomGroupShapes = MenuDefaults.groupShape(index = 1, count = 2)
+            DropdownMenuGroup(
+                shapes = bottomGroupShapes,
+                modifier = Modifier.topBarMenuHaze(
+                    hazeState = hazeState,
+                    displaySetting = displaySetting,
+                    containerColor = baseContainerColor,
+                    shape = bottomGroupShapes.toRoundedCornerShape(),
+                ),
+                containerColor = groupContainerColor,
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+                border = groupBorder,
+            ) {
                 MenuItem(
                     text = "清空当前消息",
                     icon = HugeIcons.Delete01,

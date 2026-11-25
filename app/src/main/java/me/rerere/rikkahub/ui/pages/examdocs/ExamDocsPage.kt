@@ -238,6 +238,12 @@ fun ExamDocsPage(
                                         },
                                         enabled = document != null,
                                     ),
+                                    TopBarMenuItem(
+                                        "答题统计",
+                                        HugeIcons.ChartColumn,
+                                        { navController.navigate(Screen.ExamDocsStats) },
+                                        state.sitesReady,
+                                    ),
                                 ),
                                 listOf(
                                     TopBarMenuItem(
@@ -246,13 +252,9 @@ fun ExamDocsPage(
                                         { navController.navigate(Screen.ExamDocsSettings) },
                                         state.sitesReady,
                                     ),
-                                    TopBarMenuItem(
-                                        "答题统计",
-                                        HugeIcons.ChartColumn,
-                                        { navController.navigate(Screen.ExamDocsStats) },
-                                        state.sitesReady,
-                                    ),
                                 ),
+                                hazeState = hazeState,
+                                displaySetting = docsDisplaySetting,
                             )
                         }
                     },
