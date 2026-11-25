@@ -2,7 +2,7 @@ name: Antigravity Debug APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feat/docs-drawer-question-dock']
   workflow_dispatch:
     inputs:
       publish_release:
