@@ -70,104 +70,238 @@ import me.rerere.hugeicons.stroke.Search01
 import me.rerere.rikkahub.data.examdocs.ExamDocNode
 import me.rerere.rikkahub.data.examdocs.ExamDocsSite
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.flowOf
+import me.rerere.hugeicons.stroke.UserCircle
+import me.rerere.rikkahub.data.examdocs.DocsAccountRepository
+import me.rerere.rikkahub.data.examdocs.DocsProgressRepository
+import org.koin.compose.koinInject
+
 @Composable
-internal fun ExamDocsDirectorySheet(
+internal fun ExamDocsDirectoryDrawer(
     state: ExamDocsUiState,
     onSelectSite: (ExamDocsSite) -> Unit,
     onSelectModule: (Int) -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onRetry: () -> Unit,
     onSelectPage: (ExamDocNode.Page) -> Unit,
+    onOpenAccount: () -> Unit,
 ) {
     val currentUrl = state.currentPage?.url
     val error = state.treeError
-    Column(
-        Modifier.fillMaxWidth().fillMaxHeight(0.86f).padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                "文档目录",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            DocsSiteSelector(state.sites, state.activeSite, onSelectSite)
-        }
+    val colors = MaterialTheme.colorScheme
 
-        OutlinedTextField(
-            value = state.searchQuery,
-            onValueChange = onSearchQueryChange,
-            placeholder = { Text("搜索章节或路径") },
-            leadingIcon = { Icon(HugeIcons.Search01, null, modifier = Modifier.size(18.dp)) },
-            trailingIcon = {
-                if (state.searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { onSearchQueryChange("") }) {
-                        Icon(HugeIcons.Cancel01, "清除搜索", modifier = Modifier.size(18.dp))
+    ModalDrawerSheet(
+        modifier = Modifier.width(300.dp),
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            DocsAccountBanner(onClick = onOpenAccount)
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    "文档目录",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                DocsSiteSelector(state.sites, state.activeSite, onSelectSite)
+            }
+
+            OutlinedTextField(
+                value = state.searchQuery,
+                onValueChange = onSearchQueryChange,
+                placeholder = { Text("搜索章节或路径") },
+                leadingIcon = { Icon(HugeIcons.Search01, null, modifier = Modifier.size(18.dp)) },
+                trailingIcon = {
+                    if (state.searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { onSearchQueryChange("") }) {
+                            Icon(HugeIcons.Cancel01, "清除搜索", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = colors.surfaceContainerLow,
+                    unfocusedContainerColor = colors.surfaceContainerLow,
+                    unfocusedBorderColor = colors.outlineVariant.copy(alpha = 0.45f),
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            if (state.isLoadingTree) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                )
+            } else if (error != null) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = colors.errorContainer.copy(alpha = 0.35f),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(error, style = MaterialTheme.typography.bodySmall, color = colors.error)
+                        TextButton(onClick = onRetry) { Text("重试") }
                     }
                 }
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-            ),
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        if (state.isLoadingTree) {
-            LinearProgressIndicator(Modifier.fillMaxWidth())
-        } else if (error != null) {
-            Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            TextButton(onClick = onRetry) { Text("重试") }
-        } else if (state.searchQuery.isNotBlank()) {
-            if (state.searchResults.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "未找到匹配的文档",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            } else if (state.searchQuery.isNotBlank()) {
+                if (state.searchResults.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "未找到匹配的文档",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
                 }
-            }
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                items(state.searchResults, key = { it.page.url }) { entry ->
-                    DirectoryRow(
-                        node = entry.page,
-                        active = currentUrl == entry.page.url,
-                        subtitle = entry.breadcrumb.joinToString(" › "),
-                        onClick = { onSelectPage(entry.page) },
-                    )
-                }
-            }
-        } else {
-            if (state.modules.isNotEmpty()) {
-                ModulePagerTabs(
-                    modules = state.modules,
-                    selectedIndex = state.selectedModuleIndex,
-                    onSelectModule = onSelectModule,
-                )
-            }
-            key(state.activeSite.baseUrl, state.selectedModuleIndex) {
-                DirectoryTree(
-                    module = state.modules.getOrNull(state.selectedModuleIndex),
-                    currentUrl = currentUrl,
-                    onSelectPage = onSelectPage,
+                LazyColumn(
                     modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    items(state.searchResults, key = { it.page.url }) { entry ->
+                        DirectoryRow(
+                            node = entry.page,
+                            active = currentUrl == entry.page.url,
+                            subtitle = entry.breadcrumb.joinToString(" › "),
+                            onClick = { onSelectPage(entry.page) },
+                        )
+                    }
+                }
+            } else {
+                if (state.modules.isNotEmpty()) {
+                    ModulePagerTabs(
+                        modules = state.modules,
+                        selectedIndex = state.selectedModuleIndex,
+                        onSelectModule = onSelectModule,
+                    )
+                }
+                key(state.activeSite.baseUrl, state.selectedModuleIndex) {
+                    DirectoryTree(
+                        module = state.modules.getOrNull(state.selectedModuleIndex),
+                        currentUrl = currentUrl,
+                        onSelectPage = onSelectPage,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DocsAccountBanner(onClick: () -> Unit) {
+    val accounts = koinInject<DocsAccountRepository>()
+    val repository = koinInject<DocsProgressRepository>()
+    val account by accounts.state.collectAsStateWithLifecycle()
+    val syncing by repository.syncing.collectAsStateWithLifecycle()
+    val syncError by repository.syncError.collectAsStateWithLifecycle()
+    val user = account.user
+    val pending by remember(user?.id) {
+        user?.let { repository.pending(it.id) } ?: flowOf(0)
+    }.collectAsStateWithLifecycle(initialValue = 0)
+
+    val colors = MaterialTheme.colorScheme
+    val isError = (user != null && account.needsLogin) || (user != null && syncError?.first == user.id)
+    val subtitle = when {
+        account.restoring -> "正在恢复登录状态…"
+        user != null && account.needsLogin -> "登录已过期，点击重新验证"
+        user != null && syncing == user.id -> "正在同步答题记录…"
+        user != null && syncError?.first == user.id -> "同步失败，点击查看详情"
+        user != null && pending > 0 -> "$pending 条记录待同步"
+        user != null -> "云端同步已开启"
+        accounts.configured -> "点击登录同步答题进度"
+        else -> "本机保存答题记录"
+    }
+
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(18.dp),
+        color = colors.surfaceContainerLow,
+        border = BorderStroke(0.5.dp, colors.outlineVariant.copy(alpha = 0.45f)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(
+                        color = if (user != null) colors.primaryContainer else colors.surfaceContainerHighest,
+                        shape = CircleShape,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                val initial = user?.email?.firstOrNull()?.uppercaseChar()?.toString()
+                if (initial != null) {
+                    Text(
+                        text = initial,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onPrimaryContainer,
+                    )
+                } else {
+                    Icon(
+                        imageVector = HugeIcons.UserCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = colors.onSurfaceVariant,
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = user?.email ?: if (account.restoring) "正在读取账号…" else "未登录 · 访客模式",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = colors.onSurface,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = if (isError) colors.error else colors.onSurfaceVariant,
                 )
             }
+            Icon(
+                imageVector = HugeIcons.ArrowRight01,
+                contentDescription = "账号设置",
+                modifier = Modifier.size(16.dp),
+                tint = colors.onSurfaceVariant,
+            )
         }
     }
 }
