@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -454,11 +453,11 @@ private fun ExamDocsArticle(
             }
         }
     }
-    val renderMathBlock = rememberExamDocsMathBlockRenderer(document)
+    val mathCache = rememberDocMathLayouts(document)
+    val renderMathBlock = rememberExamDocsMathBlockRenderer(document, mathCache)
     val registry = remember(handleLink, renderMathBlock) {
         ExamDocsComponentRegistry(onLinkClick = handleLink, renderMathBlock = renderMathBlock)
     }
-    val renderMarkdown = rememberExamDocsRenderer(document, listState, handleLink, imageResolver)
     val baseStyle = LocalTextStyle.current
     val scaledStyle = remember(baseStyle, fontSizeRatio) {
         baseStyle.copy(
@@ -468,45 +467,51 @@ private fun ExamDocsArticle(
     }
 
     CompositionLocalProvider(LocalTextStyle provides scaledStyle) {
-        SelectableContent {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .topFadingEdge(topPadding + 24.dp)
-                    .hazeSource(hazeState),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                contentPadding = PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = topPadding + 14.dp,
-                    bottom = bottomPadding + 92.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                items(document.blocks, contentType = { block ->
+        val renderMarkdown = rememberExamDocsRenderer(document, listState, handleLink, imageResolver, mathCache)
+        val renderContext = remember(registry, renderMarkdown) { registry.createContext(renderMarkdown) }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .topFadingEdge(topPadding + 24.dp)
+                .hazeSource(hazeState),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = topPadding + 14.dp,
+                bottom = bottomPadding + 92.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            itemsIndexed(
+                items = document.blocks,
+                key = { index, _ -> index },
+                contentType = { _, block ->
                     when (block) {
                         is ExamDocsSegment.Markdown -> block.document.blocks.firstOrNull()?.javaClass
                         is ExamDocsSegment.CustomBlock -> block.type
                     }
-                }) { block ->
-                    Box(Modifier.fillMaxWidth().widthIn(max = 820.dp)) {
-                        ExamDocsMarkdownBlock(block, registry, renderMarkdown)
+                },
+            ) { _, block ->
+                Box(Modifier.fillMaxWidth().widthIn(max = 820.dp)) {
+                    SelectableContent {
+                        ExamDocsMarkdownBlock(block, renderContext)
                     }
                 }
-                if (previous != null || next != null) {
-                    item(key = "page-navigation") {
-                        Row(
-                            Modifier.fillMaxWidth().widthIn(max = 820.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            if (previous != null) {
-                                PageNavCard("上一节", previous.name, false, { onPage(previous) }, Modifier.weight(1f))
-                            } else Spacer(Modifier.weight(1f))
-                            if (next != null) {
-                                PageNavCard("下一节", next.name, true, { onPage(next) }, Modifier.weight(1f))
-                            } else Spacer(Modifier.weight(1f))
-                        }
+            }
+            if (previous != null || next != null) {
+                item(key = "page-navigation", contentType = "page-navigation") {
+                    Row(
+                        Modifier.fillMaxWidth().widthIn(max = 820.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        if (previous != null) {
+                            PageNavCard("上一节", previous.name, false, { onPage(previous) }, Modifier.weight(1f))
+                        } else Spacer(Modifier.weight(1f))
+                        if (next != null) {
+                            PageNavCard("下一节", next.name, true, { onPage(next) }, Modifier.weight(1f))
+                        } else Spacer(Modifier.weight(1f))
                     }
                 }
             }

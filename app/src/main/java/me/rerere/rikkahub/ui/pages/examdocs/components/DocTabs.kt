@@ -158,10 +158,13 @@ internal fun DocTabs(
                         Box(
                             modifier = Modifier
                                 .onGloballyPositioned { coords ->
-                                    measurements[index] = TabMeasurement(
+                                    val next = TabMeasurement(
                                         leftPx = coords.positionInParent().x,
                                         widthPx = coords.size.width,
                                     )
+                                    if (measurements[index] != next) {
+                                        measurements[index] = next
+                                    }
                                 }
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },

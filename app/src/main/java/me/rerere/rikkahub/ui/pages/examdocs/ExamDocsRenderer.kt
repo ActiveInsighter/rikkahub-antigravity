@@ -55,8 +55,15 @@ import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
 import me.rerere.rikkahub.ui.components.richtext.buildSvgImageRequest
 import me.rerere.rikkahub.ui.components.richtext.rememberRichMarkdownRenderer
 import me.rerere.rikkahub.ui.context.LocalSettings
+import java.util.Collections
 
 private const val PREFETCH_GROUP = 8
+
+@Composable
+internal fun rememberDocMathLayouts(document: ExamDocsDocument): DocMathLayouts {
+    val context = LocalContext.current.applicationContext
+    return remember(document, context) { DocMathLayouts(context) }
+}
 
 @Composable
 internal fun rememberExamDocsRenderer(
@@ -64,9 +71,9 @@ internal fun rememberExamDocsRenderer(
     listState: LazyListState,
     onLinkClick: (String) -> Unit,
     imageUrlResolver: (String) -> String,
+    cache: DocMathLayouts = rememberDocMathLayouts(document),
 ): RichMarkdownRenderer {
     val context = LocalContext.current.applicationContext
-    val cache = remember(document, context) { DocMathLayouts(context) }
     val painter = rememberLatexPainter()
     val displayMath: @Composable (String) -> Unit = remember(cache) {
         { formula ->
@@ -101,7 +108,7 @@ internal fun rememberExamDocsRenderer(
     }
 
     val renderLatex = LocalSettings.current.displaySetting.enableLatexRendering
-    val prefetchedUrls = remember(document) { mutableSetOf<String>() }
+    val prefetchedUrls = remember(document) { Collections.synchronizedSet(mutableSetOf<String>()) }
     LaunchedEffect(cache, listState, renderLatex, imageUrlResolver) {
         val imageLoader = context.imageLoader
         snapshotFlow { listState.firstVisibleItemIndex / PREFETCH_GROUP }.collectLatest { group ->
@@ -111,12 +118,8 @@ internal fun rememberExamDocsRenderer(
                 for (index in start until end) {
                     ensureActive()
                     val segment = document.blocks[index]
-                    if (renderLatex && segment is ExamDocsSegment.Markdown) {
-                        when (val block = segment.document.blocks.singleOrNull()) {
-                            is MarkdownBlock.Paragraph -> cache.prefetch(block.content)
-                            is MarkdownBlock.Heading -> cache.prefetch(block.content)
-                            else -> Unit
-                        }
+                    if (renderLatex) {
+                        cache.prefetchSegment(segment)
                     }
                     prefetchImages(segment, imageUrlResolver, prefetchedUrls) { resolvedUrl ->
                         val request = if (isSvgUrl(resolvedUrl)) {
@@ -193,9 +196,8 @@ internal fun rememberExamDocsRenderer(
 @Composable
 internal fun rememberExamDocsMathBlockRenderer(
     document: ExamDocsDocument,
+    cache: DocMathLayouts = rememberDocMathLayouts(document),
 ): @Composable (formula: String, display: Boolean) -> Unit {
-    val context = LocalContext.current.applicationContext
-    val cache = remember(document, context) { DocMathLayouts(context) }
     return remember(cache) {
         { formula, display ->
             val compact = LocalCompactMathBlock.current
@@ -226,9 +228,9 @@ internal fun rememberExamDocsMathBlockRenderer(
     }
 }
 
-private class DocMathLayouts(private val context: Context) {
-    private val inline = LruCache<String, LatexLayout>(192)
-    private val blocks = LruCache<String, LatexLayout>(64)
+internal class DocMathLayouts(private val context: Context) {
+    private val inline = LruCache<String, LatexLayout>(512)
+    private val blocks = LruCache<String, LatexLayout>(192)
     private val inlineSettings = LatexSettings()
     private val blockSettings = LatexSettings(displayMode = true)
 
@@ -239,6 +241,29 @@ private class DocMathLayouts(private val context: Context) {
             if (display) blockSettings else inlineSettings,
             context,
         ).also { cache.put(formula, it) }
+    }
+
+    fun prefetchSegment(segment: ExamDocsSegment) {
+        when (segment) {
+            is ExamDocsSegment.Markdown -> segment.document.blocks.forEach(::prefetchBlock)
+            is ExamDocsSegment.CustomBlock -> segment.blocks.forEach(::prefetchSegment)
+        }
+    }
+
+    private fun prefetchBlock(block: MarkdownBlock) {
+        when (block) {
+            is MarkdownBlock.Paragraph -> prefetch(block.content)
+            is MarkdownBlock.Heading -> prefetch(block.content)
+            is MarkdownBlock.Quote -> block.children.forEach(::prefetchBlock)
+            is MarkdownBlock.ListBlock -> block.items.forEach { item ->
+                item.children.forEach(::prefetchBlock)
+            }
+            is MarkdownBlock.Table -> {
+                block.header.forEach { cell -> prefetch(cell.content) }
+                block.rows.forEach { row -> row.forEach { cell -> prefetch(cell.content) } }
+            }
+            else -> Unit
+        }
     }
 
     fun prefetch(parts: List<MarkdownInline>) {
