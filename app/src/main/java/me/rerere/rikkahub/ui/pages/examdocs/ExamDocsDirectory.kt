@@ -223,7 +223,7 @@ private fun DocsAccountBanner(onClick: () -> Unit) {
     val user = account.user
     val pending by remember(user?.id) {
         user?.let { repository.pending(it.id) } ?: flowOf(0)
-    }.collectAsStateWithLifecycle(initial = 0)
+    }.collectAsStateWithLifecycle(initialValue = 0)
 
     val colors = MaterialTheme.colorScheme
     val isError = (user != null && account.needsLogin) || (user != null && syncError?.first == user.id)
