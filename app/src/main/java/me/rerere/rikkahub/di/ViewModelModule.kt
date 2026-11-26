@@ -148,7 +148,9 @@ val viewModelModule = module {
     }
     viewModel { params ->
         me.rerere.rikkahub.ui.pages.examdocs.ExamDocsVM(
-            initialUrl = params.getOrNull(),
+            initialUrl = params.getOrNull(0),
+            siteBaseUrl = params.getOrNull(1),
+            restoreScroll = params.getOrNull<Boolean>(2) ?: false,
             repository = get(),
         )
     }

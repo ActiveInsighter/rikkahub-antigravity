@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
@@ -16,23 +17,31 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,8 +52,13 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
@@ -147,7 +161,6 @@ import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.pages.agent.AgentPage
 import me.rerere.rikkahub.ui.pages.agent.AgentSettingPage
 import me.rerere.rikkahub.ui.pages.agent.AgentWorkflowPage
-import me.rerere.rikkahub.ui.pages.home.HomePage
 import me.rerere.rikkahub.ui.pages.update.ApkDownloadsPage
 import me.rerere.rikkahub.data.update.usesAntigravityUpdates
 import me.rerere.rikkahub.ui.pages.workflow.WorkflowPage
@@ -246,38 +259,65 @@ class RouteActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
-        val backStack = navStack ?: run {
+        val navigator = activeNavigator ?: run {
             // Compose 尚未创建导航栈，待就绪后处理。
             pendingIntents.addLast(intent)
             return
         }
-        val destination = when (intent.action) {
-            ACTION_TRANSLATE -> Screen.Translator
-            ACTION_MEDIA_CREATION -> {
-                openNewMediaCreation(backStack)
-                null
+        when (intent.action) {
+            ACTION_TRANSLATE -> navigator.navigateInTab(
+                MainTab.CHAT,
+                Screen.Translator,
+                builder = { launchSingleTop = true },
+            )
+            ACTION_MEDIA_CREATION -> openNewMediaCreation(navigator)
+            Intent.ACTION_SEND -> navigator.navigateInTab(
+                MainTab.CHAT,
+                Screen.ShareHandler(
+                    text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty(),
+                    streamUri = intent.getStringExtra(Intent.EXTRA_STREAM),
+                ),
+            )
+            Intent.ACTION_PROCESS_TEXT -> navigator.navigateInTab(
+                MainTab.CHAT,
+                Screen.ShareHandler(
+                    text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString().orEmpty(),
+                ),
+            )
+            else -> {
+                val mediaDest = mediaCreationDestination(intent)
+                val agentId = intent.getStringExtra(EXTRA_AGENT_CONVERSATION_ID)
+                val chatId = intent.getStringExtra(EXTRA_CONVERSATION_ID)
+                when {
+                    mediaDest != null -> navigator.navigateInTab(
+                        MainTab.CHAT,
+                        mediaDest,
+                        builder = { launchSingleTop = true },
+                    )
+                    agentId != null -> navigator.navigateInTab(
+                        MainTab.AGENT,
+                        Screen.Agent(agentId),
+                        replaceRoot = true,
+                    )
+                    chatId != null -> navigator.navigateInTab(
+                        MainTab.CHAT,
+                        Screen.Chat(chatId),
+                        replaceRoot = true,
+                    )
+                }
             }
-            Intent.ACTION_SEND -> Screen.ShareHandler(
-                text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty(),
-                streamUri = intent.getStringExtra(Intent.EXTRA_STREAM),
-            )
-            Intent.ACTION_PROCESS_TEXT -> Screen.ShareHandler(
-                text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString().orEmpty(),
-            )
-            else -> mediaCreationDestination(intent)
-                ?: intent.getStringExtra(EXTRA_AGENT_CONVERSATION_ID)?.let { Screen.Agent(it) }
-                ?: intent.getStringExtra(EXTRA_CONVERSATION_ID)?.let { Screen.Chat(it) }
-        }
-        if (destination != null && backStack.lastOrNull() != destination) {
-            backStack.add(destination)
         }
     }
 
     // 快捷方式没有指定会话，打开一个空会话
-    private fun openNewMediaCreation(backStack: MutableList<NavKey>) {
+    private fun openNewMediaCreation(navigator: Navigator) {
         lifecycleScope.launch {
             val destination = Screen.MediaCreation(mediaCreationRepository.newSession().id.toString())
-            if (backStack.lastOrNull() != destination) backStack.add(destination)
+            navigator.navigateInTab(
+                MainTab.CHAT,
+                destination,
+                builder = { launchSingleTop = true },
+            )
         }
     }
 
@@ -322,26 +362,77 @@ class RouteActivity : ComponentActivity() {
         }
         val migrationState by DatabaseMigrationTracker.state.collectAsStateWithLifecycle()
 
-        val backStack = rememberNavBackStack(Screen.Home)
+        val docsBackStack = rememberNavBackStack(Screen.DocsHub)
+        val initialAgentId = remember { Uuid.random().toString() }
+        val agentBackStack = rememberNavBackStack(Screen.Agent(id = initialAgentId))
+        val initialChatId = remember {
+            if (readBooleanPreference("create_new_conversation_on_start", true)) {
+                Uuid.random().toString()
+            } else {
+                readStringPreference("lastConversationId", null) ?: Uuid.random().toString()
+            }
+        }
+        val chatBackStack = rememberNavBackStack(Screen.Chat(id = initialChatId))
+        val workflowBackStack = rememberNavBackStack(Screen.WorkflowHub)
+
+        var activeTab by rememberSaveable { mutableStateOf(MainTab.DOCS) }
+        fun backStackFor(tab: MainTab) = when (tab) {
+            MainTab.DOCS -> docsBackStack
+            MainTab.AGENT -> agentBackStack
+            MainTab.CHAT -> chatBackStack
+            MainTab.WORKFLOW -> workflowBackStack
+        }
+        val currentBackStack = backStackFor(activeTab)
+        val showBottomBar = activeTab != MainTab.WORKFLOW || workflowBackStack.size <= 1
+
+        val navigator = remember(docsBackStack, agentBackStack, chatBackStack, workflowBackStack) {
+            Navigator(
+                getActiveBackStack = { backStackFor(activeTab) },
+                getTabBackStack = { tab -> backStackFor(tab) },
+                onSwitchTab = { tab -> activeTab = tab },
+            )
+        }
+
         SideEffect {
-            navStack = backStack
+            activeNavigator = navigator
             while (pendingIntents.isNotEmpty()) {
                 handleIntent(pendingIntents.removeFirst())
             }
         }
 
-        val navigator = remember(backStack) { Navigator(backStack) }
+        BackHandler(enabled = currentBackStack.size == 1 && activeTab != MainTab.DOCS) {
+            activeTab = MainTab.DOCS
+        }
+
+        val agentRepository = koinInject<AgentRepository>()
+        val activeAgentIds by remember(agentRepository) {
+            agentRepository.observeActiveConversationIds()
+        }.collectAsStateWithLifecycle(initialValue = emptySet())
+        val agentStatusMap by remember(agentRepository) {
+            agentRepository.observeConversationStatusMap()
+        }.collectAsStateWithLifecycle(initialValue = emptyMap())
+        val agentHasBadge = activeAgentIds.isNotEmpty() || agentStatusMap.values.any { it.hasUnread }
+
         val agentRealtime = koinInject<AgentRealtimeSync>()
-        LaunchedEffect(agentRealtime, backStack) {
+        LaunchedEffect(agentRealtime, agentBackStack) {
             agentRealtime.keepSynced(
                 combine(
                     lifecycle.currentStateFlow,
-                    snapshotFlow { (backStack.lastOrNull() as? Screen.Agent)?.id },
+                    snapshotFlow {
+                        if (activeTab == MainTab.AGENT) {
+                            (agentBackStack.lastOrNull() as? Screen.Agent)?.id
+                        } else {
+                            null
+                        }
+                    },
                 ) { state, id ->
                     id?.takeIf { state.isAtLeast(Lifecycle.State.STARTED) }?.let { Uuid.parse(it) }
                 }
             )
         }
+
+        val saveableStateHolder = rememberSaveableStateHolder()
+        val tabStoreHolder: TabViewModelStoreHolder = viewModel()
 
         SharedTransitionLayout {
             CompositionLocalProvider(
@@ -359,22 +450,54 @@ class RouteActivity : ComponentActivity() {
                         .semantics { testTagsAsResourceId = true }
                         .background(MaterialTheme.colorScheme.background)
                 ) {
-                    NavDisplay(
-                        backStack = backStack,
-                        entryDecorators = listOf(
-                            rememberSaveableStateHolderNavEntryDecorator(),
-                            rememberViewModelStoreNavEntryDecorator(),
-                        ),
-                        modifier = Modifier.fillMaxSize(),
-                        // 同一帧内连续两次返回时 NavDisplay 的返回状态还没更新，会多回调一次，不加判断会把栈弹空
-                        onBack = { if (backStack.size > 1) backStack.removeLastOrNull() },
-                        transitionSpec = {
-                            if (backStack.size == 1) fadeIn() togetherWith fadeOut()
-                            else {
-                                slideInHorizontally { it } togetherWith
-                                    slideOutHorizontally { -it / 2 } + scaleOut(targetScale = 0.7f) + fadeOut()
+                    Scaffold(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        bottomBar = {
+                            AnimatedVisibility(
+                                visible = showBottomBar,
+                                enter = fadeIn() + slideInVertically { it },
+                                exit = fadeOut() + slideOutVertically { it },
+                            ) {
+                                MainBottomBar(
+                                    activeTab = activeTab,
+                                    onSelectTab = { tab ->
+                                        if (activeTab == tab) {
+                                            navigator.switchTab(tab, popToRoot = true)
+                                        } else {
+                                            navigator.switchTab(tab, popToRoot = false)
+                                        }
+                                    },
+                                    agentHasBadge = agentHasBadge,
+                                )
                             }
                         },
+                    ) { innerPadding ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(bottom = innerPadding.calculateBottomPadding())
+                                .consumeWindowInsets(innerPadding)
+                        ) {
+                            saveableStateHolder.SaveableStateProvider(activeTab) {
+                                CompositionLocalProvider(
+                                    LocalViewModelStoreOwner provides tabStoreHolder.ownerFor(activeTab)
+                                ) {
+                                    NavDisplay(
+                                        backStack = currentBackStack,
+                                        entryDecorators = listOf(
+                                            rememberSaveableStateHolderNavEntryDecorator(),
+                                            rememberViewModelStoreNavEntryDecorator(),
+                                        ),
+                                        modifier = Modifier.fillMaxSize(),
+                                        // 同一帧内连续两次返回时 NavDisplay 的返回状态还没更新，会多回调一次，不加判断会把栈弹空
+                                        onBack = { if (currentBackStack.size > 1) currentBackStack.removeLastOrNull() },
+                                        transitionSpec = {
+                                            if (currentBackStack.size == 1) fadeIn() togetherWith fadeOut()
+                                            else {
+                                                slideInHorizontally { it } togetherWith
+                                                    slideOutHorizontally { -it / 2 } + scaleOut(targetScale = 0.7f) + fadeOut()
+                                            }
+                                        },
                         popTransitionSpec = {
                             slideInHorizontally { -it / 2 } + scaleIn(initialScale = 0.7f) + fadeIn() togetherWith
                                 slideOutHorizontally { it }
@@ -634,11 +757,18 @@ class RouteActivity : ComponentActivity() {
                                 StatsPage()
                             }
 
-                            entry<Screen.Home>(
+                            entry<Screen.DocsHub>(
                                 metadata = NavDisplay.transitionSpec { fadeIn() togetherWith fadeOut() }
                                     + NavDisplay.popTransitionSpec { fadeIn() togetherWith fadeOut() }
                             ) {
-                                HomePage()
+                                DocsHubPage()
+                            }
+
+                            entry<Screen.WorkflowHub>(
+                                metadata = NavDisplay.transitionSpec { fadeIn() togetherWith fadeOut() }
+                                    + NavDisplay.popTransitionSpec { fadeIn() togetherWith fadeOut() }
+                            ) {
+                                WorkflowHubPage()
                             }
 
                             entry<Screen.ApkDownloads> {
@@ -667,6 +797,8 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.ExamDocs> { key ->
                                 me.rerere.rikkahub.ui.pages.examdocs.ExamDocsPage(
                                     initialUrl = key.initialUrl,
+                                    siteBaseUrl = key.siteBaseUrl,
+                                    restoreScroll = key.restoreScroll,
                                 )
                             }
 
@@ -943,7 +1075,10 @@ sealed interface Screen : NavKey {
     data object Stats : Screen
 
     @Serializable
-    data object Home : Screen
+    data object DocsHub : Screen
+
+    @Serializable
+    data object WorkflowHub : Screen
 
     @Serializable
     data object ApkDownloads : Screen
@@ -961,7 +1096,11 @@ sealed interface Screen : NavKey {
     data object Workflow : Screen
 
     @Serializable
-    data class ExamDocs(val initialUrl: String? = null) : Screen
+    data class ExamDocs(
+        val initialUrl: String? = null,
+        val siteBaseUrl: String? = null,
+        val restoreScroll: Boolean = false,
+    ) : Screen
 
     @Serializable
     data object ExamDocsSettings : Screen

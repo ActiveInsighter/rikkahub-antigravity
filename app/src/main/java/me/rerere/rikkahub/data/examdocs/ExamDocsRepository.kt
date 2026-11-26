@@ -42,11 +42,25 @@ private const val KEY_ACTIVE_SITE = "active_site"
 private const val KEY_BASE_URL = "base_url"
 private const val KEY_LAST_PAGE_URL = "last_page_url"
 private const val KEY_UI_SETTINGS = "ui_settings"
+private const val KEY_RECENT_DOCS = "recent_docs_v1"
+private const val MAX_RECENT_DOCS = 12
 private const val ANDROID_MARKDOWN_VERSION = 2
 private const val MAX_RESPONSE_BYTES = 16L * 1024 * 1024
 
 @Serializable
 data class ExamDocsSite(val name: String, val baseUrl: String)
+
+@Serializable
+data class RecentExamDoc(
+    val siteBaseUrl: String,
+    val siteName: String,
+    val pageUrl: String,
+    val title: String,
+    val breadcrumb: List<String> = emptyList(),
+    val lastReadAt: Long = System.currentTimeMillis(),
+    val scrollIndex: Int = 0,
+    val scrollOffset: Int = 0,
+)
 
 val builtInDocsSites = listOf(
     ExamDocsSite("Exam Docs", DEFAULT_EXAM_DOCS_BASE_URL),
@@ -236,6 +250,92 @@ class ExamDocsRepository internal constructor(
     }
 
     private fun lastPageKey(baseUrl: String) = "last_page:$baseUrl"
+
+    private val _recentDocsFlow by lazy { MutableStateFlow(loadRecentDocs()) }
+    val recentDocsFlow: StateFlow<List<RecentExamDoc>> get() = _recentDocsFlow.asStateFlow()
+
+    private fun loadRecentDocs(): List<RecentExamDoc> {
+        val raw = prefs.getString(KEY_RECENT_DOCS, null) ?: return emptyList()
+        return runCatching { json.decodeFromString<List<RecentExamDoc>>(raw) }
+            .getOrDefault(emptyList())
+    }
+
+    private fun saveRecentDocs(items: List<RecentExamDoc>) {
+        val trimmed = items.take(MAX_RECENT_DOCS)
+        prefs.edit { putString(KEY_RECENT_DOCS, json.encodeToString(trimmed)) }
+        _recentDocsFlow.value = trimmed
+    }
+
+    fun recordRecentDoc(
+        site: ExamDocsSite,
+        pageUrl: String,
+        title: String,
+        breadcrumb: List<String>,
+    ) {
+        val normalized = normalizeDocPath(pageUrl)
+        val current = _recentDocsFlow.value
+        val existing = current.firstOrNull {
+            it.siteBaseUrl == site.baseUrl && normalizeDocPath(it.pageUrl) == normalized
+        }
+        val updated = RecentExamDoc(
+            siteBaseUrl = site.baseUrl,
+            siteName = site.name,
+            pageUrl = normalized,
+            title = title.ifBlank { existing?.title ?: normalized },
+            breadcrumb = breadcrumb.ifEmpty { existing?.breadcrumb.orEmpty() },
+            lastReadAt = System.currentTimeMillis(),
+            scrollIndex = existing?.scrollIndex ?: 0,
+            scrollOffset = existing?.scrollOffset ?: 0,
+        )
+        val rest = current.filterNot {
+            it.siteBaseUrl == site.baseUrl && normalizeDocPath(it.pageUrl) == normalized
+        }
+        saveRecentDocs(listOf(updated) + rest)
+    }
+
+    fun updateDocScrollPosition(
+        siteBaseUrl: String,
+        pageUrl: String,
+        scrollIndex: Int,
+        scrollOffset: Int,
+    ) {
+        val normalized = normalizeDocPath(pageUrl)
+        val current = _recentDocsFlow.value
+        val index = current.indexOfFirst {
+            it.siteBaseUrl == siteBaseUrl && normalizeDocPath(it.pageUrl) == normalized
+        }
+        if (index == -1) return
+        val existing = current[index]
+        if (existing.scrollIndex == scrollIndex && existing.scrollOffset == scrollOffset) return
+        val updated = existing.copy(
+            scrollIndex = scrollIndex.coerceAtLeast(0),
+            scrollOffset = scrollOffset.coerceAtLeast(0),
+            lastReadAt = System.currentTimeMillis(),
+        )
+        val mutable = current.toMutableList()
+        mutable[index] = updated
+        saveRecentDocs(mutable)
+    }
+
+    fun getRecentDocScrollPosition(siteBaseUrl: String, pageUrl: String): Pair<Int, Int>? {
+        val normalized = normalizeDocPath(pageUrl)
+        val doc = _recentDocsFlow.value.firstOrNull {
+            it.siteBaseUrl == siteBaseUrl && normalizeDocPath(it.pageUrl) == normalized
+        } ?: return null
+        return if (doc.scrollIndex > 0 || doc.scrollOffset > 0) {
+            doc.scrollIndex to doc.scrollOffset
+        } else {
+            null
+        }
+    }
+
+    fun removeRecentDoc(siteBaseUrl: String, pageUrl: String) {
+        val normalized = normalizeDocPath(pageUrl)
+        val updated = _recentDocsFlow.value.filterNot {
+            it.siteBaseUrl == siteBaseUrl && normalizeDocPath(it.pageUrl) == normalized
+        }
+        saveRecentDocs(updated)
+    }
 
     suspend fun fetchSourceTree(site: ExamDocsSite, refresh: Boolean): ExamDocsDirectory {
         if (!refresh) directories.get(site.baseUrl)?.takeIf { it.fresh }?.let { return it.value }

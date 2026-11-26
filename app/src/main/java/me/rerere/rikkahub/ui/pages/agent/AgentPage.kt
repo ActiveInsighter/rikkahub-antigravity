@@ -283,9 +283,11 @@ fun AgentPage(id: Uuid) {
     var showLiveInsights by remember { mutableStateOf(false) }
 
     fun navigateToAgentConversation(targetId: Uuid) {
-        navController.navigate(Screen.Agent(targetId.toString())) {
-            popUpTo(Screen.Home)
-        }
+        navController.navigateInTab(
+            me.rerere.rikkahub.ui.components.nav.MainTab.AGENT,
+            Screen.Agent(targetId.toString()),
+            replaceRoot = true,
+        )
     }
 
     CompositionLocalProvider(LocalSettings provides composedSettings) {

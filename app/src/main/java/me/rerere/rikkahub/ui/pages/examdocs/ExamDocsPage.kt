@@ -55,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -74,6 +75,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
@@ -109,10 +114,13 @@ import org.koin.core.parameter.parametersOf
 
 private val externalLinkSchemes = setOf("https", "http", "mailto", "tel")
 
+@OptIn(FlowPreview::class)
 @Composable
 fun ExamDocsPage(
     initialUrl: String? = null,
-    vm: ExamDocsVM = koinViewModel(parameters = { parametersOf(initialUrl) }),
+    siteBaseUrl: String? = null,
+    restoreScroll: Boolean = false,
+    vm: ExamDocsVM = koinViewModel(parameters = { parametersOf(initialUrl, siteBaseUrl, restoreScroll) }),
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val settings = LocalSettings.current
@@ -170,14 +178,35 @@ fun ExamDocsPage(
         settings.copy(displaySetting = docsDisplaySetting)
     }
 
-    LaunchedEffect(canRenderDocument, document, state.pendingAnchor) {
+    LaunchedEffect(canRenderDocument, document, state.pendingAnchor, state.pendingScrollPosition) {
+        if (!canRenderDocument || document == null) return@LaunchedEffect
         val anchor = state.pendingAnchor
-        if (canRenderDocument && document != null && anchor != null) {
+        if (anchor != null) {
             document.headings.firstOrNull { it.anchor == anchor }?.let {
                 listState.scrollToItem(it.blockIndex)
             }
             vm.consumeAnchor(anchor)
+            vm.consumeScrollPosition()
+            return@LaunchedEffect
         }
+        val pos = state.pendingScrollPosition
+        if (pos != null) {
+            val targetIndex = pos.first.coerceIn(0, (document.blocks.size - 1).coerceAtLeast(0))
+            listState.scrollToItem(targetIndex, pos.second.coerceAtLeast(0))
+            vm.consumeScrollPosition()
+        }
+    }
+
+    LaunchedEffect(canRenderDocument, document, page?.url, state.activeSite.baseUrl) {
+        if (!canRenderDocument || document == null || page == null) return@LaunchedEffect
+        snapshotFlow {
+            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+        }
+            .drop(1)
+            .debounce(400)
+            .collectLatest { (index, offset) ->
+                vm.saveScrollPosition(state.activeSite.baseUrl, page.url, index, offset)
+            }
     }
 
     val drawerContent: @Composable () -> Unit = {
