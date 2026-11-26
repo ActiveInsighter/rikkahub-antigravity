@@ -277,7 +277,9 @@ internal fun DocQuestionCard(
     val saved = optimistic?.takeIf { stored == null || it.timestamp > stored.timestamp } ?: stored
     val answer = saved?.state ?: DocsAnswerState()
     val selection = answer.selected
-    val blanks = List(blankCount) { answer.values.getOrElse(it) { "" } }
+    val blanks = remember(blankCount, answer.values) {
+        List(blankCount) { answer.values.getOrElse(it) { "" } }
+    }
     val draft = saved?.draft.orEmpty()
     val submitted = answer.submitted
     val selfGradeLetter = selection.firstOrNull().takeIf { submitted && kind == QuestionKind.Essay }

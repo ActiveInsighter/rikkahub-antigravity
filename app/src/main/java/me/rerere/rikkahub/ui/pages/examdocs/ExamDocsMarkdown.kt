@@ -116,11 +116,12 @@ internal fun ExamDocsMarkdownBlock(
     registry: ExamDocsComponentRegistry,
     renderMarkdown: RichMarkdownRenderer,
 ) {
-    ExamDocsMarkdownBlock(block, registry.createContext(renderMarkdown))
+    val context = remember(registry, renderMarkdown) { registry.createContext(renderMarkdown) }
+    ExamDocsMarkdownBlock(block, context)
 }
 
 @Composable
-private fun ExamDocsMarkdownBlock(
+internal fun ExamDocsMarkdownBlock(
     block: ExamDocsSegment,
     context: ExamDocsRenderContext,
 ) {
@@ -130,8 +131,10 @@ private fun ExamDocsMarkdownBlock(
             val latexEnabled = LocalSettings.current.displaySetting.enableLatexRendering
             val compact = LocalCompactMathBlock.current
             val wideThreshold = if (compact) 28 else 44
-            val hasSpecialMath = renderMathBlock != null && latexEnabled && block.document.blocks.any { mdBlock ->
-                mdBlock is MarkdownBlock.Paragraph && mdBlock.containsScrollableMath(wideThreshold)
+            val hasSpecialMath = remember(block, renderMathBlock, latexEnabled, wideThreshold) {
+                renderMathBlock != null && latexEnabled && block.document.blocks.any { mdBlock ->
+                    mdBlock is MarkdownBlock.Paragraph && mdBlock.containsScrollableMath(wideThreshold)
+                }
             }
             if (!hasSpecialMath || renderMathBlock == null) {
                 context.renderMarkdown(block.document, Modifier.fillMaxWidth())
