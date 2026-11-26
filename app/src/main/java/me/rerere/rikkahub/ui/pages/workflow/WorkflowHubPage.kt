@@ -134,26 +134,26 @@ fun WorkflowHubPage(
                         title = { Text("重要通知") },
                     ) {
                         state.notices.forEach { notice ->
-                            val (icon, containerColor, contentColor) = when (notice.severity) {
-                                HubNoticeSeverity.ERROR -> Triple(
-                                    HugeIcons.Alert01,
-                                    MaterialTheme.colorScheme.errorContainer,
-                                    MaterialTheme.colorScheme.onErrorContainer,
-                                )
-                                HubNoticeSeverity.WARNING -> Triple(
-                                    HugeIcons.Alert01,
-                                    MaterialTheme.colorScheme.tertiaryContainer,
-                                    MaterialTheme.colorScheme.onTertiaryContainer,
-                                )
-                                HubNoticeSeverity.INFO -> Triple(
-                                    HugeIcons.Notification01,
-                                    MaterialTheme.colorScheme.primaryContainer,
-                                    MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                            }
                             item(
                                 onClick = { navController.navigate(notice.destination) },
                                 leadingContent = {
+                                    val (icon, containerColor, contentColor) = when (notice.severity) {
+                                        HubNoticeSeverity.ERROR -> Triple(
+                                            HugeIcons.Alert01,
+                                            MaterialTheme.colorScheme.errorContainer,
+                                            MaterialTheme.colorScheme.onErrorContainer,
+                                        )
+                                        HubNoticeSeverity.WARNING -> Triple(
+                                            HugeIcons.Alert01,
+                                            MaterialTheme.colorScheme.tertiaryContainer,
+                                            MaterialTheme.colorScheme.onTertiaryContainer,
+                                        )
+                                        HubNoticeSeverity.INFO -> Triple(
+                                            HugeIcons.Notification01,
+                                            MaterialTheme.colorScheme.primaryContainer,
+                                            MaterialTheme.colorScheme.onPrimaryContainer,
+                                        )
+                                    }
                                     CardGroupIcon(
                                         icon = icon,
                                         containerColor = containerColor,
