@@ -2,10 +2,19 @@ package me.rerere.rikkahub.ui.context
 
 import androidx.compose.runtime.compositionLocalOf
 import androidx.navigation3.runtime.NavKey
-import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.ui.components.nav.MainTab
 
-class Navigator(private val backStack: MutableList<NavKey>) {
+class Navigator(
+    private val getActiveBackStack: () -> MutableList<NavKey>,
+    private val onSwitchTab: (MainTab) -> Unit = {},
+    private val getTabBackStack: (MainTab) -> MutableList<NavKey> = { getActiveBackStack() },
+) {
+    constructor(backStack: MutableList<NavKey>) : this(
+        getActiveBackStack = { backStack },
+    )
+
     fun navigate(screen: Screen, builder: NavigateOptionsBuilder.() -> Unit = {}) {
+        val backStack = getActiveBackStack()
         val options = NavigateOptionsBuilder().apply(builder)
 
         options.popUpToScreen?.let { target ->
@@ -26,13 +35,30 @@ class Navigator(private val backStack: MutableList<NavKey>) {
     }
 
     fun clearAndNavigate(screen: Screen) {
+        val backStack = getActiveBackStack()
         backStack.clear()
         backStack.add(screen)
     }
 
-    fun contains(screen: Screen): Boolean = backStack.any { it == screen }
+    fun switchTab(tab: MainTab) {
+        onSwitchTab(tab)
+    }
+
+    fun navigateInTab(tab: MainTab, screen: Screen, replaceRoot: Boolean = false) {
+        val backStack = getTabBackStack(tab)
+        if (replaceRoot) {
+            backStack.clear()
+            backStack.add(screen)
+        } else if (backStack.lastOrNull() != screen) {
+            backStack.add(screen)
+        }
+        onSwitchTab(tab)
+    }
+
+    fun contains(screen: Screen): Boolean = getActiveBackStack().any { it == screen }
 
     fun popBackStack() {
+        val backStack = getActiveBackStack()
         if (backStack.size > 1) backStack.removeLastOrNull()
     }
 }

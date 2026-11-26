@@ -112,7 +112,11 @@ private val externalLinkSchemes = setOf("https", "http", "mailto", "tel")
 @Composable
 fun ExamDocsPage(
     initialUrl: String? = null,
-    vm: ExamDocsVM = koinViewModel(parameters = { parametersOf(initialUrl) }),
+    initialSiteBaseUrl: String? = null,
+    restoreScrollPosition: Boolean = false,
+    vm: ExamDocsVM = koinViewModel(
+        parameters = { parametersOf(initialUrl, initialSiteBaseUrl, restoreScrollPosition) },
+    ),
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val settings = LocalSettings.current
@@ -177,6 +181,34 @@ fun ExamDocsPage(
                 listState.scrollToItem(it.blockIndex)
             }
             vm.consumeAnchor(anchor)
+        }
+    }
+
+    LaunchedEffect(canRenderDocument, document, state.pendingScrollPosition, state.pendingAnchor) {
+        val pos = state.pendingScrollPosition
+        if (canRenderDocument && document != null && pos != null && state.pendingAnchor == null) {
+            val maxIndex = (document.blocks.size - 1).coerceAtLeast(0)
+            listState.scrollToItem(pos.first.coerceIn(0, maxIndex), pos.second.coerceAtLeast(0))
+            vm.consumeScrollPosition()
+        }
+    }
+
+    LaunchedEffect(listState, document, page?.url) {
+        if (document == null || page == null) return@LaunchedEffect
+        androidx.compose.runtime.snapshotFlow {
+            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+        }.collect { (index, offset) ->
+            if (!listState.isScrollInProgress || index > 0 || offset > 0) {
+                vm.saveReadingPosition(index, offset)
+            }
+        }
+    }
+
+    androidx.compose.runtime.DisposableEffect(listState, document, page?.url) {
+        onDispose {
+            if (document != null && page != null) {
+                vm.saveReadingPosition(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+            }
         }
     }
 

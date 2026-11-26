@@ -42,11 +42,26 @@ private const val KEY_ACTIVE_SITE = "active_site"
 private const val KEY_BASE_URL = "base_url"
 private const val KEY_LAST_PAGE_URL = "last_page_url"
 private const val KEY_UI_SETTINGS = "ui_settings"
+private const val KEY_RECENT_DOCS = "recent_docs"
+private const val MAX_RECENT_DOCS = 15
 private const val ANDROID_MARKDOWN_VERSION = 2
 private const val MAX_RESPONSE_BYTES = 16L * 1024 * 1024
 
 @Serializable
 data class ExamDocsSite(val name: String, val baseUrl: String)
+
+@Serializable
+data class RecentDocEntry(
+    val siteBaseUrl: String,
+    val siteName: String,
+    val url: String,
+    val title: String,
+    val breadcrumb: List<String> = emptyList(),
+    val scrollIndex: Int = 0,
+    val scrollOffset: Int = 0,
+    val totalBlocks: Int = 0,
+    val lastReadAt: Long = 0L,
+)
 
 val builtInDocsSites = listOf(
     ExamDocsSite("Exam Docs", DEFAULT_EXAM_DOCS_BASE_URL),
@@ -236,6 +251,85 @@ class ExamDocsRepository internal constructor(
     }
 
     private fun lastPageKey(baseUrl: String) = "last_page:$baseUrl"
+
+    private val _recentDocsFlow = MutableStateFlow(loadRecentDocs())
+    val recentDocsFlow: StateFlow<List<RecentDocEntry>> = _recentDocsFlow.asStateFlow()
+
+    private fun loadRecentDocs(): List<RecentDocEntry> {
+        val raw = prefs.getString(KEY_RECENT_DOCS, null) ?: return emptyList()
+        return runCatching { json.decodeFromString<List<RecentDocEntry>>(raw) }.getOrDefault(emptyList())
+    }
+
+    private fun persistRecentDocs(list: List<RecentDocEntry>) {
+        _recentDocsFlow.value = list
+        prefs.edit { putString(KEY_RECENT_DOCS, json.encodeToString(list)) }
+    }
+
+    fun recordRecentDoc(
+        site: ExamDocsSite,
+        url: String,
+        title: String,
+        breadcrumb: List<String>,
+        totalBlocks: Int = 0,
+    ) {
+        val normalized = normalizeDocPath(url)
+        val current = _recentDocsFlow.value
+        val existing = current.firstOrNull { it.siteBaseUrl == site.baseUrl && it.url == normalized }
+        val updated = RecentDocEntry(
+            siteBaseUrl = site.baseUrl,
+            siteName = site.name,
+            url = normalized,
+            title = title,
+            breadcrumb = breadcrumb,
+            scrollIndex = existing?.scrollIndex ?: 0,
+            scrollOffset = existing?.scrollOffset ?: 0,
+            totalBlocks = if (totalBlocks > 0) totalBlocks else (existing?.totalBlocks ?: 0),
+            lastReadAt = System.currentTimeMillis(),
+        )
+        val next = (listOf(updated) + current.filterNot { it.siteBaseUrl == site.baseUrl && it.url == normalized })
+            .take(MAX_RECENT_DOCS)
+        persistRecentDocs(next)
+    }
+
+    fun saveReadingPosition(
+        siteBaseUrl: String,
+        url: String,
+        scrollIndex: Int,
+        scrollOffset: Int,
+        totalBlocks: Int,
+    ) {
+        val normalized = normalizeDocPath(url)
+        val current = _recentDocsFlow.value
+        val existing = current.firstOrNull { it.siteBaseUrl == siteBaseUrl && it.url == normalized } ?: return
+        if (existing.scrollIndex == scrollIndex && existing.scrollOffset == scrollOffset && existing.totalBlocks == totalBlocks) {
+            return
+        }
+        val updated = existing.copy(
+            scrollIndex = scrollIndex,
+            scrollOffset = scrollOffset,
+            totalBlocks = if (totalBlocks > 0) totalBlocks else existing.totalBlocks,
+            lastReadAt = System.currentTimeMillis(),
+        )
+        val next = listOf(updated) + current.filterNot { it.siteBaseUrl == siteBaseUrl && it.url == normalized }
+        persistRecentDocs(next)
+    }
+
+    fun getReadingPosition(siteBaseUrl: String, url: String): Pair<Int, Int>? {
+        val normalized = normalizeDocPath(url)
+        val entry = _recentDocsFlow.value.firstOrNull { it.siteBaseUrl == siteBaseUrl && it.url == normalized }
+            ?: return null
+        return if (entry.scrollIndex > 0 || entry.scrollOffset > 0) {
+            entry.scrollIndex to entry.scrollOffset
+        } else {
+            null
+        }
+    }
+
+    fun removeRecentDoc(siteBaseUrl: String, url: String) {
+        val normalized = normalizeDocPath(url)
+        val next = _recentDocsFlow.value.filterNot { it.siteBaseUrl == siteBaseUrl && it.url == normalized }
+        persistRecentDocs(next)
+    }
 
     suspend fun fetchSourceTree(site: ExamDocsSite, refresh: Boolean): ExamDocsDirectory {
         if (!refresh) directories.get(site.baseUrl)?.takeIf { it.fresh }?.let { return it.value }

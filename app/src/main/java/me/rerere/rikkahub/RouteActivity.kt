@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
@@ -16,14 +17,23 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -32,10 +42,14 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.res.stringResource
@@ -147,9 +161,13 @@ import me.rerere.rikkahub.ui.pages.webview.WebViewPage
 import me.rerere.rikkahub.ui.pages.agent.AgentPage
 import me.rerere.rikkahub.ui.pages.agent.AgentSettingPage
 import me.rerere.rikkahub.ui.pages.agent.AgentWorkflowPage
-import me.rerere.rikkahub.ui.pages.home.HomePage
+import me.rerere.rikkahub.ui.components.nav.ClaudeBottomBar
+import me.rerere.rikkahub.ui.components.nav.ClaudeBottomBarHeight
+import me.rerere.rikkahub.ui.components.nav.MainTab
+import me.rerere.rikkahub.ui.pages.examdocs.DocsHubPage
 import me.rerere.rikkahub.ui.pages.update.ApkDownloadsPage
 import me.rerere.rikkahub.data.update.usesAntigravityUpdates
+import me.rerere.rikkahub.ui.pages.workflow.WorkflowHubPage
 import me.rerere.rikkahub.ui.pages.workflow.WorkflowPage
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import me.rerere.rikkahub.utils.CrashHandler
@@ -176,6 +194,7 @@ class RouteActivity : ComponentActivity() {
     private val okHttpClient by inject<OkHttpClient>()
     private val settingsStore by inject<SettingsStore>()
     private val mediaCreationRepository by inject<MediaCreationRepository>()
+    private var navigatorRef: Navigator? = null
     private var navStack: MutableList<NavKey>? = null
     private val pendingIntents = ArrayDeque<Intent>()
 
@@ -251,6 +270,17 @@ class RouteActivity : ComponentActivity() {
             pendingIntents.addLast(intent)
             return
         }
+        val nav = navigatorRef
+        val agentId = intent.getStringExtra(EXTRA_AGENT_CONVERSATION_ID)
+        if (agentId != null && nav != null) {
+            nav.navigateInTab(MainTab.AGENT, Screen.Agent(agentId), replaceRoot = true)
+            return
+        }
+        val chatId = intent.getStringExtra(EXTRA_CONVERSATION_ID)
+        if (chatId != null && nav != null) {
+            nav.navigateInTab(MainTab.CHAT, Screen.Chat(chatId), replaceRoot = true)
+            return
+        }
         val destination = when (intent.action) {
             ACTION_TRANSLATE -> Screen.Translator
             ACTION_MEDIA_CREATION -> {
@@ -265,8 +295,8 @@ class RouteActivity : ComponentActivity() {
                 text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString().orEmpty(),
             )
             else -> mediaCreationDestination(intent)
-                ?: intent.getStringExtra(EXTRA_AGENT_CONVERSATION_ID)?.let { Screen.Agent(it) }
-                ?: intent.getStringExtra(EXTRA_CONVERSATION_ID)?.let { Screen.Chat(it) }
+                ?: agentId?.let { Screen.Agent(it) }
+                ?: chatId?.let { Screen.Chat(it) }
         }
         if (destination != null && backStack.lastOrNull() != destination) {
             backStack.add(destination)
@@ -322,26 +352,72 @@ class RouteActivity : ComponentActivity() {
         }
         val migrationState by DatabaseMigrationTracker.state.collectAsStateWithLifecycle()
 
-        val backStack = rememberNavBackStack(Screen.Home)
+        var activeTab by rememberSaveable { mutableStateOf(MainTab.DOCS) }
+        val initialChatId = remember {
+            if (readBooleanPreference("create_new_conversation_on_start", true)) {
+                Uuid.random().toString()
+            } else {
+                readStringPreference("lastConversationId", Uuid.random().toString())
+                    ?: Uuid.random().toString()
+            }
+        }
+        val initialAgentId = remember { Uuid.random().toString() }
+
+        val docsBackStack = rememberNavBackStack(Screen.DocsHub)
+        val agentBackStack = rememberNavBackStack(Screen.Agent(id = initialAgentId))
+        val chatBackStack = rememberNavBackStack(Screen.Chat(id = initialChatId))
+        val workflowBackStack = rememberNavBackStack(Screen.WorkflowHub)
+
+        fun backStackFor(tab: MainTab) = when (tab) {
+            MainTab.DOCS -> docsBackStack
+            MainTab.AGENT -> agentBackStack
+            MainTab.CHAT -> chatBackStack
+            MainTab.WORKFLOW -> workflowBackStack
+        }
+
+        val activeBackStack = backStackFor(activeTab)
+
+        val navigator = remember(docsBackStack, agentBackStack, chatBackStack, workflowBackStack) {
+            Navigator(
+                getActiveBackStack = { backStackFor(activeTab) },
+                onSwitchTab = { tab -> activeTab = tab },
+                getTabBackStack = { tab -> backStackFor(tab) },
+            )
+        }
+
         SideEffect {
-            navStack = backStack
+            navigatorRef = navigator
+            navStack = activeBackStack
             while (pendingIntents.isNotEmpty()) {
                 handleIntent(pendingIntents.removeFirst())
             }
         }
 
-        val navigator = remember(backStack) { Navigator(backStack) }
+        BackHandler(enabled = activeBackStack.size <= 1 && activeTab != MainTab.DOCS) {
+            activeTab = MainTab.DOCS
+        }
+
         val agentRealtime = koinInject<AgentRealtimeSync>()
-        LaunchedEffect(agentRealtime, backStack) {
+        LaunchedEffect(agentRealtime, agentBackStack, activeTab) {
             agentRealtime.keepSynced(
                 combine(
                     lifecycle.currentStateFlow,
-                    snapshotFlow { (backStack.lastOrNull() as? Screen.Agent)?.id },
+                    snapshotFlow {
+                        if (activeTab == MainTab.AGENT) {
+                            (agentBackStack.lastOrNull() as? Screen.Agent)?.id
+                        } else {
+                            null
+                        }
+                    },
                 ) { state, id ->
                     id?.takeIf { state.isAtLeast(Lifecycle.State.STARTED) }?.let { Uuid.parse(it) }
                 }
             )
         }
+
+        val density = LocalDensity.current
+        val isImeVisible = WindowInsets.ime.getBottom(density) > 0
+        val showBottomBar = !isImeVisible && (activeTab != MainTab.WORKFLOW || workflowBackStack.size <= 1)
 
         SharedTransitionLayout {
             CompositionLocalProvider(
@@ -359,17 +435,26 @@ class RouteActivity : ComponentActivity() {
                         .semantics { testTagsAsResourceId = true }
                         .background(MaterialTheme.colorScheme.background)
                 ) {
+                    val contentModifier = if (showBottomBar) {
+                        Modifier
+                            .fillMaxSize()
+                            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                            .consumeWindowInsets(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                            .padding(bottom = ClaudeBottomBarHeight)
+                    } else {
+                        Modifier.fillMaxSize()
+                    }
                     NavDisplay(
-                        backStack = backStack,
+                        backStack = activeBackStack,
                         entryDecorators = listOf(
                             rememberSaveableStateHolderNavEntryDecorator(),
                             rememberViewModelStoreNavEntryDecorator(),
                         ),
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = contentModifier,
                         // 同一帧内连续两次返回时 NavDisplay 的返回状态还没更新，会多回调一次，不加判断会把栈弹空
-                        onBack = { if (backStack.size > 1) backStack.removeLastOrNull() },
+                        onBack = { if (activeBackStack.size > 1) activeBackStack.removeLastOrNull() },
                         transitionSpec = {
-                            if (backStack.size == 1) fadeIn() togetherWith fadeOut()
+                            if (activeBackStack.size == 1) fadeIn() togetherWith fadeOut()
                             else {
                                 slideInHorizontally { it } togetherWith
                                     slideOutHorizontally { -it / 2 } + scaleOut(targetScale = 0.7f) + fadeOut()
@@ -634,11 +719,18 @@ class RouteActivity : ComponentActivity() {
                                 StatsPage()
                             }
 
-                            entry<Screen.Home>(
+                            entry<Screen.DocsHub>(
                                 metadata = NavDisplay.transitionSpec { fadeIn() togetherWith fadeOut() }
                                     + NavDisplay.popTransitionSpec { fadeIn() togetherWith fadeOut() }
                             ) {
-                                HomePage()
+                                DocsHubPage()
+                            }
+
+                            entry<Screen.WorkflowHub>(
+                                metadata = NavDisplay.transitionSpec { fadeIn() togetherWith fadeOut() }
+                                    + NavDisplay.popTransitionSpec { fadeIn() togetherWith fadeOut() }
+                            ) {
+                                WorkflowHubPage()
                             }
 
                             entry<Screen.ApkDownloads> {
@@ -667,6 +759,8 @@ class RouteActivity : ComponentActivity() {
                             entry<Screen.ExamDocs> { key ->
                                 me.rerere.rikkahub.ui.pages.examdocs.ExamDocsPage(
                                     initialUrl = key.initialUrl,
+                                    initialSiteBaseUrl = key.initialSiteBaseUrl,
+                                    restoreScrollPosition = key.restoreScrollPosition,
                                 )
                             }
 
@@ -711,6 +805,26 @@ class RouteActivity : ComponentActivity() {
                             }
                         }
                     )
+                    AnimatedVisibility(
+                        visible = showBottomBar,
+                        enter = fadeIn() + slideInVertically { it / 2 },
+                        exit = fadeOut() + slideOutVertically { it / 2 },
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    ) {
+                        ClaudeBottomBar(
+                            activeTab = activeTab,
+                            onSelectTab = { tab ->
+                                if (tab == activeTab) {
+                                    val stack = backStackFor(tab)
+                                    while (stack.size > 1) {
+                                        stack.removeLastOrNull()
+                                    }
+                                } else {
+                                    activeTab = tab
+                                }
+                            },
+                        )
+                    }
                     if (BuildConfig.DEBUG) {
                         Text(
                             text = "[开发模式]",
@@ -943,7 +1057,10 @@ sealed interface Screen : NavKey {
     data object Stats : Screen
 
     @Serializable
-    data object Home : Screen
+    data object DocsHub : Screen
+
+    @Serializable
+    data object WorkflowHub : Screen
 
     @Serializable
     data object ApkDownloads : Screen
@@ -961,7 +1078,11 @@ sealed interface Screen : NavKey {
     data object Workflow : Screen
 
     @Serializable
-    data class ExamDocs(val initialUrl: String? = null) : Screen
+    data class ExamDocs(
+        val initialUrl: String? = null,
+        val initialSiteBaseUrl: String? = null,
+        val restoreScrollPosition: Boolean = false,
+    ) : Screen
 
     @Serializable
     data object ExamDocsSettings : Screen

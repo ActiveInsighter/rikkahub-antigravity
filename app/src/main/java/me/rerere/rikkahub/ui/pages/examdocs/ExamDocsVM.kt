@@ -41,6 +41,7 @@ data class ExamDocsUiState(
     val contentError: String? = null,
     val document: ExamDocsDocument? = null,
     val pendingAnchor: String? = null,
+    val pendingScrollPosition: Pair<Int, Int>? = null,
     val prevPage: ExamDocNode.Page? = null,
     val nextPage: ExamDocNode.Page? = null,
     val searchQuery: String = "",
@@ -49,6 +50,8 @@ data class ExamDocsUiState(
 
 class ExamDocsVM(
     private val initialUrl: String?,
+    private val initialSiteBaseUrl: String? = null,
+    private val restoreScrollPosition: Boolean = false,
     private val repository: ExamDocsRepository,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(ExamDocsUiState())
@@ -64,14 +67,20 @@ class ExamDocsVM(
             val (settings, uiSettings) = withContext(Dispatchers.IO) {
                 repository.siteSettingsFlow.value to repository.uiSettingsFlow.value
             }
-            val target = initialUrl?.let { getExamDocsLink(settings.active.baseUrl, "/docs", it) }
+            val initialSite = initialSiteBaseUrl?.let { targetUrl ->
+                settings.sites.firstOrNull { it.baseUrl == targetUrl }
+            } ?: settings.active
+            if (initialSite.baseUrl != settings.active.baseUrl) {
+                repository.switchSite(initialSite)
+            }
+            val target = initialUrl?.let { getExamDocsLink(initialSite.baseUrl, "/docs", it) }
             _uiState.value = ExamDocsUiState(
                 sites = settings.sites,
-                activeSite = settings.active,
+                activeSite = initialSite,
                 sitesReady = true,
                 uiSettings = uiSettings,
             )
-            loadTree(target = target)
+            loadTree(target = target, restoreScroll = restoreScrollPosition)
 
             launch {
                 repository.uiSettingsFlow.drop(1).collectLatest { updatedUi ->
@@ -92,7 +101,11 @@ class ExamDocsVM(
         loadTree(refresh = true, target = target)
     }
 
-    private fun loadTree(refresh: Boolean = false, target: ExamDocsLink? = null) {
+    private fun loadTree(
+        refresh: Boolean = false,
+        target: ExamDocsLink? = null,
+        restoreScroll: Boolean = false,
+    ) {
         val site = _uiState.value.activeSite
         directoryJob?.cancel()
         documentJob?.cancel()
@@ -112,7 +125,7 @@ class ExamDocsVM(
                     it.copy(isLoadingTree = false, modules = index.modules)
                 }
                 updateSearchQuery(_uiState.value.searchQuery)
-                if (page != null) openPage(page, refresh, target?.fragment)
+                if (page != null) openPage(page, refresh, target?.fragment, restoreScroll = restoreScroll)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -182,12 +195,22 @@ class ExamDocsVM(
         openPage(entry?.page ?: ExamDocNode.Page(documentTitle(link.path), link.path), anchor = link.fragment)
     }
 
-    fun openPage(page: ExamDocNode.Page) = openPage(page, refresh = false)
+    fun openPage(page: ExamDocNode.Page) = openPage(page, refresh = false, restoreScroll = false)
 
-    private fun openPage(page: ExamDocNode.Page, refresh: Boolean = false, anchor: String? = null) {
+    private fun openPage(
+        page: ExamDocNode.Page,
+        refresh: Boolean = false,
+        anchor: String? = null,
+        restoreScroll: Boolean = false,
+    ) {
         val state = _uiState.value
+        val savedPos = if (restoreScroll && anchor == null) {
+            repository.getReadingPosition(state.activeSite.baseUrl, page.url)
+        } else {
+            null
+        }
         if (!refresh && state.currentPage?.url == page.url && state.document != null) {
-            _uiState.update { it.copy(pendingAnchor = anchor) }
+            _uiState.update { it.copy(pendingAnchor = anchor, pendingScrollPosition = savedPos) }
             return
         }
 
@@ -206,6 +229,7 @@ class ExamDocsVM(
                 contentError = null,
                 document = null,
                 pendingAnchor = anchor,
+                pendingScrollPosition = savedPos,
             )
         }
 
@@ -215,6 +239,13 @@ class ExamDocsVM(
                     state.activeSite, page.url, index?.usesAndroidMarkdown == true, refresh,
                 )
                 repository.saveLastPageUrl(state.activeSite, page.url)
+                repository.recordRecentDoc(
+                    site = state.activeSite,
+                    url = page.url,
+                    title = page.name,
+                    breadcrumb = entry?.breadcrumb.orEmpty(),
+                    totalBlocks = document.blocks.size,
+                )
                 _uiState.update { it.copy(isLoadingContent = false, document = document) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -226,6 +257,23 @@ class ExamDocsVM(
 
     fun consumeAnchor(anchor: String) {
         _uiState.update { if (it.pendingAnchor == anchor) it.copy(pendingAnchor = null) else it }
+    }
+
+    fun consumeScrollPosition() {
+        _uiState.update { if (it.pendingScrollPosition != null) it.copy(pendingScrollPosition = null) else it }
+    }
+
+    fun saveReadingPosition(scrollIndex: Int, scrollOffset: Int) {
+        val state = _uiState.value
+        val page = state.currentPage ?: return
+        val document = state.document ?: return
+        repository.saveReadingPosition(
+            siteBaseUrl = state.activeSite.baseUrl,
+            url = page.url,
+            scrollIndex = scrollIndex,
+            scrollOffset = scrollOffset,
+            totalBlocks = document.blocks.size,
+        )
     }
 
     private fun documentTitle(path: String): String =

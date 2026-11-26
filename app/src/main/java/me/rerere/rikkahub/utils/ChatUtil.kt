@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import me.rerere.ai.ui.UIMessage
 import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.ui.components.nav.MainTab
 import me.rerere.rikkahub.ui.context.Navigator
 import kotlin.uuid.Uuid
 
@@ -24,14 +25,7 @@ fun navigateToChatPage(
         files = initFiles.map { it.toString() },
         nodeId = nodeId?.toString(),
     )
-    if (navigator.contains(Screen.Home)) {
-        navigator.navigate(destination) {
-            popUpTo(Screen.Home)
-        }
-    } else {
-        navigator.clearAndNavigate(Screen.Home)
-        navigator.navigate(destination)
-    }
+    navigator.navigateInTab(MainTab.CHAT, destination, replaceRoot = true)
 }
 
 fun Context.copyMessageToClipboard(message: UIMessage) {

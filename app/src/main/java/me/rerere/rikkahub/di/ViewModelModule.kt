@@ -117,6 +117,15 @@ val viewModelModule = module {
     viewModelOf(::SearchVM)
     viewModelOf(::StatsVM)
     viewModelOf(::WorkflowVM)
+    viewModel {
+        me.rerere.rikkahub.ui.pages.workflow.WorkflowHubVM(
+            workflowRepository = get(),
+            beszelSettingsStore = get(),
+            beszelClient = get(),
+            pocketBaseSettingsStore = get(),
+            agentRepository = get(),
+        )
+    }
     viewModelOf(::WorkflowSchedulesVM)
     viewModelOf(::WorkflowLibraryVM)
     viewModelOf(::WorkflowFilesVM)
@@ -148,7 +157,9 @@ val viewModelModule = module {
     }
     viewModel { params ->
         me.rerere.rikkahub.ui.pages.examdocs.ExamDocsVM(
-            initialUrl = params.getOrNull(),
+            initialUrl = params.values.getOrNull(0) as? String,
+            initialSiteBaseUrl = params.values.getOrNull(1) as? String,
+            restoreScrollPosition = (params.values.getOrNull(2) as? Boolean) ?: false,
             repository = get(),
         )
     }
