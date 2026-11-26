@@ -1,10 +1,7 @@
 package me.rerere.rikkahub.ui.pages.examdocs
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -325,11 +322,7 @@ private fun DirectorySearchBar(
                 modifier = Modifier.size(26.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                AnimatedVisibility(
-                    visible = query.isNotEmpty() || focused,
-                    enter = fadeIn(),
-                    exit = fadeOut(),
-                ) {
+                if (query.isNotEmpty() || focused) {
                     Box(
                         modifier = Modifier
                             .size(24.dp)
