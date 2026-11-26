@@ -154,6 +154,7 @@ internal fun ExamDocsDirectoryDrawer(
 
             DirectorySearchBar(
                 query = state.searchQuery,
+                isDrawerOpen = isDrawerOpen,
                 onQueryChange = onSearchQueryChange,
                 onClearAndClose = {
                     onSearchQueryChange("")
@@ -246,6 +247,7 @@ internal fun ExamDocsDirectoryDrawer(
 @Composable
 private fun DirectorySearchBar(
     query: String,
+    isDrawerOpen: Boolean,
     onQueryChange: (String) -> Unit,
     onClearAndClose: () -> Unit,
 ) {
@@ -253,7 +255,24 @@ private fun DirectorySearchBar(
     val focusManager = LocalFocusManager.current
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
+    var editing by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
+
+    // 抽屉打开时 Material3 会把焦点交给第一个可聚焦元素；触摸模式下 clickable 属于
+    // SystemDefined 不可聚焦，焦点会直接落到可编辑的 BasicTextField 上并弹起软键盘。
+    // 因此编辑框只在用户主动点击后才进入组合，抽屉关闭时立刻退出编辑态。
+    LaunchedEffect(isDrawerOpen) {
+        if (!isDrawerOpen) {
+            editing = false
+            focused = false
+        }
+    }
+
+    LaunchedEffect(editing) {
+        if (editing) {
+            focusRequester.requestFocus()
+        }
+    }
 
     val borderColor by animateColorAsState(
         targetValue = if (focused) colors.primary.copy(alpha = 0.7f) else colors.outlineVariant.copy(alpha = 0.45f),
@@ -271,7 +290,7 @@ private fun DirectorySearchBar(
         modifier = Modifier
             .fillMaxWidth()
             .height(44.dp)
-            .clickable { focusRequester.requestFocus() },
+            .clickable { editing = true },
     ) {
         Row(
             modifier = Modifier
@@ -290,45 +309,53 @@ private fun DirectorySearchBar(
                 modifier = Modifier.weight(1f),
                 contentAlignment = Alignment.CenterStart,
             ) {
-                if (query.isEmpty()) {
+                if (editing) {
+                    BasicTextField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.onSurface),
+                        cursorBrush = SolidColor(colors.primary),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(
+                            onSearch = {
+                                focusManager.clearFocus(force = true)
+                                softwareKeyboardController?.hide()
+                            },
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focusRequester)
+                            .onFocusChanged { focused = it.isFocused },
+                    )
+                } else {
                     Text(
-                        text = "搜索章节或路径",
+                        text = query.ifEmpty { "搜索章节或路径" },
                         style = MaterialTheme.typography.bodyMedium,
-                        color = colors.onSurfaceVariant.copy(alpha = 0.72f),
+                        color = if (query.isEmpty()) {
+                            colors.onSurfaceVariant.copy(alpha = 0.72f)
+                        } else {
+                            colors.onSurface
+                        },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                BasicTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.onSurface),
-                    cursorBrush = SolidColor(colors.primary),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(
-                        onSearch = {
-                            focusManager.clearFocus(force = true)
-                            softwareKeyboardController?.hide()
-                        },
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(focusRequester)
-                        .onFocusChanged { focused = it.isFocused },
-                )
             }
             Box(
                 modifier = Modifier.size(26.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                if (query.isNotEmpty() || focused) {
+                if (query.isNotEmpty() || editing) {
                     Box(
                         modifier = Modifier
                             .size(24.dp)
                             .clip(CircleShape)
                             .background(colors.surfaceContainerHighest.copy(alpha = 0.8f))
-                            .clickable(onClick = onClearAndClose),
+                            .clickable {
+                                editing = false
+                                onClearAndClose()
+                            },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
