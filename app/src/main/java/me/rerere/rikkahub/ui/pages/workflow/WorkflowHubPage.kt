@@ -408,7 +408,7 @@ fun WorkflowHubPage(
                                 beszelState.session != null && beszelState.systems.isNotEmpty() ->
                                     "在线 $onlineSystemsCount/${beszelState.systems.size} 台 · 告警 ${beszelState.activeAlertCount}"
                                 beszelState.session != null ->
-                                    "已连接 · ${beszelState.session?.email}"
+                                    "已连接 · ${beszelState.session?.userEmail?.ifBlank { beszelState.session?.identity.orEmpty() }}"
                                 else -> "Beszel 监控 · 实时指标、容器与告警"
                             }
                             Text(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -435,9 +435,9 @@ fun WorkflowHubPage(
                         supportingContent = {
                             val subtitle = when {
                                 pbState.session != null && pbState.collections.isNotEmpty() ->
-                                    "${pbState.session?.email} · ${pbState.collections.size} 个集合"
+                                    "${pbState.session?.identity} · ${pbState.collections.size} 个集合"
                                 pbState.session != null ->
-                                    "已连接 · ${pbState.session?.email}"
+                                    "已连接 · ${pbState.session?.identity}"
                                 else -> "PocketBase 控制台 · 表结构、记录、日志与 SQL"
                             }
                             Text(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis)

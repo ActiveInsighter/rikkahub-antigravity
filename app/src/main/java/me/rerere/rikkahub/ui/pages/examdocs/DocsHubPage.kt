@@ -278,7 +278,7 @@ private fun RecentDocsGroup(
             } else {
                 "已打开"
             }
-            val timeText = doc.lastReadAt.toLocalDateTime()
+            val timeText = java.time.Instant.ofEpochMilli(doc.lastReadAt).toLocalDateTime()
 
             item(
                 onClick = { onOpenDoc(doc) },

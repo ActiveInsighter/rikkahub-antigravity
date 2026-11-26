@@ -551,7 +551,11 @@ private fun ExportedChatImage(
     options: ExportOptions = ExportOptions()
 ) {
     val navBackStack = remember { mutableStateListOf<NavKey>() }
-    val navigator = Navigator(navBackStack)
+    val navigator = Navigator(
+        getActiveBackStack = { navBackStack },
+        getTabBackStack = { navBackStack },
+        onSwitchTab = {},
+    )
     val toasterState = rememberToasterState()
     RikkahubTheme {
         CompositionLocalProvider(
