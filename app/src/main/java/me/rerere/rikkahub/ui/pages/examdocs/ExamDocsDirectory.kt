@@ -1,44 +1,38 @@
 package me.rerere.rikkahub.ui.pages.examdocs
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ToggleButton
-import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -47,17 +41,22 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.flowOf
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowRight01
@@ -67,18 +66,12 @@ import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Folder01
 import me.rerere.hugeicons.stroke.Internet
 import me.rerere.hugeicons.stroke.Search01
-import me.rerere.rikkahub.data.examdocs.ExamDocNode
-import me.rerere.rikkahub.data.examdocs.ExamDocsSite
-
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.flow.flowOf
+import me.rerere.hugeicons.stroke.Tick01
 import me.rerere.hugeicons.stroke.UserCircle
 import me.rerere.rikkahub.data.examdocs.DocsAccountRepository
 import me.rerere.rikkahub.data.examdocs.DocsProgressRepository
+import me.rerere.rikkahub.data.examdocs.ExamDocNode
+import me.rerere.rikkahub.data.examdocs.ExamDocsSite
 import org.koin.compose.koinInject
 
 @Composable
@@ -90,57 +83,64 @@ internal fun ExamDocsDirectoryDrawer(
     onRetry: () -> Unit,
     onSelectPage: (ExamDocNode.Page) -> Unit,
     onOpenAccount: () -> Unit,
+    isDrawerOpen: Boolean = true,
 ) {
     val currentUrl = state.currentPage?.url
     val error = state.treeError
     val colors = MaterialTheme.colorScheme
+    val focusManager = LocalFocusManager.current
+    val softwareKeyboardController = LocalSoftwareKeyboardController.current
+    var searchActive by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(isDrawerOpen) {
+        if (!isDrawerOpen) {
+            focusManager.clearFocus(force = true)
+            softwareKeyboardController?.hide()
+            if (state.searchQuery.isEmpty()) {
+                searchActive = false
+            }
+        }
+    }
 
     ModalDrawerSheet(
-        modifier = Modifier.width(300.dp),
+        modifier = Modifier
+            .fillMaxWidth(0.86f)
+            .widthIn(min = 310.dp, max = 368.dp),
     ) {
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            DocsAccountBanner(onClick = onOpenAccount)
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
+                    .padding(horizontal = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
                     "文档目录",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                 )
                 DocsSiteSelector(state.sites, state.activeSite, onSelectSite)
             }
 
-            OutlinedTextField(
-                value = state.searchQuery,
-                onValueChange = onSearchQueryChange,
-                placeholder = { Text("搜索章节或路径") },
-                leadingIcon = { Icon(HugeIcons.Search01, null, modifier = Modifier.size(18.dp)) },
-                trailingIcon = {
-                    if (state.searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { onSearchQueryChange("") }) {
-                            Icon(HugeIcons.Cancel01, "清除搜索", modifier = Modifier.size(18.dp))
-                        }
-                    }
+            DocsAccountBanner(onClick = onOpenAccount)
+
+            DirectorySearchBar(
+                query = state.searchQuery,
+                active = searchActive,
+                onActivate = { searchActive = true },
+                onQueryChange = onSearchQueryChange,
+                onClearAndClose = {
+                    onSearchQueryChange("")
+                    searchActive = false
+                    focusManager.clearFocus(force = true)
+                    softwareKeyboardController?.hide()
                 },
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = colors.surfaceContainerLow,
-                    unfocusedContainerColor = colors.surfaceContainerLow,
-                    unfocusedBorderColor = colors.outlineVariant.copy(alpha = 0.45f),
-                ),
-                modifier = Modifier.fillMaxWidth(),
             )
 
             if (state.isLoadingTree) {
@@ -188,28 +188,117 @@ internal fun ExamDocsDirectoryDrawer(
                             node = entry.page,
                             active = currentUrl == entry.page.url,
                             subtitle = entry.breadcrumb.joinToString(" › "),
-                            onClick = { onSelectPage(entry.page) },
+                            onClick = {
+                                focusManager.clearFocus(force = true)
+                                softwareKeyboardController?.hide()
+                                onSelectPage(entry.page)
+                            },
                         )
                     }
                 }
             } else {
                 if (state.modules.isNotEmpty()) {
-                    ModulePagerTabs(
+                    ModuleDropdownSelector(
                         modules = state.modules,
                         selectedIndex = state.selectedModuleIndex,
                         onSelectModule = onSelectModule,
                     )
                 }
+                HorizontalDivider(
+                    color = colors.outlineVariant.copy(alpha = 0.35f),
+                )
                 key(state.activeSite.baseUrl, state.selectedModuleIndex) {
                     DirectoryTree(
                         module = state.modules.getOrNull(state.selectedModuleIndex),
                         currentUrl = currentUrl,
-                        onSelectPage = onSelectPage,
+                        onSelectPage = { page ->
+                            focusManager.clearFocus(force = true)
+                            softwareKeyboardController?.hide()
+                            onSelectPage(page)
+                        },
                         modifier = Modifier.weight(1f),
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DirectorySearchBar(
+    query: String,
+    active: Boolean,
+    onActivate: () -> Unit,
+    onQueryChange: (String) -> Unit,
+    onClearAndClose: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val focusManager = LocalFocusManager.current
+    val softwareKeyboardController = LocalSoftwareKeyboardController.current
+
+    if (!active && query.isEmpty()) {
+        Surface(
+            onClick = onActivate,
+            shape = RoundedCornerShape(16.dp),
+            color = colors.surfaceContainerLow,
+            border = BorderStroke(0.5.dp, colors.outlineVariant.copy(alpha = 0.45f)),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    imageVector = HugeIcons.Search01,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = colors.onSurfaceVariant,
+                )
+                Text(
+                    text = "搜索章节或路径",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSurfaceVariant.copy(alpha = 0.8f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    } else {
+        val focusRequester = remember { FocusRequester() }
+        LaunchedEffect(active) {
+            if (active) {
+                focusRequester.requestFocus()
+            }
+        }
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            placeholder = { Text("搜索章节或路径") },
+            leadingIcon = { Icon(HugeIcons.Search01, null, modifier = Modifier.size(18.dp)) },
+            trailingIcon = {
+                IconButton(onClick = onClearAndClose) {
+                    Icon(HugeIcons.Cancel01, "清除搜索", modifier = Modifier.size(18.dp))
+                }
+            },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    focusManager.clearFocus(force = true)
+                    softwareKeyboardController?.hide()
+                },
+            ),
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = colors.surfaceContainerLow,
+                unfocusedContainerColor = colors.surfaceContainerLow,
+                unfocusedBorderColor = colors.outlineVariant.copy(alpha = 0.45f),
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester),
+        )
     }
 }
 
@@ -307,56 +396,132 @@ private fun DocsAccountBanner(onClick: () -> Unit) {
 }
 
 @Composable
-private fun ModulePagerTabs(
+private fun ModuleDropdownSelector(
     modules: List<ExamDocNode.Folder>,
     selectedIndex: Int,
     onSelectModule: (Int) -> Unit,
 ) {
-    val requesters = remember(modules) { modules.map { BringIntoViewRequester() } }
-    LaunchedEffect(selectedIndex, modules.size) {
-        if (selectedIndex in requesters.indices) {
-            requesters[selectedIndex].bringIntoView()
-        }
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .selectableGroup(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        modules.forEachIndexed { index, module ->
-            val selected = index == selectedIndex
-            ToggleButton(
-                checked = selected,
-                onCheckedChange = {
-                    if (!selected) onSelectModule(index)
-                },
-                modifier = Modifier
-                    .bringIntoViewRequester(requesters[index])
-                    .semantics { role = Role.Tab },
-                colors = ToggleButtonDefaults.colors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                ),
+    val selectedModule = modules.getOrNull(selectedIndex) ?: modules.firstOrNull() ?: return
+    val canSwitch = modules.size > 1
+    var expanded by remember { mutableStateOf(false) }
+    val colors = MaterialTheme.colorScheme
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        label = "moduleChevron",
+    )
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Surface(
+            onClick = { if (canSwitch) expanded = true },
+            enabled = canSwitch,
+            shape = RoundedCornerShape(16.dp),
+            color = colors.surfaceContainerHigh.copy(alpha = 0.72f),
+            border = BorderStroke(0.5.dp, colors.outlineVariant.copy(alpha = 0.45f)),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                AnimatedVisibility(
-                    visible = selected,
-                    enter = expandHorizontally(MaterialTheme.motionScheme.fastSpatialSpec()) + fadeIn(),
-                    exit = shrinkHorizontally(MaterialTheme.motionScheme.fastSpatialSpec()) + fadeOut(),
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .background(colors.primary.copy(alpha = 0.12f), RoundedCornerShape(9.dp)),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Row {
-                        Icon(
-                            imageVector = HugeIcons.Book02,
-                            contentDescription = null,
-                            modifier = Modifier.size(ToggleButtonDefaults.IconSize),
+                    Icon(
+                        imageVector = HugeIcons.Book02,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = colors.primary,
+                    )
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                ) {
+                    Text(
+                        text = selectedModule.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (selectedModule.questions > 0) {
+                        Text(
+                            text = "${selectedModule.questions} 道练习题",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                            maxLines = 1,
                         )
-                        Spacer(Modifier.width(ToggleButtonDefaults.IconSpacing))
                     }
                 }
-                Text(
-                    text = module.name,
-                    maxLines = 1,
-                    softWrap = false,
+                if (canSwitch) {
+                    Surface(
+                        shape = CircleShape,
+                        color = colors.surfaceContainerHighest,
+                    ) {
+                        Text(
+                            text = "${selectedIndex + 1}/${modules.size}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium,
+                            color = colors.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
+                    Icon(
+                        imageVector = HugeIcons.ArrowDown01,
+                        contentDescription = "切换模块",
+                        modifier = Modifier
+                            .size(16.dp)
+                            .graphicsLayer { rotationZ = chevronRotation },
+                        tint = colors.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            modules.forEachIndexed { index, module ->
+                val isSelected = index == selectedIndex
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = module.name,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (isSelected) colors.primary else colors.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (isSelected) HugeIcons.Tick01 else HugeIcons.Book02,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = if (isSelected) colors.primary else colors.onSurfaceVariant,
+                        )
+                    },
+                    trailingIcon = if (module.questions > 0) {
+                        {
+                            Text(
+                                text = "${module.questions} 题",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isSelected) colors.primary else colors.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    onClick = {
+                        expanded = false
+                        onSelectModule(index)
+                    },
                 )
             }
         }
@@ -366,12 +531,13 @@ private fun ModulePagerTabs(
 @Composable
 private fun DocsSiteSelector(sites: List<ExamDocsSite>, selected: ExamDocsSite, onSelect: (ExamDocsSite) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
+    val colors = MaterialTheme.colorScheme
     Box {
         Surface(
             onClick = { expanded = true },
             shape = RoundedCornerShape(999.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+            color = colors.surfaceContainerHigh,
+            border = BorderStroke(0.5.dp, colors.outlineVariant.copy(alpha = 0.45f)),
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
@@ -382,7 +548,7 @@ private fun DocsSiteSelector(sites: List<ExamDocsSite>, selected: ExamDocsSite, 
                     HugeIcons.Internet,
                     contentDescription = null,
                     modifier = Modifier.size(15.dp),
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = colors.primary,
                 )
                 Text(
                     selected.name,
@@ -395,18 +561,31 @@ private fun DocsSiteSelector(sites: List<ExamDocsSite>, selected: ExamDocsSite, 
                     HugeIcons.ArrowDown01,
                     contentDescription = "切换站点",
                     modifier = Modifier.size(15.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = colors.onSurfaceVariant,
                 )
             }
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            shape = RoundedCornerShape(16.dp),
+        ) {
             for (site in sites) {
+                val isSelected = site == selected
                 DropdownMenuItem(
                     text = {
                         Text(
                             site.name,
-                            fontWeight = if (site == selected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (site == selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (isSelected) colors.primary else colors.onSurface,
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (isSelected) HugeIcons.Tick01 else HugeIcons.Internet,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = if (isSelected) colors.primary else colors.onSurfaceVariant,
                         )
                     },
                     onClick = {

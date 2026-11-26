@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -135,8 +136,8 @@ fun ExamDocsPage(
         scope.launch { drawerState.close() }
     }
 
-    LaunchedEffect(drawerState.isOpen) {
-        if (drawerState.isOpen) {
+    LaunchedEffect(drawerState.currentValue, drawerState.targetValue) {
+        if (drawerState.targetValue == DrawerValue.Open || !drawerState.isOpen) {
             focusManager.clearFocus(force = true)
             softwareKeyboardController?.hide()
         }
@@ -199,6 +200,7 @@ fun ExamDocsPage(
                 }
                 navController.navigate(Screen.ExamDocsAccount)
             },
+            isDrawerOpen = isBigScreen || drawerState.isOpen,
         )
     }
 
@@ -470,11 +472,12 @@ private fun ExamDocsArticle(
                     .fillMaxSize()
                     .topFadingEdge(topPadding + 24.dp)
                     .hazeSource(hazeState),
+                horizontalAlignment = Alignment.CenterHorizontally,
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 16.dp,
                     top = topPadding + 14.dp,
-                    bottom = bottomPadding + 28.dp,
+                    bottom = bottomPadding + 92.dp,
                 ),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
@@ -484,11 +487,16 @@ private fun ExamDocsArticle(
                         is ExamDocsSegment.CustomBlock -> block.type
                     }
                 }) { block ->
-                    ExamDocsMarkdownBlock(block, registry, renderMarkdown)
+                    Box(Modifier.fillMaxWidth().widthIn(max = 820.dp)) {
+                        ExamDocsMarkdownBlock(block, registry, renderMarkdown)
+                    }
                 }
                 if (previous != null || next != null) {
                     item(key = "page-navigation") {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth().widthIn(max = 820.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
                             if (previous != null) {
                                 PageNavCard("上一节", previous.name, false, { onPage(previous) }, Modifier.weight(1f))
                             } else Spacer(Modifier.weight(1f))
