@@ -79,6 +79,7 @@ import me.rerere.ui.toast.rememberToasterState
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import me.rerere.rikkahub.data.agent.AgentRepository
 import me.rerere.rikkahub.data.agent.AgentRealtimeSync
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.db.DatabaseMigrationTracker
@@ -88,6 +89,8 @@ import me.rerere.rikkahub.data.event.AppEventBus
 import me.rerere.rikkahub.data.repository.MediaCreationRepository
 import me.rerere.rikkahub.service.MediaCreationForegroundService
 import me.rerere.rikkahub.ui.activity.SafeModeActivity
+import me.rerere.rikkahub.ui.components.nav.MainBottomBar
+import me.rerere.rikkahub.ui.components.nav.MainTab
 import me.rerere.rikkahub.ui.components.ui.TTSController
 import me.rerere.rikkahub.ui.context.LocalASRState
 import me.rerere.rikkahub.ui.context.LocalNavController
@@ -112,6 +115,7 @@ import me.rerere.rikkahub.ui.pages.assistant.detail.AssistantRequestPage
 import me.rerere.rikkahub.ui.pages.backup.BackupPage
 import me.rerere.rikkahub.ui.pages.chat.ChatPage
 import me.rerere.rikkahub.ui.pages.debug.DebugPage
+import me.rerere.rikkahub.ui.pages.examdocs.DocsHubPage
 import me.rerere.rikkahub.ui.pages.extensions.ExtensionsPage
 import me.rerere.rikkahub.ui.pages.extensions.PromptPage
 import me.rerere.rikkahub.ui.pages.extensions.QuickMessagesPage
@@ -163,6 +167,7 @@ import me.rerere.rikkahub.ui.pages.agent.AgentSettingPage
 import me.rerere.rikkahub.ui.pages.agent.AgentWorkflowPage
 import me.rerere.rikkahub.ui.pages.update.ApkDownloadsPage
 import me.rerere.rikkahub.data.update.usesAntigravityUpdates
+import me.rerere.rikkahub.ui.pages.workflow.WorkflowHubPage
 import me.rerere.rikkahub.ui.pages.workflow.WorkflowPage
 import me.rerere.rikkahub.ui.theme.RikkahubTheme
 import me.rerere.rikkahub.utils.CrashHandler
@@ -189,7 +194,7 @@ class RouteActivity : ComponentActivity() {
     private val okHttpClient by inject<OkHttpClient>()
     private val settingsStore by inject<SettingsStore>()
     private val mediaCreationRepository by inject<MediaCreationRepository>()
-    private var navStack: MutableList<NavKey>? = null
+    private var activeNavigator: Navigator? = null
     private val pendingIntents = ArrayDeque<Intent>()
 
     // Volume key listener registry — last registered handler wins
@@ -896,6 +901,22 @@ class RouteActivity : ComponentActivity() {
                 }
             }
         }
+    }
+}
+
+internal class TabViewModelStoreHolder : ViewModel() {
+    private val owners = mutableMapOf<MainTab, ViewModelStoreOwner>()
+
+    fun ownerFor(tab: MainTab): ViewModelStoreOwner = owners.getOrPut(tab) {
+        val store = ViewModelStore()
+        object : ViewModelStoreOwner {
+            override val viewModelStore: ViewModelStore = store
+        }
+    }
+
+    override fun onCleared() {
+        owners.values.forEach { it.viewModelStore.clear() }
+        owners.clear()
     }
 }
 
