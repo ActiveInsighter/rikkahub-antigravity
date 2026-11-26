@@ -70,15 +70,30 @@ internal fun rememberExamDocsRenderer(
     val painter = rememberLatexPainter()
     val displayMath: @Composable (String) -> Unit = remember(cache) {
         { formula ->
+            val compact = LocalCompactMathBlock.current
             val layout = remember(formula, cache) { cache.get(formula, display = true) }
             val style = LocalTextStyle.current
-            LatexBlock(
-                layout,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                fontSize = style.fontSize.takeOrElse { MaterialTheme.typography.bodyLarge.fontSize },
-                scale = 1.15f,
-                color = style.color.takeOrElse { LocalContentColor.current },
-            )
+            val fontSize = style.fontSize.takeOrElse { MaterialTheme.typography.bodyLarge.fontSize }
+            val color = style.color.takeOrElse { LocalContentColor.current }
+            if (compact) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    LatexBlock(
+                        layout,
+                        modifier = Modifier.padding(vertical = 2.dp),
+                        fontSize = fontSize,
+                        scale = 1.08f,
+                        color = color,
+                    )
+                }
+            } else {
+                LatexBlock(
+                    layout,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    fontSize = fontSize,
+                    scale = 1.15f,
+                    color = color,
+                )
+            }
         }
     }
     val inlineMath: (String) -> BetterInline = remember(cache, painter) {
@@ -173,6 +188,42 @@ internal fun rememberExamDocsRenderer(
         svgPreviewByDefault = true,
         showCodeBlockContainer = false,
     )
+}
+
+@Composable
+internal fun rememberExamDocsMathBlockRenderer(
+    document: ExamDocsDocument,
+): @Composable (formula: String, display: Boolean) -> Unit {
+    val context = LocalContext.current.applicationContext
+    val cache = remember(document, context) { DocMathLayouts(context) }
+    return remember(cache) {
+        { formula, display ->
+            val compact = LocalCompactMathBlock.current
+            val layout = remember(formula, display, cache) { cache.get(formula, display = display) }
+            val style = LocalTextStyle.current
+            val fontSize = style.fontSize.takeOrElse { MaterialTheme.typography.bodyLarge.fontSize }
+            val color = style.color.takeOrElse { LocalContentColor.current }
+            if (compact || !display) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    LatexBlock(
+                        layout,
+                        modifier = Modifier.padding(vertical = 2.dp),
+                        fontSize = fontSize,
+                        scale = if (compact) 1.08f else 1.1f,
+                        color = color,
+                    )
+                }
+            } else {
+                LatexBlock(
+                    layout,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    fontSize = fontSize,
+                    scale = 1.15f,
+                    color = color,
+                )
+            }
+        }
+    }
 }
 
 private class DocMathLayouts(private val context: Context) {

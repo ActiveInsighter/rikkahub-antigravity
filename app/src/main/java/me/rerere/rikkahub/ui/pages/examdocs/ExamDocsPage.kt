@@ -83,7 +83,7 @@ import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.ChartColumn
 import me.rerere.hugeicons.stroke.Copy01
-import me.rerere.hugeicons.stroke.LeftToRightListBullet
+import me.rerere.hugeicons.stroke.Menu03
 import me.rerere.hugeicons.stroke.Refresh03
 import me.rerere.hugeicons.stroke.Settings03
 import me.rerere.rikkahub.Screen
@@ -227,7 +227,7 @@ fun ExamDocsPage(
                                         onClick = { scope.launch { drawerState.open() } },
                                         enabled = state.sitesReady,
                                     ) {
-                                        Icon(HugeIcons.LeftToRightListBullet, "文档目录")
+                                        Icon(HugeIcons.Menu03, "文档目录")
                                     }
                                 }
                             }
@@ -454,7 +454,10 @@ private fun ExamDocsArticle(
             }
         }
     }
-    val registry = remember(handleLink) { ExamDocsComponentRegistry(onLinkClick = handleLink) }
+    val renderMathBlock = rememberExamDocsMathBlockRenderer(document)
+    val registry = remember(handleLink, renderMathBlock) {
+        ExamDocsComponentRegistry(onLinkClick = handleLink, renderMathBlock = renderMathBlock)
+    }
     val renderMarkdown = rememberExamDocsRenderer(document, listState, handleLink, imageResolver)
     val baseStyle = LocalTextStyle.current
     val scaledStyle = remember(baseStyle, fontSizeRatio) {

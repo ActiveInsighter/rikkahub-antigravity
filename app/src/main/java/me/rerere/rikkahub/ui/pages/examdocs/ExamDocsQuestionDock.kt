@@ -1,30 +1,37 @@
 package me.rerere.rikkahub.ui.pages.examdocs
 
 import android.os.SystemClock
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
@@ -42,18 +49,21 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import me.rerere.hugeicons.HugeIcons
+import me.rerere.hugeicons.stroke.Clock01
 import me.rerere.hugeicons.stroke.Pause
 import me.rerere.hugeicons.stroke.Pin
 import me.rerere.hugeicons.stroke.Play
@@ -306,7 +316,7 @@ internal fun ExamDocsQuestionDock(
         shape = CircleShape,
         color = if (displaySetting.enableBlurEffect) Color.Transparent else containerColor,
         modifier = modifier
-            .size(62.dp)
+            .size(64.dp)
             .topBarMenuHaze(
                 hazeState = hazeState,
                 displaySetting = displaySetting,
@@ -324,30 +334,27 @@ internal fun ExamDocsQuestionDock(
                     .fillMaxSize()
                     .padding(3.dp),
             )
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text = "$answeredCount",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "/${items.size}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (stopwatch.running) {
-                    Box(
-                        modifier = Modifier
-                            .padding(top = 2.dp)
-                            .size(5.dp)
-                            .background(MaterialTheme.colorScheme.primary, CircleShape),
-                    )
+            AnimatedContent(
+                targetState = stopwatch.started,
+                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                label = "dockBallContent",
+            ) { timerStarted ->
+                if (timerStarted) {
+                    FloatingBallTimerContent(stopwatch)
+                } else {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            text = "$answeredCount",
+                            style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "/${items.size}",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -432,6 +439,7 @@ private fun QuestionDockSheetContent(
     val answeredCount = items.size - idleCount
     val gradedCount = correctCount + partialCount + incorrectCount
     val accuracy = if (gradedCount > 0) ((correctCount.toFloat() / gradedCount) * 100f).roundToInt() else null
+    val progress = if (items.isNotEmpty()) answeredCount.toFloat() / items.size else 0f
     val markedIds = remember(stopwatch.marks) {
         stopwatch.marks.mapNotNull { it.questionId }.toSet()
     }
@@ -447,52 +455,91 @@ private fun QuestionDockSheetContent(
     ) {
         // 计时器卡片
         Surface(
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(24.dp),
             color = colors.surfaceContainerLow,
             border = BorderStroke(0.5.dp, colors.outlineVariant.copy(alpha = 0.45f)),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        StopwatchClockText(stopwatch)
-                        Text(
-                            text = when {
-                                stopwatch.running -> "计时中"
-                                stopwatch.started -> "已暂停"
-                                else -> "点击开始计时"
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Surface(
+                            shape = CircleShape,
+                            color = when {
+                                stopwatch.running -> colors.primaryContainer
+                                stopwatch.started -> colors.secondaryContainer
+                                else -> colors.surfaceContainerHigh
                             },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.onSurfaceVariant,
-                        )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                Icon(
+                                    imageVector = HugeIcons.Clock01,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(12.dp),
+                                    tint = when {
+                                        stopwatch.running -> colors.onPrimaryContainer
+                                        stopwatch.started -> colors.onSecondaryContainer
+                                        else -> colors.onSurfaceVariant
+                                    },
+                                )
+                                Text(
+                                    text = when {
+                                        stopwatch.running -> "计时中"
+                                        stopwatch.started -> "已暂停"
+                                        else -> "做题计时"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = when {
+                                        stopwatch.running -> colors.onPrimaryContainer
+                                        stopwatch.started -> colors.onSecondaryContainer
+                                        else -> colors.onSurfaceVariant
+                                    },
+                                )
+                            }
+                        }
+                        StopwatchClockText(stopwatch)
                     }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        IconButton(
+                        FilledTonalIconButton(
                             onClick = stopwatch::reset,
                             enabled = stopwatch.started,
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = colors.surfaceContainerHigh,
+                            ),
+                            modifier = Modifier.size(40.dp),
                         ) {
                             Icon(HugeIcons.Refresh03, "重置计时", modifier = Modifier.size(18.dp))
                         }
-                        IconButton(
+                        FilledTonalIconButton(
                             onClick = onMarkHere,
                             enabled = stopwatch.started,
+                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                containerColor = colors.surfaceContainerHigh,
+                            ),
+                            modifier = Modifier.size(40.dp),
                         ) {
                             Icon(HugeIcons.Pin, "标记当前题目与时间", modifier = Modifier.size(18.dp))
                         }
                         FilledIconButton(
                             onClick = { if (stopwatch.running) stopwatch.pause() else stopwatch.start() },
+                            modifier = Modifier.size(46.dp),
                         ) {
                             Icon(
                                 imageVector = if (stopwatch.running) HugeIcons.Pause else HugeIcons.Play,
                                 contentDescription = if (stopwatch.running) "暂停计时" else "开始计时",
-                                modifier = Modifier.size(18.dp),
+                                modifier = Modifier.size(20.dp),
                             )
                         }
                     }
@@ -500,7 +547,13 @@ private fun QuestionDockSheetContent(
 
                 if (stopwatch.marks.isNotEmpty()) {
                     HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.35f))
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "分段标记 (${stopwatch.marks.size})",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                            color = colors.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium,
+                        )
                         stopwatch.marks.forEachIndexed { index, mark ->
                             val targetBlockIndex = mark.questionId?.let { itemById[it]?.blockIndex }
                             val prevAt = stopwatch.marks.getOrNull(index - 1)?.atMs ?: 0L
@@ -508,21 +561,28 @@ private fun QuestionDockSheetContent(
                             Surface(
                                 onClick = { if (targetBlockIndex != null) onJumpToQuestion(targetBlockIndex) },
                                 enabled = targetBlockIndex != null,
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color.Transparent,
+                                shape = RoundedCornerShape(12.dp),
+                                color = colors.surfaceContainer.copy(alpha = 0.7f),
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    Icon(
-                                        HugeIcons.Pin,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(14.dp),
-                                        tint = colors.primary,
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .background(colors.primary.copy(alpha = 0.14f), CircleShape),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            text = "${index + 1}",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colors.primary,
+                                        )
+                                    }
                                     Text(
                                         text = mark.label?.let { "第 $it 题" } ?: "标记 ${index + 1}",
                                         style = MaterialTheme.typography.bodySmall,
@@ -531,11 +591,17 @@ private fun QuestionDockSheetContent(
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f),
                                     )
-                                    Text(
-                                        text = "+${formatDuration(split)}",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-                                        color = colors.onSurfaceVariant,
-                                    )
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = colors.surfaceContainerHighest.copy(alpha = 0.7f),
+                                    ) {
+                                        Text(
+                                            text = "+${formatDuration(split)}",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                            color = colors.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                        )
+                                    }
                                     Text(
                                         text = formatDuration(mark.atMs),
                                         style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
@@ -550,98 +616,165 @@ private fun QuestionDockSheetContent(
             }
         }
 
-        // 答题卡
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+        // 答题卡卡片
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = colors.surfaceContainerLow,
+            border = BorderStroke(0.5.dp, colors.outlineVariant.copy(alpha = 0.45f)),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Text(
-                    text = "答题卡",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = buildString {
-                        append("已答 $answeredCount/${items.size}")
-                        if (accuracy != null) append(" · 正确率 $accuracy%")
-                    },
-                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
-                    color = colors.onSurfaceVariant,
-                )
-            }
-
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                items.forEach { item ->
-                    val accent = statusAccentColor(item.status)
-                    val isCurrent = item.id == currentQuestionId
-                    val isMarked = item.id in markedIds
-                    val tileBg = when (item.status) {
-                        DocQuestionStatus.Idle -> colors.surfaceContainerLow
-                        else -> accent.copy(alpha = 0.14f)
-                    }
-                    val tileBorder = when {
-                        isCurrent -> BorderStroke(1.8.dp, colors.primary)
-                        item.status == DocQuestionStatus.Idle -> BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.45f))
-                        else -> BorderStroke(1.2.dp, accent.copy(alpha = 0.65f))
-                    }
-                    val textColor = when (item.status) {
-                        DocQuestionStatus.Idle -> colors.onSurfaceVariant
-                        else -> accent
-                    }
-
-                    Surface(
-                        onClick = { onJumpToQuestion(item.blockIndex) },
-                        shape = RoundedCornerShape(14.dp),
-                        color = tileBg,
-                        border = tileBorder,
-                        modifier = Modifier.size(46.dp),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "答题卡",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Surface(
+                            shape = CircleShape,
+                            color = colors.surfaceContainerHigh,
+                        ) {
                             Text(
-                                text = item.label,
-                                style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                                text = "$answeredCount / ${items.size}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                                 fontWeight = FontWeight.SemiBold,
-                                color = textColor,
-                                maxLines = 1,
+                                color = colors.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                             )
-                            if (isMarked) {
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(5.dp)
-                                        .size(6.dp)
-                                        .background(colors.primary, CircleShape),
-                                )
+                        }
+                    }
+                    if (accuracy != null) {
+                        Surface(
+                            shape = CircleShape,
+                            color = colors.primaryContainer.copy(alpha = 0.75f),
+                        ) {
+                            Text(
+                                text = "正确率 $accuracy%",
+                                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
+                }
+
+                // 进度条
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(CircleShape)
+                        .background(colors.surfaceContainerHighest),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress.coerceIn(0f, 1f))
+                            .fillMaxHeight()
+                            .clip(CircleShape)
+                            .background(colors.primary),
+                    )
+                }
+
+                // 图例胶囊
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    LegendItem(DocQuestionStatus.Correct, correctCount)
+                    LegendItem(DocQuestionStatus.Incorrect, incorrectCount)
+                    if (partialCount > 0) {
+                        LegendItem(DocQuestionStatus.Partial, partialCount)
+                    }
+                    if (recordedCount > 0) {
+                        LegendItem(DocQuestionStatus.Recorded, recordedCount)
+                    }
+                    LegendItem(DocQuestionStatus.Idle, idleCount)
+                }
+
+                // 等宽自适应题号网格
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    val columns = (maxWidth / 52.dp).toInt().coerceIn(5, 10)
+                    val rows = remember(items, columns) { items.chunked(columns) }
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        rows.forEach { rowItems ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                rowItems.forEach { item ->
+                                    val accent = statusAccentColor(item.status)
+                                    val isCurrent = item.id == currentQuestionId
+                                    val isMarked = item.id in markedIds
+                                    val tileBg = when (item.status) {
+                                        DocQuestionStatus.Idle -> colors.surfaceContainer
+                                        else -> accent.copy(alpha = 0.14f)
+                                    }
+                                    val tileBorder = when {
+                                        isCurrent -> BorderStroke(2.dp, colors.primary)
+                                        item.status == DocQuestionStatus.Idle ->
+                                            BorderStroke(0.8.dp, colors.outlineVariant.copy(alpha = 0.45f))
+                                        else -> BorderStroke(1.dp, accent.copy(alpha = 0.55f))
+                                    }
+                                    val textColor = when (item.status) {
+                                        DocQuestionStatus.Idle -> colors.onSurfaceVariant
+                                        else -> accent
+                                    }
+
+                                    Surface(
+                                        onClick = { onJumpToQuestion(item.blockIndex) },
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = tileBg,
+                                        border = tileBorder,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp),
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = item.label,
+                                                style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold,
+                                                color = textColor,
+                                                maxLines = 1,
+                                            )
+                                            if (isMarked) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .padding(5.dp)
+                                                        .size(5.dp)
+                                                        .background(colors.primary, CircleShape),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                repeat(columns - rowItems.size) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
                             }
                         }
                     }
                 }
-            }
-
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                LegendItem(DocQuestionStatus.Correct, correctCount)
-                LegendItem(DocQuestionStatus.Incorrect, incorrectCount)
-                LegendItem(DocQuestionStatus.Partial, partialCount)
-                if (recordedCount > 0) {
-                    LegendItem(DocQuestionStatus.Recorded, recordedCount)
-                }
-                LegendItem(DocQuestionStatus.Idle, idleCount)
             }
         }
     }
 }
 
 @Composable
-private fun StopwatchClockText(stopwatch: DockStopwatchState) {
+private fun rememberStopwatchElapsedMs(stopwatch: DockStopwatchState): Long {
     var tick by remember { mutableIntStateOf(0) }
     LaunchedEffect(stopwatch.running, stopwatch.sinceMs, stopwatch.bankedMs) {
         if (!stopwatch.running) return@LaunchedEffect
@@ -653,11 +786,46 @@ private fun StopwatchClockText(stopwatch: DockStopwatchState) {
     }
     @Suppress("UNUSED_EXPRESSION")
     tick
-    val text = formatDuration(stopwatch.elapsedMs())
+    return stopwatch.elapsedMs()
+}
+
+@Composable
+private fun FloatingBallTimerContent(stopwatch: DockStopwatchState) {
+    val elapsedMs = rememberStopwatchElapsedMs(stopwatch)
+    val text = formatDuration(elapsedMs)
+    val colors = MaterialTheme.colorScheme
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontFeatureSettings = "tnum",
+                fontSize = if (text.length > 5) 10.sp else 12.sp,
+            ),
+            fontWeight = FontWeight.Bold,
+            color = if (stopwatch.running) colors.primary else colors.onSurfaceVariant,
+            maxLines = 1,
+        )
+        if (!stopwatch.running) {
+            Text(
+                text = "暂停",
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                color = colors.onSurfaceVariant.copy(alpha = 0.8f),
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StopwatchClockText(stopwatch: DockStopwatchState) {
+    val text = formatDuration(rememberStopwatchElapsedMs(stopwatch))
     Text(
         text = text,
-        style = MaterialTheme.typography.headlineMedium.copy(fontFeatureSettings = "tnum"),
-        fontWeight = FontWeight.SemiBold,
+        style = MaterialTheme.typography.headlineLarge.copy(fontFeatureSettings = "tnum"),
+        fontWeight = FontWeight.Bold,
         color = if (stopwatch.running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
     )
 }
@@ -665,19 +833,25 @@ private fun StopwatchClockText(stopwatch: DockStopwatchState) {
 @Composable
 private fun LegendItem(status: DocQuestionStatus, count: Int) {
     val color = statusAccentColor(status)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .background(color, CircleShape),
-        )
-        Text(
-            text = "${status.label} $count",
-            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(7.dp)
+                    .background(color, CircleShape),
+            )
+            Text(
+                text = "${status.label} $count",
+                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

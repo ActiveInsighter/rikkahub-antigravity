@@ -1,8 +1,13 @@
 package me.rerere.rikkahub.ui.pages.examdocs
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,25 +16,25 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,13 +46,17 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -61,9 +70,11 @@ import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ArrowDown01
 import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Book02
+import me.rerere.hugeicons.stroke.Bookshelf01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.File02
 import me.rerere.hugeicons.stroke.Folder01
+import me.rerere.hugeicons.stroke.FolderOpen
 import me.rerere.hugeicons.stroke.Internet
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.Tick01
@@ -90,15 +101,11 @@ internal fun ExamDocsDirectoryDrawer(
     val colors = MaterialTheme.colorScheme
     val focusManager = LocalFocusManager.current
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
-    var searchActive by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(isDrawerOpen) {
         if (!isDrawerOpen) {
             focusManager.clearFocus(force = true)
             softwareKeyboardController?.hide()
-            if (state.searchQuery.isEmpty()) {
-                searchActive = false
-            }
         }
     }
 
@@ -120,11 +127,29 @@ internal fun ExamDocsDirectoryDrawer(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(
-                    "文档目录",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .background(colors.primary.copy(alpha = 0.12f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Bookshelf01,
+                            contentDescription = null,
+                            modifier = Modifier.size(17.dp),
+                            tint = colors.primary,
+                        )
+                    }
+                    Text(
+                        "文档目录",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
                 DocsSiteSelector(state.sites, state.activeSite, onSelectSite)
             }
 
@@ -132,12 +157,9 @@ internal fun ExamDocsDirectoryDrawer(
 
             DirectorySearchBar(
                 query = state.searchQuery,
-                active = searchActive,
-                onActivate = { searchActive = true },
                 onQueryChange = onSearchQueryChange,
                 onClearAndClose = {
                     onSearchQueryChange("")
-                    searchActive = false
                     focusManager.clearFocus(force = true)
                     softwareKeyboardController?.hide()
                 },
@@ -227,78 +249,105 @@ internal fun ExamDocsDirectoryDrawer(
 @Composable
 private fun DirectorySearchBar(
     query: String,
-    active: Boolean,
-    onActivate: () -> Unit,
     onQueryChange: (String) -> Unit,
     onClearAndClose: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     val focusManager = LocalFocusManager.current
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
+    var focused by remember { mutableStateOf(false) }
 
-    if (!active && query.isEmpty()) {
-        Surface(
-            onClick = onActivate,
-            shape = RoundedCornerShape(16.dp),
-            color = colors.surfaceContainerLow,
-            border = BorderStroke(0.5.dp, colors.outlineVariant.copy(alpha = 0.45f)),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Icon(
-                    imageVector = HugeIcons.Search01,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = colors.onSurfaceVariant,
-                )
-                Text(
-                    text = "搜索章节或路径",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.onSurfaceVariant.copy(alpha = 0.8f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    } else {
-        val focusRequester = remember { FocusRequester() }
-        LaunchedEffect(active) {
-            if (active) {
-                focusRequester.requestFocus()
-            }
-        }
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            placeholder = { Text("搜索章节或路径") },
-            leadingIcon = { Icon(HugeIcons.Search01, null, modifier = Modifier.size(18.dp)) },
-            trailingIcon = {
-                IconButton(onClick = onClearAndClose) {
-                    Icon(HugeIcons.Cancel01, "清除搜索", modifier = Modifier.size(18.dp))
-                }
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(
-                onSearch = {
-                    focusManager.clearFocus(force = true)
-                    softwareKeyboardController?.hide()
-                },
-            ),
-            shape = RoundedCornerShape(16.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = colors.surfaceContainerLow,
-                unfocusedContainerColor = colors.surfaceContainerLow,
-                unfocusedBorderColor = colors.outlineVariant.copy(alpha = 0.45f),
-            ),
+    val borderColor by animateColorAsState(
+        targetValue = if (focused) colors.primary.copy(alpha = 0.7f) else colors.outlineVariant.copy(alpha = 0.45f),
+        label = "searchBorder",
+    )
+    val containerColor by animateColorAsState(
+        targetValue = if (focused) colors.surfaceContainerHigh.copy(alpha = 0.75f) else colors.surfaceContainerLow,
+        label = "searchContainer",
+    )
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = containerColor,
+        border = BorderStroke(if (focused) 1.dp else 0.5.dp, borderColor),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .clickable { focusRequester.requestFocus() },
+    ) {
+        Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(focusRequester),
-        )
+                .fillMaxSize()
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                imageVector = HugeIcons.Search01,
+                contentDescription = null,
+                modifier = Modifier.size(17.dp),
+                tint = if (focused) colors.primary else colors.onSurfaceVariant,
+            )
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (query.isEmpty()) {
+                    Text(
+                        text = "搜索章节或路径",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant.copy(alpha = 0.72f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.onSurface),
+                    cursorBrush = SolidColor(colors.primary),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            focusManager.clearFocus(force = true)
+                            softwareKeyboardController?.hide()
+                        },
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester)
+                        .onFocusChanged { focused = it.isFocused },
+                )
+            }
+            Box(
+                modifier = Modifier.size(26.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                AnimatedVisibility(
+                    visible = query.isNotEmpty() || focused,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(colors.surfaceContainerHighest.copy(alpha = 0.8f))
+                            .clickable(onClick = onClearAndClose),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = HugeIcons.Cancel01,
+                            contentDescription = "清除搜索",
+                            modifier = Modifier.size(13.dp),
+                            tint = colors.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -651,9 +700,8 @@ private fun DirectoryTree(
                 node = node,
                 active = node is ExamDocNode.Page && node.url == currentUrl,
                 expanded = entry.expanded,
-                modifier = Modifier
-                    .animateItem()
-                    .padding(start = (entry.depth.coerceAtMost(10) * 14).dp),
+                depth = entry.depth,
+                modifier = Modifier.animateItem(),
                 onClick = {
                     when (node) {
                         is ExamDocNode.Folder -> overrides[entry.key] = !entry.expanded
@@ -673,89 +721,127 @@ private fun DirectoryRow(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     expanded: Boolean = false,
+    depth: Int = 0,
 ) {
     val colors = MaterialTheme.colorScheme
     val folder = node is ExamDocNode.Folder
-    val containerColor = if (active) colors.primary.copy(alpha = 0.12f) else Color.Transparent
+    val clampedDepth = depth.coerceAtMost(8)
+    val guideColor = colors.outlineVariant.copy(alpha = 0.35f)
+    val containerColor = when {
+        active -> colors.primaryContainer.copy(alpha = 0.52f)
+        folder && expanded && depth == 0 -> colors.surfaceContainerLow.copy(alpha = 0.65f)
+        else -> Color.Transparent
+    }
+    val border = when {
+        active -> BorderStroke(0.8.dp, colors.primary.copy(alpha = 0.28f))
+        else -> null
+    }
     val contentColor = if (active) colors.primary else colors.onSurface
     val iconTint = when {
         active -> colors.primary
+        folder && expanded -> colors.primary
         folder -> colors.onSurfaceVariant
-        else -> colors.onSurfaceVariant.copy(alpha = 0.8f)
+        else -> colors.onSurfaceVariant.copy(alpha = 0.78f)
     }
 
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = containerColor,
-        contentColor = contentColor,
-        modifier = modifier.fillMaxWidth(),
-    ) {
-        Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (folder) {
-                val rotation = animateFloatAsState(if (expanded) 90f else 0f, label = "directoryChevron")
-                Icon(
-                    HugeIcons.ArrowRight01,
-                    if (expanded) "收起" else "展开",
-                    Modifier.size(14.dp).graphicsLayer { rotationZ = rotation.value },
-                    tint = colors.onSurfaceVariant,
-                )
-            } else if (subtitle == null) {
-                Spacer(Modifier.size(14.dp))
-            }
-            Icon(
-                if (folder) HugeIcons.Folder01 else HugeIcons.File02,
-                null,
-                Modifier.size(17.dp),
-                tint = iconTint,
-            )
-            Column(Modifier.weight(1f)) {
-                Text(
-                    node.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = if (folder || active) FontWeight.SemiBold else FontWeight.Normal,
-                    color = contentColor,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (subtitle != null) {
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .drawBehind {
+                if (clampedDepth > 0) {
+                    val stepPx = 14.dp.toPx()
+                    val strokePx = 1.dp.toPx()
+                    for (level in 0 until clampedDepth) {
+                        val x = level * stepPx + 10.dp.toPx()
+                        drawLine(
+                            color = guideColor,
+                            start = Offset(x, 0f),
+                            end = Offset(x, size.height),
+                            strokeWidth = strokePx,
+                        )
+                    }
                 }
             }
-            if (node.questions > 0) {
-                Surface(
-                    shape = RoundedCornerShape(999.dp),
-                    color = if (active) {
-                        colors.primary.copy(alpha = 0.16f)
-                    } else {
-                        colors.surfaceContainerHighest.copy(alpha = 0.7f)
-                    },
-                    border = BorderStroke(
-                        0.5.dp,
-                        if (active) {
-                            colors.primary.copy(alpha = 0.28f)
-                        } else {
-                            colors.outlineVariant.copy(alpha = 0.35f)
-                        },
-                    ),
-                ) {
-                    Text(
-                        "${node.questions} 题",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Medium,
-                        color = if (active) colors.primary else colors.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            .padding(start = (clampedDepth * 14).dp),
+    ) {
+        Surface(
+            onClick = onClick,
+            shape = RoundedCornerShape(12.dp),
+            color = containerColor,
+            contentColor = contentColor,
+            border = border,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (folder) {
+                    val rotation = animateFloatAsState(if (expanded) 90f else 0f, label = "directoryChevron")
+                    Icon(
+                        HugeIcons.ArrowRight01,
+                        if (expanded) "收起" else "展开",
+                        Modifier.size(14.dp).graphicsLayer { rotationZ = rotation.value },
+                        tint = if (expanded) colors.primary else colors.onSurfaceVariant,
                     )
+                } else if (subtitle == null && clampedDepth == 0) {
+                    Spacer(Modifier.size(14.dp))
+                }
+                Icon(
+                    when {
+                        folder && expanded -> HugeIcons.FolderOpen
+                        folder -> HugeIcons.Folder01
+                        else -> HugeIcons.File02
+                    },
+                    null,
+                    Modifier.size(17.dp),
+                    tint = iconTint,
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        node.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (folder || active) FontWeight.SemiBold else FontWeight.Normal,
+                        color = contentColor,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (subtitle != null) {
+                        Text(
+                            subtitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (node.questions > 0) {
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = if (active) {
+                            colors.primary.copy(alpha = 0.16f)
+                        } else {
+                            colors.surfaceContainerHighest.copy(alpha = 0.65f)
+                        },
+                        border = BorderStroke(
+                            0.5.dp,
+                            if (active) {
+                                colors.primary.copy(alpha = 0.28f)
+                            } else {
+                                colors.outlineVariant.copy(alpha = 0.35f)
+                            },
+                        ),
+                    ) {
+                        Text(
+                            "${node.questions} 题",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                            fontWeight = FontWeight.Medium,
+                            color = if (active) colors.primary else colors.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                        )
+                    }
                 }
             }
         }

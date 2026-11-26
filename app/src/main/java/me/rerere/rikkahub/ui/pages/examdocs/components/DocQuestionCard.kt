@@ -49,6 +49,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -98,6 +99,7 @@ import me.rerere.rikkahub.data.examdocs.DocsSavedAnswer
 import me.rerere.rikkahub.data.examdocs.DocsWrite
 import me.rerere.rikkahub.data.examdocs.ExamDocsSegment
 import me.rerere.rikkahub.ui.components.ui.cardGroupItemShape
+import me.rerere.rikkahub.ui.pages.examdocs.LocalCompactMathBlock
 import me.rerere.rikkahub.ui.pages.examdocs.LocalDocsReadingProgress
 
 private enum class QuestionKind(val label: String, val icon: ImageVector) {
@@ -697,7 +699,9 @@ private fun QuestionChoice(
                 if (option.text != null) {
                     Text(option.text, style = MaterialTheme.typography.bodyLarge)
                 } else {
-                    renderChildren(option.blocks)
+                    CompositionLocalProvider(LocalCompactMathBlock provides true) {
+                        renderChildren(option.blocks)
+                    }
                 }
                 AnimatedVisibility(
                     visible = feedback == ChoiceFeedback.Missed || feedback == ChoiceFeedback.Answer,
