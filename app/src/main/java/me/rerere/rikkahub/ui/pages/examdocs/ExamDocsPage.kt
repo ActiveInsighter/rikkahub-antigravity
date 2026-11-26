@@ -1,6 +1,7 @@
 package me.rerere.rikkahub.ui.pages.examdocs
 
 import android.content.ClipData
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,19 +26,23 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.adaptive.currentWindowDpSize
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -56,6 +61,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -102,8 +109,6 @@ import org.koin.core.parameter.parametersOf
 
 private val externalLinkSchemes = setOf("https", "http", "mailto", "tel")
 
-private enum class ReaderSheet { Directory, Outline }
-
 @Composable
 fun ExamDocsPage(
     initialUrl: String? = null,
@@ -121,7 +126,32 @@ fun ExamDocsPage(
         lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
         value = true
     }
-    var sheet by rememberSaveable { mutableStateOf<ReaderSheet?>(null) }
+    var showOutlineSheet by rememberSaveable { mutableStateOf(false) }
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val softwareKeyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+
+    BackHandler(enabled = drawerState.isOpen) {
+        scope.launch { drawerState.close() }
+    }
+
+    LaunchedEffect(drawerState.isOpen) {
+        if (drawerState.isOpen) {
+            focusManager.clearFocus(force = true)
+            softwareKeyboardController?.hide()
+        }
+    }
+
+    val windowAdaptiveInfo = currentWindowDpSize()
+    val isBigScreen =
+        windowAdaptiveInfo.width > windowAdaptiveInfo.height && windowAdaptiveInfo.width >= 1100.dp
+
+    LaunchedEffect(isBigScreen) {
+        if (isBigScreen && drawerState.isOpen) {
+            drawerState.close()
+        }
+    }
+
     val page = state.currentPage
     val document = state.document
     val listState = key(state.activeSite.baseUrl, page?.url) { rememberLazyListState() }
@@ -150,190 +180,231 @@ fun ExamDocsPage(
         }
     }
 
-    Surface(
-        color = MaterialTheme.colorScheme.background,
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        AssistantBackground(setting = settings, modifier = Modifier.hazeSource(hazeState))
-        Scaffold(
-            containerColor = Color.Transparent,
-            topBar = {
-                TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                    navigationIcon = {
-                        ChatTopBarCapsule(
-                            hazeState = hazeState,
-                            displaySetting = docsDisplaySetting,
-                            showBackground = listScrolledUnderTopBar,
-                            modifier = Modifier.padding(start = 8.dp, end = 4.dp),
-                        ) {
-                            IconButton(
-                                onClick = { sheet = ReaderSheet.Directory },
-                                enabled = state.sitesReady,
-                            ) {
-                                Icon(HugeIcons.LeftToRightListBullet, "文档目录")
-                            }
-                        }
-                    },
-                    title = {
-                        Surface(
-                            onClick = { if (state.sitesReady) sheet = ReaderSheet.Directory },
-                            color = Color.Transparent,
-                            shape = RoundedCornerShape(16.dp),
-                        ) {
-                            Column(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
-                                Text(
-                                    page?.name ?: state.activeSite.name,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium,
-                                )
-                                if (page != null) {
-                                    val subtitle = remember(state.activeSite.name, state.currentBreadcrumb) {
-                                        (listOf(state.activeSite.name) + state.currentBreadcrumb).joinToString(" / ")
+    val drawerContent: @Composable () -> Unit = {
+        ExamDocsDirectoryDrawer(
+            state = state,
+            onSelectSite = vm::switchSite,
+            onSelectModule = vm::selectModule,
+            onSearchQueryChange = vm::updateSearchQuery,
+            onRetry = vm::reload,
+            onSelectPage = { selectedPage ->
+                if (!isBigScreen) {
+                    scope.launch { drawerState.close() }
+                }
+                vm.openPage(selectedPage)
+            },
+            onOpenAccount = {
+                if (!isBigScreen) {
+                    scope.launch { drawerState.close() }
+                }
+                navController.navigate(Screen.ExamDocsAccount)
+            },
+        )
+    }
+
+    val pageContent: @Composable () -> Unit = {
+        Surface(
+            color = MaterialTheme.colorScheme.background,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            AssistantBackground(setting = settings, modifier = Modifier.hazeSource(hazeState))
+            Scaffold(
+                containerColor = Color.Transparent,
+                topBar = {
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                        navigationIcon = {
+                            if (!isBigScreen) {
+                                ChatTopBarCapsule(
+                                    hazeState = hazeState,
+                                    displaySetting = docsDisplaySetting,
+                                    showBackground = listScrolledUnderTopBar,
+                                    modifier = Modifier.padding(start = 8.dp, end = 4.dp),
+                                ) {
+                                    IconButton(
+                                        onClick = { scope.launch { drawerState.open() } },
+                                        enabled = state.sitesReady,
+                                    ) {
+                                        Icon(HugeIcons.LeftToRightListBullet, "文档目录")
                                     }
+                                }
+                            }
+                        },
+                        title = {
+                            Surface(
+                                onClick = {
+                                    if (!isBigScreen && state.sitesReady) {
+                                        scope.launch { drawerState.open() }
+                                    }
+                                },
+                                color = Color.Transparent,
+                                shape = RoundedCornerShape(16.dp),
+                            ) {
+                                Column(Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
                                     Text(
-                                        subtitle,
+                                        page?.name ?: state.activeSite.name,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                    if (page != null) {
+                                        val subtitle = remember(state.activeSite.name, state.currentBreadcrumb) {
+                                            (listOf(state.activeSite.name) + state.currentBreadcrumb).joinToString(" / ")
+                                        }
+                                        Text(
+                                            subtitle,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        actions = {
+                            ChatTopBarCapsule(
+                                hazeState = hazeState,
+                                displaySetting = docsDisplaySetting,
+                                showBackground = listScrolledUnderTopBar,
+                                modifier = Modifier.padding(start = 4.dp, end = 8.dp),
+                            ) {
+                                IconButton(
+                                    onClick = { showOutlineSheet = true },
+                                    enabled = !document?.headings.isNullOrEmpty(),
+                                ) {
+                                    Icon(HugeIcons.Book02, "本页大纲")
+                                }
+                                TopBarMoreMenu(
+                                    listOf(
+                                        TopBarMenuItem(
+                                            "重新加载",
+                                            HugeIcons.Refresh03,
+                                            vm::reload,
+                                            state.sitesReady && !state.isLoadingTree,
+                                        ),
+                                        TopBarMenuItem(
+                                            "复制链接",
+                                            HugeIcons.Copy01,
+                                            onClick = {
+                                                document?.sourceUrl?.let { url ->
+                                                    scope.launch {
+                                                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Link", url)))
+                                                        toaster.show("已复制链接", type = ToastType.Success)
+                                                    }
+                                                }
+                                            },
+                                            enabled = document != null,
+                                        ),
+                                        TopBarMenuItem(
+                                            "答题统计",
+                                            HugeIcons.ChartColumn,
+                                            { navController.navigate(Screen.ExamDocsStats) },
+                                            state.sitesReady,
+                                        ),
+                                    ),
+                                    listOf(
+                                        TopBarMenuItem(
+                                            "设置",
+                                            HugeIcons.Settings03,
+                                            { navController.navigate(Screen.ExamDocsSettings) },
+                                            state.sitesReady,
+                                        ),
+                                    ),
+                                    hazeState = hazeState,
+                                    displaySetting = docsDisplaySetting,
+                                )
+                            }
+                        },
+                    )
+                },
+            ) { innerPadding ->
+                Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val treeError = state.treeError
+                    val contentError = state.contentError
+                    when {
+                        state.isLoadingTree && (page == null || document == null) ->
+                            Box(Modifier.padding(innerPadding)) { ReaderLoading("正在获取文档目录…") }
+                        treeError != null -> Box(Modifier.padding(innerPadding)) {
+                            ErrorStateView(
+                                title = "无法获取文档目录",
+                                message = treeError,
+                                onRetry = vm::reload,
+                                onSecondaryAction = { navController.navigate(Screen.ExamDocsSettings) },
+                                secondaryLabel = "设置",
+                            )
+                        }
+                        state.isLoadingContent || (document != null && !canRenderDocument) ->
+                            Box(Modifier.padding(innerPadding)) { ReaderLoading("正在加载文档…") }
+                        contentError != null -> Box(Modifier.padding(innerPadding)) {
+                            ErrorStateView(
+                                title = "文档加载失败",
+                                message = contentError,
+                                onRetry = vm::reload,
+                                onSecondaryAction = { scope.launch { drawerState.open() } },
+                                secondaryLabel = "打开目录",
+                            )
+                        }
+                        document != null && page != null -> CompositionLocalProvider(LocalSettings provides docsSettings) {
+                            ExamDocsProgressProvider(state.activeSite, page.url, document) {
+                                Box(Modifier.fillMaxSize()) {
+                                    ExamDocsArticle(
+                                        document = document,
+                                        listState = listState,
+                                        baseUrl = state.activeSite.baseUrl,
+                                        pageUrl = page.url,
+                                        hazeState = hazeState,
+                                        topPadding = innerPadding.calculateTopPadding(),
+                                        bottomPadding = innerPadding.calculateBottomPadding(),
+                                        fontSizeRatio = state.uiSettings.fontSizeRatio,
+                                        previous = state.prevPage,
+                                        next = state.nextPage,
+                                        onPage = vm::openPage,
+                                        onLink = vm::openLink,
+                                    )
+                                    ExamDocsQuestionDock(
+                                        document = document,
+                                        listState = listState,
+                                        hazeState = hazeState,
+                                        displaySetting = docsDisplaySetting,
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .padding(
+                                                end = 16.dp,
+                                                bottom = innerPadding.calculateBottomPadding() + 16.dp,
+                                            ),
                                     )
                                 }
                             }
                         }
-                    },
-                    actions = {
-                        ChatTopBarCapsule(
-                            hazeState = hazeState,
-                            displaySetting = docsDisplaySetting,
-                            showBackground = listScrolledUnderTopBar,
-                            modifier = Modifier.padding(start = 4.dp, end = 8.dp),
-                        ) {
-                            IconButton(
-                                onClick = { sheet = ReaderSheet.Outline },
-                                enabled = !document?.headings.isNullOrEmpty(),
-                            ) {
-                                Icon(HugeIcons.Book02, "本页大纲")
-                            }
-                            TopBarMoreMenu(
-                                listOf(
-                                    TopBarMenuItem(
-                                        "重新加载",
-                                        HugeIcons.Refresh03,
-                                        vm::reload,
-                                        state.sitesReady && !state.isLoadingTree,
-                                    ),
-                                    TopBarMenuItem(
-                                        "复制链接",
-                                        HugeIcons.Copy01,
-                                        onClick = {
-                                            document?.sourceUrl?.let { url ->
-                                                scope.launch {
-                                                    clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Link", url)))
-                                                    toaster.show("已复制链接", type = ToastType.Success)
-                                                }
-                                            }
-                                        },
-                                        enabled = document != null,
-                                    ),
-                                    TopBarMenuItem(
-                                        "答题统计",
-                                        HugeIcons.ChartColumn,
-                                        { navController.navigate(Screen.ExamDocsStats) },
-                                        state.sitesReady,
-                                    ),
-                                ),
-                                listOf(
-                                    TopBarMenuItem(
-                                        "设置",
-                                        HugeIcons.Settings03,
-                                        { navController.navigate(Screen.ExamDocsSettings) },
-                                        state.sitesReady,
-                                    ),
-                                ),
-                                hazeState = hazeState,
-                                displaySetting = docsDisplaySetting,
-                            )
+                        else -> Box(Modifier.padding(innerPadding)) {
+                            Button(onClick = { scope.launch { drawerState.open() } }) { Text("浏览文档目录") }
                         }
-                    },
-                )
-            },
-        ) { innerPadding ->
-            Box(
-                Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                val treeError = state.treeError
-                val contentError = state.contentError
-                when {
-                    state.isLoadingTree && (page == null || document == null) ->
-                        Box(Modifier.padding(innerPadding)) { ReaderLoading("正在获取文档目录…") }
-                    treeError != null -> Box(Modifier.padding(innerPadding)) {
-                        ErrorStateView(
-                            title = "无法获取文档目录",
-                            message = treeError,
-                            onRetry = vm::reload,
-                            onSecondaryAction = { navController.navigate(Screen.ExamDocsSettings) },
-                            secondaryLabel = "设置",
-                        )
-                    }
-                    state.isLoadingContent || (document != null && !canRenderDocument) ->
-                        Box(Modifier.padding(innerPadding)) { ReaderLoading("正在加载文档…") }
-                    contentError != null -> Box(Modifier.padding(innerPadding)) {
-                        ErrorStateView(
-                            title = "文档加载失败",
-                            message = contentError,
-                            onRetry = vm::reload,
-                            onSecondaryAction = { sheet = ReaderSheet.Directory },
-                            secondaryLabel = "打开目录",
-                        )
-                    }
-                    document != null && page != null -> CompositionLocalProvider(LocalSettings provides docsSettings) {
-                        ExamDocsProgressProvider(state.activeSite, page.url, document) {
-                            ExamDocsArticle(
-                                document = document,
-                                listState = listState,
-                                baseUrl = state.activeSite.baseUrl,
-                                pageUrl = page.url,
-                                hazeState = hazeState,
-                                topPadding = innerPadding.calculateTopPadding(),
-                                bottomPadding = innerPadding.calculateBottomPadding(),
-                                fontSizeRatio = state.uiSettings.fontSizeRatio,
-                                previous = state.prevPage,
-                                next = state.nextPage,
-                                onPage = vm::openPage,
-                                onLink = vm::openLink,
-                            )
-                        }
-                    }
-                    else -> Box(Modifier.padding(innerPadding)) {
-                        Button(onClick = { sheet = ReaderSheet.Directory }) { Text("浏览文档目录") }
                     }
                 }
             }
         }
     }
 
-    when (sheet) {
-        ReaderSheet.Directory -> ModalBottomSheet(
-            onDismissRequest = { sheet = null },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        ) {
-            ExamDocsDirectorySheet(
-                state = state,
-                onSelectSite = vm::switchSite,
-                onSelectModule = vm::selectModule,
-                onSearchQueryChange = vm::updateSearchQuery,
-                onRetry = vm::reload,
-                onSelectPage = {
-                    sheet = null
-                    vm.openPage(it)
-                },
-            )
-        }
-        ReaderSheet.Outline -> ModalBottomSheet(onDismissRequest = { sheet = null }) {
+    if (isBigScreen) {
+        PermanentNavigationDrawer(
+            drawerContent = drawerContent,
+            content = pageContent,
+        )
+    } else {
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = drawerContent,
+            content = pageContent,
+        )
+    }
+
+    if (showOutlineSheet) {
+        ModalBottomSheet(onDismissRequest = { showOutlineSheet = false }) {
             val activeHeadingIndex = remember(document?.headings, listState.firstVisibleItemIndex) {
                 val headings = document?.headings.orEmpty()
                 headings.indexOfLast { it.blockIndex <= listState.firstVisibleItemIndex }.coerceAtLeast(0)
@@ -342,11 +413,10 @@ fun ExamDocsPage(
                 headings = document?.headings.orEmpty(),
                 activeIndex = activeHeadingIndex,
             ) { heading ->
-                sheet = null
+                showOutlineSheet = false
                 scope.launch { listState.scrollToItem(heading.blockIndex) }
             }
         }
-        null -> Unit
     }
 }
 
