@@ -68,13 +68,29 @@ jobs:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
       - name: Prepare debug Firebase configuration
         run: python3 tools/antigravity/prepare-debug.py
-      - name: Restore persistent debug signing key
+      - name: Restore or generate debug signing key
         env:
           DEBUG_KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
         run: |
-          test -n "$DEBUG_KEYSTORE" || { echo 'Missing ANDROID_DEBUG_KEYSTORE_BASE64 repository secret'; exit 1; }
-          KEYSTORE_PATH="$RUNNER_TEMP/rikkahub-debug.keystore"
-          printf '%s' "$DEBUG_KEYSTORE" | base64 --decode > "$KEYSTORE_PATH"
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            test -n "$DEBUG_KEYSTORE" || { echo 'Missing ANDROID_DEBUG_KEYSTORE_BASE64 repository secret'; exit 1; }
+            KEYSTORE_PATH="$RUNNER_TEMP/rikkahub-debug.keystore"
+            printf '%s' "$DEBUG_KEYSTORE" | base64 --decode > "$KEYSTORE_PATH"
+          else
+            KEYSTORE_PATH="$RUNNER_TEMP/rikkahub-branch-debug.keystore"
+            rm -f "$KEYSTORE_PATH"
+            DNAME_BRANCH=$(printf '%s' "$GITHUB_REF_NAME" | tr -cd 'A-Za-z0-9._/-' | head -c 48)
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_PATH" \
+              -storetype JKS \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=RikkaHub ${DNAME_BRANCH:-branch}, OU=Antigravity, O=RikkaHub"
+          fi
           chmod 600 "$KEYSTORE_PATH"
           echo "RIKKA_DEBUG_KEYSTORE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
       - name: Set Android build version
@@ -113,7 +129,12 @@ jobs:
           VERSION_NAME=$(python3 -c 'import json; print(json.load(open("app/build/outputs/apk/github/debug/output-metadata.json"))["elements"][0]["versionName"])')
           [[ "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+([a-zA-Z0-9.+-]*)$ ]]
           echo "RIKKA_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          EXPECTED_PACKAGE=$(python3 tools/antigravity/prepare-debug.py --print-package-name)
           APK_PREFIX="RikkaHub-${VERSION_NAME}-antigravity"
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            BRANCH_SLUG=$(python3 tools/antigravity/prepare-debug.py --print-branch-slug)
+            APK_PREFIX="RikkaHub-${VERSION_NAME}-antigravity-${BRANCH_SLUG}"
+          fi
           echo "APK_PREFIX=$APK_PREFIX" >> "$GITHUB_ENV"
           mkdir -p artifacts
           APK_SIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
@@ -121,7 +142,7 @@ jobs:
           EXPECTED_CERT=$(keytool -exportcert -keystore "$RIKKA_DEBUG_KEYSTORE" -storepass android -alias androiddebugkey | sha256sum | cut -d ' ' -f 1)
           for apk in app/build/outputs/apk/github/debug/*.apk; do
             "$AAPT" dump badging "$apk" > "$RUNNER_TEMP/apk-badging.txt"
-            grep -F "name='me.rerere.rikkahub.debug'" "$RUNNER_TEMP/apk-badging.txt"
+            grep -F "name='${EXPECTED_PACKAGE}'" "$RUNNER_TEMP/apk-badging.txt"
             grep -F "versionCode='$RIKKA_ANTIGRAVITY_VERSION_CODE'" "$RUNNER_TEMP/apk-badging.txt"
             grep -F "versionName='$VERSION_NAME'" "$RUNNER_TEMP/apk-badging.txt"
             "$APK_SIGNER" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/apk-signature.txt"
@@ -248,4 +269,4 @@ jobs:
             --build-number "$GITHUB_RUN_NUMBER" --commit "$GITHUB_SHA"
       - name: Remove signing key from runner
         if: always()
-        run: rm -f "$RUNNER_TEMP/rikkahub-debug.keystore"
+        run: rm -f "$RUNNER_TEMP/rikkahub-debug.keystore" "$RUNNER_TEMP/rikkahub-branch-debug.keystore"

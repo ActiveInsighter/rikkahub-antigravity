@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.FileInputStream
 import java.net.URI
+import java.security.MessageDigest
 import java.util.Properties
 
 plugins {
@@ -13,6 +14,51 @@ plugins {
     alias(libs.plugins.google.services)
     alias(libs.plugins.firebase.crashlytics)
     alias(libs.plugins.baselineprofile)
+}
+
+fun resolveBranchName(): String {
+    val fromEnv = providers.environmentVariable("RIKKA_BRANCH_NAME").orNull?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: providers.environmentVariable("GITHUB_REF_NAME").orNull?.trim()
+            ?.takeIf { it.isNotEmpty() }
+    if (fromEnv != null) return fromEnv
+    return runCatching {
+        val process = ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD")
+            .directory(rootDir)
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().readText().trim()
+        if (process.waitFor() == 0) output else ""
+    }.getOrDefault("")
+}
+
+fun branchPackageSegment(branchName: String): String {
+    val hash6 = MessageDigest.getInstance("SHA-256")
+        .digest(branchName.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+        .take(6)
+    val rawSlug = branchName.lowercase()
+        .replace(Regex("[^a-z0-9]+"), "_")
+        .trim('_')
+        .take(24)
+        .trimEnd('_')
+        .ifEmpty { "branch" }
+    return "b_${rawSlug}_$hash6"
+}
+
+val currentBranchName = resolveBranchName()
+val isMainBranch = currentBranchName.isEmpty() || currentBranchName == "HEAD" || currentBranchName == "main"
+val debugApplicationIdSuffix = if (isMainBranch) {
+    ".debug"
+} else {
+    ".debug.${branchPackageSegment(currentBranchName)}"
+}
+val debugAppName = if (isMainBranch) {
+    "RikkaHub Antigravity"
+} else {
+    val sanitized = currentBranchName.replace(Regex("[^A-Za-z0-9._/\\- ]"), "_")
+    val shortBranch = if (sanitized.length > 24) "${sanitized.take(21)}..." else sanitized
+    "RikkaHub ($shortBranch)"
 }
 
 val antigravityVersionCode = providers.environmentVariable("RIKKA_ANTIGRAVITY_VERSION_CODE").orNull?.let {
@@ -112,7 +158,8 @@ android {
             buildConfigField("String", "VERSION_CODE", "\"${android.defaultConfig.versionCode}\"")
         }
         debug {
-            applicationIdSuffix = ".debug"
+            applicationIdSuffix = debugApplicationIdSuffix
+            resValue("string", "app_name", debugAppName)
             val minifyDebug = System.getenv("CI") == "true" || project.hasProperty("rikka.minifyDebug")
             if (minifyDebug) {
                 optimization {
