@@ -201,6 +201,7 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        resValues = true
     }
     testOptions {
         // Providers call android.util.Log from their streaming callbacks, which would otherwise throw
