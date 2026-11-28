@@ -483,7 +483,7 @@ fun AgentPage(id: Uuid) {
                                     .padding(innerPadding),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                ContainedLoadingIndicator(modifier = Modifier.size(48.dp))
+                                ClaudeStarburstIndicator(size = 40.dp)
                             }
                         } else {
                             ChatList(
@@ -513,6 +513,12 @@ fun AgentPage(id: Uuid) {
                                 },
                                 onProcessingStatusClick = { showLiveInsights = true },
                                 onOpenAgentInsights = { msg -> insightsMessageId = msg.id },
+                                loadingIndicator = { statusText, onStatusClick ->
+                                    ClaudeAgentWaitingIndicator(
+                                        elapsedText = statusText,
+                                        onClick = onStatusClick,
+                                    )
+                                },
                             )
                         }
                     }

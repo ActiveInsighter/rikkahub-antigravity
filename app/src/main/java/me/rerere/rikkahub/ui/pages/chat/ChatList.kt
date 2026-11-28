@@ -116,6 +116,7 @@ fun ChatList(
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
     onProcessingStatusClick: (() -> Unit)? = null,
     onOpenAgentInsights: ((UIMessage) -> Unit)? = null,
+    loadingIndicator: (@Composable (statusText: String?, onStatusClick: (() -> Unit)?) -> Unit)? = null,
 ) {
     val previewProgress = rememberPreviewSwipeProgress(previewMode)
     val scope = rememberCoroutineScope()
@@ -178,6 +179,7 @@ fun ChatList(
                 onConversationSystemPromptChange = onConversationSystemPromptChange,
                 onProcessingStatusClick = onProcessingStatusClick,
                 onOpenAgentInsights = onOpenAgentInsights,
+                loadingIndicator = loadingIndicator,
                 selectionState = selectionState,
             )
         }
@@ -253,6 +255,7 @@ private fun ChatListNormal(
     onConversationSystemPromptChange: ((String?) -> Unit)? = null,
     onProcessingStatusClick: (() -> Unit)? = null,
     onOpenAgentInsights: ((UIMessage) -> Unit)? = null,
+    loadingIndicator: (@Composable (statusText: String?, onStatusClick: (() -> Unit)?) -> Unit)? = null,
     selectionState: ChatSelectionState,
 ) {
     val scope = rememberCoroutineScope()
@@ -474,35 +477,39 @@ private fun ChatListNormal(
             if (loading) {
                 item(key = LoadingIndicatorKey, contentType = "loading") {
                     val currentProcessingStatus = processingStatusState?.value ?: processingStatus
-                    Row(
-                        modifier = Modifier.padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Box(modifier = Modifier.graphicsLayer()) {
-                            ContainedLoadingIndicator(
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                        AnimatedVisibility(
-                            visible = currentProcessingStatus != null || onProcessingStatusClick != null,
+                    if (loadingIndicator != null) {
+                        loadingIndicator(currentProcessingStatus, onProcessingStatusClick)
+                    } else {
+                        Row(
+                            modifier = Modifier.padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            val timeModifier = if (onProcessingStatusClick != null) {
-                                Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable(onClick = onProcessingStatusClick)
-                                    .padding(horizontal = 6.dp, vertical = 4.dp)
-                            } else {
-                                Modifier
+                            Box(modifier = Modifier.graphicsLayer()) {
+                                ContainedLoadingIndicator(
+                                    modifier = Modifier.size(28.dp)
+                                )
                             }
-                            Text(
-                                text = currentProcessingStatus ?: "0秒",
-                                style = MaterialTheme.typography.labelMedium.copy(
-                                    fontFeatureSettings = "tnum",
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = timeModifier,
-                            )
+                            AnimatedVisibility(
+                                visible = currentProcessingStatus != null || onProcessingStatusClick != null,
+                            ) {
+                                val timeModifier = if (onProcessingStatusClick != null) {
+                                    Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable(onClick = onProcessingStatusClick)
+                                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                                } else {
+                                    Modifier
+                                }
+                                Text(
+                                    text = currentProcessingStatus ?: "0秒",
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontFeatureSettings = "tnum",
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = timeModifier,
+                                )
+                            }
                         }
                     }
                 }
